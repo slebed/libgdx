@@ -20,6 +20,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.GL31;
 import com.badlogic.gdx.graphics.GL32;
+import com.badlogic.gdx.graphics.VK;
 
 /** Environment class holding references to the {@link Application}, {@link Graphics}, {@link Audio}, {@link Files} and
  * {@link Input} instances. The references are held in public static fields which allows static access to all sub systems. Do not
@@ -40,4 +41,5 @@ public class Gdx {
 	public static GL30 gl30;
 	public static GL31 gl31;
 	public static GL32 gl32;
+	public static VK vk;
 }

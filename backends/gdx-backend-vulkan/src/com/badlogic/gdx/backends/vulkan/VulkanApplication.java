@@ -14,17 +14,21 @@
  * limitations under the License.
  ******************************************************************************/
 
-package com.badlogic.gdx.backends.lwjgl3;
+package com.badlogic.gdx.backends.vulkan;
+
+import static org.lwjgl.glfw.GLFW.glfwDestroyWindow;
+import static org.lwjgl.glfw.GLFW.glfwPollEvents;
+import static org.lwjgl.glfw.GLFW.glfwWindowShouldClose;
 
 import java.io.File;
 import java.io.PrintStream;
-import java.lang.reflect.Method;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.nio.IntBuffer;
 
 import com.badlogic.gdx.ApplicationLogger;
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration.GLEmulation;
-import com.badlogic.gdx.backends.lwjgl3.audio.Lwjgl3Audio;
-import com.badlogic.gdx.backends.lwjgl3.audio.OpenALLwjgl3Audio;
+import com.badlogic.gdx.backends.vulkan.audio.OpenALLwjgl3Audio;
+import com.badlogic.gdx.backends.vulkan.audio.VulkanAudio;
 import com.badlogic.gdx.graphics.glutils.GLVersion;
 
 import com.badlogic.gdx.utils.*;
@@ -37,7 +41,6 @@ import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL43;
 import org.lwjgl.opengl.GLCapabilities;
-import org.lwjgl.opengl.GLUtil;
 import org.lwjgl.opengl.KHRDebug;
 import org.lwjgl.system.Callback;
 
@@ -51,23 +54,23 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.LifecycleListener;
 import com.badlogic.gdx.Net;
 import com.badlogic.gdx.Preferences;
-import com.badlogic.gdx.backends.lwjgl3.audio.mock.MockAudio;
-import com.badlogic.gdx.math.GridPoint2;
+import com.badlogic.gdx.backends.vulkan.audio.mock.MockAudio;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Clipboard;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.ObjectMap;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
 
-public class Lwjgl3Application implements Lwjgl3ApplicationBase {
-    private final Lwjgl3ApplicationConfiguration config;
-    final Array<Lwjgl3Window> windows = new Array<Lwjgl3Window>();
-    private volatile Lwjgl3Window currentWindow;
-    private Lwjgl3Audio audio;
+public class VulkanApplication implements VulkanApplicationBase {
+    //private final VulkanApplicationConfiguration config;
+    final Array<VulkanWindow> windows = new Array<VulkanWindow>();
+    //final Array<Lwjgl3Window> windows = new Array<Lwjgl3Window>();
+    private volatile VulkanWindow currentWindow;
+    private VulkanAudio audio;
     private final Files files;
     private final Net net;
     private final ObjectMap<String, Preferences> preferences = new ObjectMap<String, Preferences>();
-    private final Lwjgl3Clipboard clipboard;
+    //private final VulkanClipboard clipboard;
     private int logLevel = LOG_INFO;
     private ApplicationLogger applicationLogger;
     private volatile boolean running = true;
@@ -77,12 +80,17 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
     private static GLFWErrorCallback errorCallback;
     private static GLVersion glVersion;
     private static Callback glDebugCallback;
-    private final Sync sync;
+    //private final Sync sync;
+
+    private final VulkanClipboard clipboard;
+    private final VulkanApplicationConfiguration config;
+    private long window;
+    private VulkanWindow gdxWindow;
 
     static void initializeGlfw() {
         if (errorCallback == null) {
-            Lwjgl3NativesLoader.load();
-            errorCallback = GLFWErrorCallback.createPrint(Lwjgl3ApplicationConfiguration.errorStream);
+            VulkanNativesLoader.load();
+            errorCallback = GLFWErrorCallback.createPrint(VulkanApplicationConfiguration.errorStream);
             GLFW.glfwSetErrorCallback(errorCallback);
             if (SharedLibraryLoader.os == Os.MacOsX)
                 GLFW.glfwInitHint(GLFW.GLFW_ANGLE_PLATFORM_TYPE, GLFW.GLFW_ANGLE_PLATFORM_TYPE_METAL);
@@ -93,7 +101,7 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
         }
     }
 
-    static void loadANGLE() {
+    /*static void loadANGLE() {
         try {
             Class angleLoader = Class.forName("com.badlogic.gdx.backends.lwjgl3.angle.ANGLELoader");
             Method load = angleLoader.getMethod("load");
@@ -115,21 +123,25 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
         } catch (Throwable t) {
             throw new GdxRuntimeException("Couldn't load ANGLE.", t);
         }
+    }*/
+
+    public VulkanApplication(ApplicationListener listener) {
+        this(listener, new VulkanApplicationConfiguration());
     }
 
-    public Lwjgl3Application(ApplicationListener listener) {
-        this(listener, new Lwjgl3ApplicationConfiguration());
-    }
-
-    public Lwjgl3Application(ApplicationListener listener, Lwjgl3ApplicationConfiguration config) {
-        if (config.glEmulation == Lwjgl3ApplicationConfiguration.GLEmulation.ANGLE_GLES20)
-            loadANGLE();
+    public VulkanApplication(ApplicationListener listener, VulkanApplicationConfiguration config) {
         initializeGlfw();
-        setApplicationLogger(new Lwjgl3ApplicationLogger());
+        setApplicationLogger(new VulkanApplicationLogger());
 
-        this.config = config = Lwjgl3ApplicationConfiguration.copy(config);
+        this.config = config = VulkanApplicationConfiguration.copy(config);
         if (config.title == null) config.title = listener.getClass().getSimpleName();
 
+        Gdx.app = this;
+
+        // Step 2: Initialize libGDX window with Vulkan handle injection
+        //createLibGDXWindow(listener, config);
+
+        // Step 3: Now set Gdx.app to this VulkanLwjgl3Application instance
         Gdx.app = this;
         if (!config.disableAudio) {
             try {
@@ -143,15 +155,62 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
         }
         Gdx.audio = audio;
         this.files = Gdx.files = createFiles();
-        this.net = Gdx.net = new Lwjgl3Net(config);
-        this.clipboard = new Lwjgl3Clipboard();
+        this.net = Gdx.net = new VulkanNet(config);
+        this.clipboard = new VulkanClipboard();
+
+        // Step 4: Call listener's create() method
+        listener.create();
+
+        VulkanWindow window = createWindow(config, listener, 0);
+        windows.add(window);
+
+        // Step 5: Start the rendering loop
+        runMainLoop();
+
+        /*if (config.glEmulation == GLEmulation.ANGLE_GLES20)
+            loadANGLE();
+        initializeGlfw();
+        setApplicationLogger(new VulkanApplicationLogger());
+
+        this.config = config = VulkanApplicationConfiguration.copy(config);
+        if (config.title == null) config.title = listener.getClass().getSimpleName();
+
+        Gdx.app = this;
+        if (!config.disableAudio) {
+            try {
+                this.audio = createAudio(config);
+            } catch (Throwable t) {
+                log("VulkanApplication", "Couldn't initialize audio, disabling audio", t);
+                this.audio = new MockAudio();
+            }
+        } else {
+            this.audio = new MockAudio();
+        }
+        Gdx.audio = audio;
+        this.files = Gdx.files = createFiles();
+        this.net = Gdx.net = new VulkanNet(config);
+        this.clipboard = new VulkanClipboard();
 
         this.sync = new Sync();
 
-        Lwjgl3Window window = createWindow(config, listener, 0);
-        if (config.glEmulation == Lwjgl3ApplicationConfiguration.GLEmulation.ANGLE_GLES20)
+        VulkanWindow window = createWindow(config, listener, 0);
+        if (config.glEmulation == GLEmulation.ANGLE_GLES20)
             postLoadANGLE();
         windows.add(window);
+        try {
+            loop();
+            cleanupWindows();
+        } catch (Throwable t) {
+            if (t instanceof RuntimeException)
+                throw (RuntimeException) t;
+            else
+                throw new GdxRuntimeException(t);
+        } finally {
+            cleanup();
+        }*/
+    }
+
+    public void runMainLoop() {
         try {
             loop();
             cleanupWindows();
@@ -165,8 +224,8 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
         }
     }
 
-    protected void loop() {
-        Array<Lwjgl3Window> closedWindows = new Array<Lwjgl3Window>();
+    public void loop() {
+        Array<VulkanWindow> closedWindows = new Array<VulkanWindow>();
         while (running && windows.size > 0) {
             // FIXME put it on a separate thread
             audio.update();
@@ -174,7 +233,7 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
             boolean haveWindowsRendered = false;
             closedWindows.clear();
             int targetFramerate = -2;
-            for (Lwjgl3Window window : windows) {
+            for (VulkanWindow window : windows) {
                 if (currentWindow != window) {
                     window.makeCurrent();
                     currentWindow = window;
@@ -202,12 +261,91 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
             if (shouldRequestRendering) {
                 // Must follow Runnables execution so changes done by Runnables are reflected
                 // in the following render.
-                for (Lwjgl3Window window : windows) {
+                for (VulkanWindow window : windows) {
                     if (!window.getGraphics().isContinuousRendering()) window.requestRendering();
                 }
             }
 
-            for (Lwjgl3Window closedWindow : closedWindows) {
+            for (VulkanWindow closedWindow : closedWindows) {
+                if (windows.size == 1) {
+                    // Lifecycle listener methods have to be called before ApplicationListener methods. The
+                    // application will be disposed when _all_ windows have been disposed, which is the case,
+                    // when there is only 1 window left, which is in the process of being disposed.
+                    for (int i = lifecycleListeners.size - 1; i >= 0; i--) {
+                        LifecycleListener l = lifecycleListeners.get(i);
+                        l.pause();
+                        l.dispose();
+                    }
+                    lifecycleListeners.clear();
+                }
+                closedWindow.dispose();
+
+                windows.removeValue(closedWindow, false);
+            }
+
+            if (!haveWindowsRendered) {
+                // Sleep a few milliseconds in case no rendering was requested
+                // with continuous rendering disabled.
+                try {
+                    Thread.sleep(1000 / config.idleFPS);
+                } catch (InterruptedException e) {
+                    // ignore
+                }
+            } else if (targetFramerate > 0) {
+                //sync.sync(targetFramerate); // sleep as needed to meet the target framerate
+            }
+        }
+        /*while (running && windows.size > 0) {
+        //while (!glfwWindowShouldClose(window) && running) {
+            glfwPollEvents();
+            listener.render();
+        }*/
+        //dispose();
+    }
+
+    /*protected void loop() {
+        Array<VulkanWindow> closedWindows = new Array<VulkanWindow>();
+        while (running && windows.size > 0) {
+            // FIXME put it on a separate thread
+            audio.update();
+
+            boolean haveWindowsRendered = false;
+            closedWindows.clear();
+            int targetFramerate = -2;
+            for (VulkanWindow window : windows) {
+                if (currentWindow != window) {
+                    window.makeCurrent();
+                    currentWindow = window;
+                }
+                if (targetFramerate == -2) targetFramerate = window.getConfig().foregroundFPS;
+                synchronized (lifecycleListeners) {
+                    haveWindowsRendered |= window.update();
+                }
+                if (window.shouldClose()) {
+                    closedWindows.add(window);
+                }
+            }
+            GLFW.glfwPollEvents();
+
+            boolean shouldRequestRendering;
+            synchronized (runnables) {
+                shouldRequestRendering = runnables.size > 0;
+                executedRunnables.clear();
+                executedRunnables.addAll(runnables);
+                runnables.clear();
+            }
+            for (Runnable runnable : executedRunnables) {
+                runnable.run();
+            }
+            if (shouldRequestRendering) {
+                // Must follow Runnables execution so changes done by Runnables are reflected
+                // in the following render.
+                for (VulkanWindow window : windows) {
+                    if (!window.getGraphics().isContinuousRendering()) window.requestRendering();
+                }
+            }
+
+            for (VulkanWindow closedWindow : closedWindows) {
                 if (windows.size == 1) {
                     // Lifecycle listener methods have to be called before ApplicationListener methods. The
                     // application will be disposed when _all_ windows have been disposed, which is the case,
@@ -236,7 +374,7 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
                 sync.sync(targetFramerate); // sleep as needed to meet the target framerate
             }
         }
-    }
+    }*/
 
     protected void cleanupWindows() {
         synchronized (lifecycleListeners) {
@@ -245,20 +383,23 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
                 lifecycleListener.dispose();
             }
         }
-        for (Lwjgl3Window window : windows) {
+        for (VulkanWindow window : windows) {
             window.dispose();
         }
         windows.clear();
     }
 
     protected void cleanup() {
-        Lwjgl3Cursor.disposeSystemCursors();
+        VulkanCursor.disposeSystemCursors();
         audio.dispose();
         errorCallback.free();
         errorCallback = null;
         if (glDebugCallback != null) {
             glDebugCallback.free();
             glDebugCallback = null;
+        }
+        if (window != 0) {
+            glfwDestroyWindow(window);
         }
         GLFW.glfwTerminate();
     }
@@ -368,8 +509,8 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
         if (preferences.containsKey(name)) {
             return preferences.get(name);
         } else {
-            Preferences prefs = new Lwjgl3Preferences(
-                    new Lwjgl3FileHandle(new File(config.preferencesDirectory, name), config.preferencesFileType));
+            Preferences prefs = new VulkanPreferences(
+                    new VulkanFileHandle(new File(config.preferencesDirectory, name), config.preferencesFileType));
             preferences.put(name, prefs);
             return prefs;
         }
@@ -407,33 +548,33 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
     }
 
     @Override
-    public Lwjgl3Audio createAudio(Lwjgl3ApplicationConfiguration config) {
+    public VulkanAudio createAudio(VulkanApplicationConfiguration config) {
         return new OpenALLwjgl3Audio(config.audioDeviceSimultaneousSources, config.audioDeviceBufferCount,
                 config.audioDeviceBufferSize);
     }
 
     @Override
-    public Lwjgl3Input createInput(Lwjgl3Window window) {
-        return new DefaultLwjgl3Input(window);
+    public VulkanInput createInput(VulkanWindow window) {
+        return new DefaultVulkanInput(window);
     }
 
     protected Files createFiles() {
-        return new Lwjgl3Files();
+        return new VulkanFiles();
     }
 
-    /** Creates a new {@link Lwjgl3Window} using the provided listener and {@link Lwjgl3WindowConfiguration}.
+    /** Creates a new {@link VulkanWindow} using the provided listener and {@link VulkanWindowConfiguration}.
      *
-     * This function only just instantiates a {@link Lwjgl3Window} and returns immediately. The actual window creation is postponed
+     * This function only just instantiates a {@link VulkanWindow} and returns immediately. The actual window creation is postponed
      * with {@link Application#postRunnable(Runnable)} until after all existing windows are updated. */
-    public Lwjgl3Window newWindow(ApplicationListener listener, Lwjgl3WindowConfiguration config) {
-        Lwjgl3ApplicationConfiguration appConfig = Lwjgl3ApplicationConfiguration.copy(this.config);
+    public VulkanWindow newWindow(ApplicationListener listener, VulkanWindowConfiguration config) {
+        VulkanApplicationConfiguration appConfig = VulkanApplicationConfiguration.copy(this.config);
         appConfig.setWindowConfiguration(config);
         if (appConfig.title == null) appConfig.title = listener.getClass().getSimpleName();
         return createWindow(appConfig, listener, windows.get(0).getWindowHandle());
     }
 
-    private Lwjgl3Window createWindow(final Lwjgl3ApplicationConfiguration config, ApplicationListener listener, final long sharedContext) {
-        final Lwjgl3Window window = new Lwjgl3Window(listener, lifecycleListeners, config, this);
+    private VulkanWindow createWindow(final VulkanApplicationConfiguration config, ApplicationListener listener, final long sharedContext) {
+        final VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, config, this);
         if (sharedContext == 0) {
             // the main window is created immediately
             createWindow(window, config, sharedContext);
@@ -449,7 +590,7 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
         return window;
     }
 
-    void createWindow(Lwjgl3Window window, Lwjgl3ApplicationConfiguration config, long sharedContext) {
+    void createWindow(VulkanWindow window, VulkanApplicationConfiguration config, long sharedContext) {
         long windowHandle = createGlfwWindow(config, sharedContext);
         window.create(windowHandle);
         window.setVisible(config.initialVisible);
@@ -468,7 +609,7 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
         }
     }
 
-    static long createGlfwWindow(Lwjgl3ApplicationConfiguration config, long sharedContextWindow) {
+    /*static long createGlfwWindow(VulkanApplicationConfiguration config, long sharedContextWindow) {
         GLFW.glfwDefaultWindowHints();
         GLFW.glfwWindowHint(GLFW.GLFW_VISIBLE, GLFW.GLFW_FALSE);
         GLFW.glfwWindowHint(GLFW.GLFW_RESIZABLE, config.windowResizable ? GLFW.GLFW_TRUE : GLFW.GLFW_FALSE);
@@ -483,9 +624,9 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
         GLFW.glfwWindowHint(GLFW.GLFW_DEPTH_BITS, config.depth);
         GLFW.glfwWindowHint(GLFW.GLFW_SAMPLES, config.samples);
 
-        if (config.glEmulation == Lwjgl3ApplicationConfiguration.GLEmulation.GL30
-                || config.glEmulation == Lwjgl3ApplicationConfiguration.GLEmulation.GL31
-                || config.glEmulation == Lwjgl3ApplicationConfiguration.GLEmulation.GL32) {
+        if (config.glEmulation == GLEmulation.GL30
+                || config.glEmulation == GLEmulation.GL31
+                || config.glEmulation == GLEmulation.GL32) {
             GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR, config.gles30ContextMajorVersion);
             GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MINOR, config.gles30ContextMinorVersion);
             if (SharedLibraryLoader.os == Os.MacOsX) {
@@ -496,7 +637,7 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
                 GLFW.glfwWindowHint(GLFW.GLFW_OPENGL_PROFILE, GLFW.GLFW_OPENGL_CORE_PROFILE);
             }
         } else {
-            if (config.glEmulation == Lwjgl3ApplicationConfiguration.GLEmulation.ANGLE_GLES20) {
+            if (config.glEmulation == GLEmulation.ANGLE_GLES20) {
                 GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_CREATION_API, GLFW.GLFW_EGL_CONTEXT_API);
                 GLFW.glfwWindowHint(GLFW.GLFW_CLIENT_API, GLFW.GLFW_OPENGL_ES_API);
                 GLFW.glfwWindowHint(GLFW.GLFW_CONTEXT_VERSION_MAJOR, 2);
@@ -525,7 +666,7 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
         if (windowHandle == 0) {
             throw new GdxRuntimeException("Couldn't create window");
         }
-        Lwjgl3Window.setSizeLimits(windowHandle, config.windowMinWidth, config.windowMinHeight, config.windowMaxWidth,
+        VulkanWindow.setSizeLimits(windowHandle, config.windowMinWidth, config.windowMinHeight, config.windowMaxWidth,
                 config.windowMaxHeight);
         if (config.fullscreenMode == null) {
             if (GLFW.glfwGetPlatform() != GLFW.GLFW_PLATFORM_WAYLAND) {
@@ -542,8 +683,8 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
                         monitorHandle = config.maximizedMonitor.monitorHandle;
                     }
 
-                    GridPoint2 newPos = Lwjgl3ApplicationConfiguration.calculateCenteredWindowPosition(
-                            Lwjgl3ApplicationConfiguration.toLwjgl3Monitor(monitorHandle), windowWidth, windowHeight);
+                    GridPoint2 newPos = VulkanApplicationConfiguration.calculateCenteredWindowPosition(
+                            VulkanApplicationConfiguration.toVulkanMonitor(monitorHandle), windowWidth, windowHeight);
                     GLFW.glfwSetWindowPos(windowHandle, newPos.x, newPos.y);
                 } else {
                     GLFW.glfwSetWindowPos(windowHandle, config.windowX, config.windowY);
@@ -555,11 +696,11 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
             }
         }
         if (config.windowIconPaths != null) {
-            Lwjgl3Window.setIcon(windowHandle, config.windowIconPaths, config.windowIconFileType);
+            VulkanWindow.setIcon(windowHandle, config.windowIconPaths, config.windowIconFileType);
         }
         GLFW.glfwMakeContextCurrent(windowHandle);
         GLFW.glfwSwapInterval(config.vSyncEnabled ? 1 : 0);
-        if (config.glEmulation == Lwjgl3ApplicationConfiguration.GLEmulation.ANGLE_GLES20) {
+        if (config.glEmulation == GLEmulation.ANGLE_GLES20) {
             try {
                 Class gles = Class.forName("org.lwjgl.opengles.GLES");
                 gles.getMethod("createCapabilities").invoke(gles);
@@ -570,12 +711,13 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
             GL.createCapabilities();
         }
 
-        initiateGL(config.glEmulation == Lwjgl3ApplicationConfiguration.GLEmulation.ANGLE_GLES20);
+        //initiateGL(config.glEmulation == GLEmulation.ANGLE_GLES20);
+        initVulkan();
         if (!glVersion.isVersionEqualToOrHigher(2, 0))
             throw new GdxRuntimeException("OpenGL 2.0 or higher with the FBO extension is required. OpenGL version: "
                     + glVersion.getVersionString() + "\n" + glVersion.getDebugVersionString());
 
-        if (config.glEmulation != Lwjgl3ApplicationConfiguration.GLEmulation.ANGLE_GLES20 && !supportsFBO()) {
+        if (config.glEmulation != GLEmulation.ANGLE_GLES20 && !supportsFBO()) {
             throw new GdxRuntimeException("OpenGL 2.0 or higher with the FBO extension is required. OpenGL version: "
                     + glVersion.getVersionString() + ", FBO extension: false\n" + glVersion.getDebugVersionString());
         }
@@ -583,16 +725,95 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
         if (config.debug) {
             if (config.glEmulation == GLEmulation.ANGLE_GLES20) {
                 throw new IllegalStateException(
-                        "ANGLE currently can't be used with with Lwjgl3ApplicationConfiguration#enableGLDebugOutput");
+                        "ANGLE currently can't be used with with VulkanApplicationConfiguration#enableGLDebugOutput");
             }
             glDebugCallback = GLUtil.setupDebugMessageCallback(config.debugStream);
             setGLDebugMessageControl(GLDebugMessageSeverity.NOTIFICATION, false);
         }
 
         return windowHandle;
+    }*/
+
+    private long createGlfwWindow(VulkanApplicationConfiguration config, long sharedContextWindow) {
+        GLFW.glfwDefaultWindowHints();
+        GLFW.glfwWindowHint(GLFW.GLFW_CLIENT_API, GLFW.GLFW_NO_API);
+        GLFW.glfwWindowHint(GLFW.GLFW_VISIBLE, GLFW.GLFW_FALSE);
+        GLFW.glfwWindowHint(GLFW.GLFW_RESIZABLE, config.windowResizable ? GLFW.GLFW_TRUE : GLFW.GLFW_FALSE);
+        GLFW.glfwWindowHint(GLFW.GLFW_MAXIMIZED, config.windowMaximized ? GLFW.GLFW_TRUE : GLFW.GLFW_FALSE);
+        GLFW.glfwWindowHint(GLFW.GLFW_AUTO_ICONIFY, config.autoIconify ? GLFW.GLFW_TRUE : GLFW.GLFW_FALSE);
+        if (!GLFW.glfwInit()) {
+            throw new RuntimeException("Failed to initialize GLFW");
+        }
+
+        System.out.println("Creating Vulkan-compatible GLFW window...");
+        long window = GLFW.glfwCreateWindow(config.windowWidth, config.windowHeight, "GdxVk", 0, 0);
+
+        if (window == 0) {
+            throw new RuntimeException("Failed to create GLFW window");
+        }
+
+        System.out.println("Vulkan-compatible window created. Window handle: " + window);
+
+        return window;
     }
 
-    private static void initiateGL(boolean useGLES20) {
+    private void createLibGDXWindow(ApplicationListener listener, VulkanApplicationConfiguration config) {
+        // Initialize the array to hold VulkanWindow instances
+        windows.clear();
+
+        // Create the VulkanWindow instance directly
+        gdxWindow = new VulkanWindow(listener, lifecycleListeners, config, this);
+
+        // Add the window to the internal windows list
+        windows.add(gdxWindow);
+
+        System.out.println("LibGDX Vulkan window successfully created.");
+    }
+
+    /*private void createLibGDXWindow(ApplicationListener listener, VulkanApplicationConfiguration config) {
+        try {
+            windows = new Array<>();
+
+            Constructor<Lwjgl3Window> constructor = Lwjgl3Window.class.getDeclaredConstructor(
+                    ApplicationListener.class,
+                    Array.class,
+                    Lwjgl3ApplicationConfiguration.class,
+                    Lwjgl3ApplicationBase.class
+            );
+
+            constructor.setAccessible(true);
+
+            // Create the Lwjgl3Window instance
+            gdxWindow = constructor.newInstance(listener, windows, config.copyToOrig(), this);
+
+            // Inject the Vulkan-created window handle into Lwjgl3Window
+            Field[] fields = Lwjgl3Window.class.getDeclaredFields();
+            boolean injected = false;
+
+            for (Field field : fields) {
+                if (field.getType() == long.class) {  // Identify the field holding the window handle
+                    field.setAccessible(true);
+                    field.set(gdxWindow, window);  // Inject the Vulkan-created window
+                    System.out.println("Injected Vulkan window handle into Lwjgl3Window: " + window);
+                    injected = true;
+                    break;
+                }
+            }
+
+            if (!injected) {
+                throw new RuntimeException("Failed to find the GLFW window handle field in Lwjgl3Window.");
+            }
+
+            // Add this window to the internal windows list
+            windows.add(gdxWindow);
+            System.out.println("LibGDX window successfully injected with Vulkan window handle.");
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create Lwjgl3Window using Reflection", e);
+        }
+    }*/
+
+    /*private static void initiateGL(boolean useGLES20) {
         if (!useGLES20) {
             String versionString = GL11.glGetString(GL11.GL_VERSION);
             String vendorString = GL11.glGetString(GL11.GL_VENDOR);
@@ -610,7 +831,7 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
                 throw new GdxRuntimeException("Couldn't get GLES version string.", e);
             }
         }
-    }
+    }*/
 
     private static boolean supportsFBO() {
         // FBO is in core since OpenGL 3.0, see https://www.opengl.org/wiki/Framebuffer_Object
@@ -639,7 +860,7 @@ public class Lwjgl3Application implements Lwjgl3ApplicationBase {
     /** Enables or disables GL debug messages for the specified severity level. Returns false if the severity level could not be
      * set (e.g. the NOTIFICATION level is not supported by the ARB and AMD extensions).
      *
-     * See {@link Lwjgl3ApplicationConfiguration#enableGLDebugOutput(boolean, PrintStream)} */
+     * See {@link VulkanApplicationConfiguration#enableGLDebugOutput(boolean, PrintStream)} */
     public static boolean setGLDebugMessageControl(GLDebugMessageSeverity severity, boolean enabled) {
         GLCapabilities caps = GL.getCapabilities();
         final int GL_DONT_CARE = 0x1100; // not defined anywhere yet
