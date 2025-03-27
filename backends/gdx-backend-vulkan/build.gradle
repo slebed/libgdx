@@ -23,8 +23,17 @@ sourceCompatibility = versions.javaLwjgl3
 targetCompatibility = versions.javaLwjgl3
 
 dependencies {
-	api libraries.lwjgl3
+	api "com.badlogicgames.jlayer:jlayer:$versions.jlayer"
+	api "org.jcraft:jorbis:$versions.jorbis" // OGG dependency often nearby
+	api "org.lwjgl:lwjgl-jemalloc:$versions.lwjgl3"
+	api "org.lwjgl:lwjgl-openal:$versions.lwjgl3"
+	api "org.lwjgl:lwjgl-stb:$versions.lwjgl3"
+	api "org.lwjgl:lwjgl:$versions.lwjgl3"
+	api "org.lwjgl:lwjgl-glfw:$versions.lwjgl3" // If you need windowing
+	api "org.lwjgl:lwjgl-vulkan:$versions.lwjgl3" // The one you need!
+
 	api gdxnatives.desktop
 }
+
 
 

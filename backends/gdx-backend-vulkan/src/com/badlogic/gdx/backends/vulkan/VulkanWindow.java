@@ -421,11 +421,11 @@ public class VulkanWindow implements Disposable {
         if (asyncResized) {
             asyncResized = false;
             graphics.updateFramebufferInfo();
-            graphics.gl20.glViewport(0, 0, graphics.getBackBufferWidth(), graphics.getBackBufferHeight());
+            //graphics.gl20.glViewport(0, 0, graphics.getBackBufferWidth(), graphics.getBackBufferHeight());
             listener.resize(graphics.getWidth(), graphics.getHeight());
             graphics.update();
             listener.render();
-            GLFW.glfwSwapBuffers(windowHandle);
+            //GLFW.glfwSwapBuffers(windowHandle);
             return true;
         }
 
@@ -467,14 +467,7 @@ public class VulkanWindow implements Disposable {
     }
 
     void makeCurrent() {
-        Gdx.graphics = graphics;
-        Gdx.gl32 = graphics.getGL32();
-        Gdx.gl31 = Gdx.gl32 != null ? Gdx.gl32 : graphics.getGL31();
-        Gdx.gl30 = Gdx.gl31 != null ? Gdx.gl31 : graphics.getGL30();
-        Gdx.gl20 = Gdx.gl30 != null ? Gdx.gl30 : graphics.getGL20();
-        Gdx.gl = Gdx.gl20;
         Gdx.input = input;
-
         GLFW.glfwMakeContextCurrent(windowHandle);
     }
 

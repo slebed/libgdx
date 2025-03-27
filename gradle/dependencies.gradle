@@ -107,7 +107,7 @@ libraries.lwjgl3 = [
         "org.lwjgl:lwjgl-stb:${versions.lwjgl3}:natives-macos-arm64",
         "org.lwjgl:lwjgl-stb:${versions.lwjgl3}:natives-windows",
         "org.lwjgl:lwjgl-stb:${versions.lwjgl3}:natives-windows-x86",
- /*       "org.lwjgl:lwjgl-vulkan:${versions.lwjgl3}",
+        "org.lwjgl:lwjgl-vulkan:${versions.lwjgl3}",
         "org.lwjgl:lwjgl-vulkan:${versions.lwjgl3}:natives-linux",
         "org.lwjgl:lwjgl-vulkan:${versions.lwjgl3}:natives-linux-arm32",
         "org.lwjgl:lwjgl-vulkan:${versions.lwjgl3}:natives-linux-arm64",
@@ -115,7 +115,7 @@ libraries.lwjgl3 = [
         "org.lwjgl:lwjgl-vulkan:${versions.lwjgl3}:natives-macos",
         "org.lwjgl:lwjgl-vulkan:${versions.lwjgl3}:natives-macos-arm64",
         "org.lwjgl:lwjgl-vulkan:${versions.lwjgl3}:natives-windows",
-        "org.lwjgl:lwjgl-vulkan:${versions.lwjgl3}:natives-windows-x86",*/
+        "org.lwjgl:lwjgl-vulkan:${versions.lwjgl3}:natives-windows-x86",
         "com.badlogicgames.jlayer:jlayer:${versions.jlayer}",
         "org.jcraft:jorbis:${versions.jorbis}"
 ]

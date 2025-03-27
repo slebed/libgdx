@@ -37,14 +37,14 @@ public class VulkanTestStarter {
         options = new CommandLineOptions(argv);
 
         VulkanApplicationConfiguration config = new VulkanApplicationConfiguration();
-        config.setWindowedMode(640, 480);
+        config.setWindowedMode(640, 800);
 
-        if (options.gl30 || options.gl31 || options.gl32) {
+        /*if (options.gl30 || options.gl31 || options.gl32) {
             ShaderProgram.prependVertexCode = "#version 140\n#define varying out\n#define attribute in\n";
             ShaderProgram.prependFragmentCode = "#version 140\n#define varying in\n#define texture2D texture\n#define gl_FragColor fragColor\nout vec4 fragColor;\n";
-        }
+        }*/
 
-        if (options.gl32) {
+        /*if (options.gl32) {
             config.setOpenGLEmulation(VulkanApplicationConfiguration.GLEmulation.GL32, 4, 6);
         } else if (options.gl31) {
             config.setOpenGLEmulation(VulkanApplicationConfiguration.GLEmulation.GL31, 4, 5);
@@ -62,7 +62,7 @@ public class VulkanTestStarter {
                 config.useVsync(false);
                 config.setForegroundFPS(60);
             }
-        }
+        }*/
 
         if (options.startupTestName != null) {
             ApplicationListener test = GdxTests.newTest(options.startupTestName);
