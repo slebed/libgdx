@@ -1,8 +1,8 @@
 package com.badlogic.gdx.tests.vulkan;
 
 import com.badlogic.gdx.ApplicationListener;
-import com.badlogic.gdx.backends.vulkan.VulkanApplication;
-import com.badlogic.gdx.backends.vulkan.VulkanApplicationConfiguration;
+import com.badlogic.gdx.backend.vulkan.VulkanApplication;
+import com.badlogic.gdx.backend.vulkan.VulkanApplicationConfiguration;
 import com.badlogic.gdx.tests.utils.CommandLineOptions;
 import com.badlogic.gdx.tests.utils.GdxTestWrapper;
 import com.badlogic.gdx.tests.utils.GdxTests;

@@ -20,7 +20,6 @@ include ":backends:gdx-backend-android"
 include ":backends:gdx-backend-headless"
 include ":backends:gdx-backend-lwjgl"
 include ":backends:gdx-backend-lwjgl3"
-include ":backends:gdx-backend-vulkan"
 include ":backends:gdx-backend-robovm"
 include ":backends:gdx-backend-robovm-metalangle"
 include ":backends:gdx-backends-gwt"
@@ -45,4 +44,5 @@ include ":tests:gdx-tests-lwjgl3"
 include ":tests:gdx-tests-vulkan"
 
 rootProject.name = "libgdx"
-include ':backends:vulkan'
+///include ':backends:vulkan'
+include ':backends:gdx-backend-vulkan2'

@@ -1,3 +1,5 @@
+package com.badlogic.gdx.backend.vulkan;
+
 /*******************************************************************************
  * Copyright 2011 See AUTHORS file.
  *
@@ -13,8 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  ******************************************************************************/
-
-package com.badlogic.gdx.backends.vulkan;
 
 import static org.lwjgl.glfw.GLFW.glfwDestroyWindow;
 import static org.lwjgl.glfw.GLFWVulkan.glfwGetRequiredInstanceExtensions;
@@ -37,8 +37,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.badlogic.gdx.ApplicationLogger;
-import com.badlogic.gdx.backends.vulkan.audio.OpenALLwjgl3Audio;
-import com.badlogic.gdx.backends.vulkan.audio.VulkanAudio;
+import com.badlogic.gdx.backend.vulkan.audio.OpenALLwjgl3Audio;
+import com.badlogic.gdx.backend.vulkan.audio.VulkanAudio;
 import com.badlogic.gdx.graphics.glutils.GLVersion;
 
 import com.badlogic.gdx.utils.*;
@@ -63,7 +63,7 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.LifecycleListener;
 import com.badlogic.gdx.Net;
 import com.badlogic.gdx.Preferences;
-import com.badlogic.gdx.backends.vulkan.audio.mock.MockAudio;
+import com.badlogic.gdx.backend.vulkan.audio.mock.MockAudio;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Clipboard;
 import com.badlogic.gdx.utils.GdxRuntimeException;
