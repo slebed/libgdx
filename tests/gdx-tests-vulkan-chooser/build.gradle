@@ -1,0 +1,101 @@
+// === build.gradle for the :tests:gdx-tests-chooser-vulkan module ===
+// Purpose: Builds and runs a UI application (using LWJGL3) that allows
+//          selecting and launching libGDX tests using the Vulkan backend
+//          via ProcessBuilder.
+// Location: libgdx/tests/gdx-tests-chooser-vulkan/build.gradle
+// Date: Monday, March 31, 2025 - Hamilton, Ontario
+
+// --- Java Version Configuration ---
+// Assuming Java plugin and sourceSets ('src', 'res') are configured by ../build.gradle
+if (JavaVersion.current().isJava9Compatible()) {
+    compileJava {
+        // Use the same Java version as the LWJGL3 backend/tests for consistency
+        options.release = versions.javaLwjgl3
+    }
+}
+sourceCompatibility = versions.javaLwjgl3
+targetCompatibility = versions.javaLwjgl3
+
+// --- Chooser Application Configuration ---
+ext {
+    // !!! IMPORTANT: Replace this with the fully qualified name of your chooser UI class !!!
+    mainClass = "com.badlogic.gdx.tests.vulkan.chooser.VulkanChooserLauncher"
+}
+
+// --- Dependencies needed TO RUN THE CHOOSER application itself ---
+dependencies {
+    // LibGDX core APIs (Gdx.app, Gdx.files, Scene2D UI, etc.)
+    implementation project(":gdx")
+
+    // Access to the common test list (GdxTests.getNames())
+    implementation project(":tests:gdx-tests")
+    implementation project(':tests:gdx-tests-vulkan')
+    // The backend required to RUN THIS CHOOSER'S UI (using stable LWJGL3)
+    implementation project(":backends:gdx-backend-lwjgl3")
+
+    // Natives required for desktop execution (for LWJGL3 backend and core GDX)
+    implementation testnatives.desktop // Ensure 'testnatives.desktop' is correctly defined elsewhere
+}
+
+// --- Gradle Task to Launch the Chooser UI ---
+tasks.register('launchVulkanChooser', JavaExec) {
+    // Ensure the chooser's classes are compiled before running
+    dependsOn classes
+
+    // Set the main class to run for this task
+    mainClass = project.mainClass
+
+    // Set the classpath needed to run the chooser application itself
+    classpath = sourceSets.main.runtimeClasspath
+
+    // --- Critical Part: Calculate and Pass the Classpath for VulkanTestStarter ---
+    // Define a closure to safely get the target project's classpath
+    def getTargetClasspath = {
+        def targetProject = project(':tests:gdx-tests-vulkan') // The project we want to launch
+        if (targetProject == null) {
+            throw new InvalidUserDataException("Target project ':tests:gdx-tests-vulkan' not found for classpath calculation.")
+        }
+        // Calculate its full runtime classpath, filtering out non-existent files
+        return targetProject.configurations.runtimeClasspath.filter { it.exists() }.asPath
+    }
+    // Calculate the classpath and pass it as a system property to the chooser JVM
+    // The doFirst ensures the calculation happens closer to execution time if needed,
+    // though it should be stable after configuration.
+    /*doFirst {
+        jvmArgs = ["-Dvulkan.test.classpath=${getTargetClasspath()}"]
+    }*/
+    doFirst {
+        def targetProject = project(':tests:gdx-tests-vulkan')
+        if (targetProject == null) {
+            throw new InvalidUserDataException("Target project ':tests:gdx-tests-vulkan' not found.")
+        }
+
+        // --- Classpath Calculation (Keep previous fix) ---
+        def runtimeJars = targetProject.configurations.runtimeClasspath.filter { it.exists() && !it.isDirectory() }.asPath
+        def classesDir = targetProject.sourceSets.main.output.classesDirs.asPath
+        def fullClasspath = classesDir + File.pathSeparator + runtimeJars
+
+        // --- Get Assets Directory Path ---
+        // Assuming assets are shared via the :tests:gdx-tests-android module path
+        def assetsDir = project(':tests:gdx-tests-android').file("assets").absolutePath
+
+        // --- Set System Properties for the Chooser JVM ---
+        jvmArgs = [
+                "-Dvulkan.test.classpath=${fullClasspath}",
+                "-Dvulkan.test.assetsdir=${assetsDir}" // Pass assets dir as well
+        ]
+    }
+    // --------------------------------------------------------------------------
+
+    // Standard JavaExec settings
+    standardInput = System.in
+    // Set working directory relative to this build file to the shared assets folder
+    workingDir = project(':tests:gdx-tests-android').file("assets")
+    ignoreExitValue = true // Don't make the Gradle build fail if the user closes the chooser
+}
+
+// --- Task Metadata (Optional but helpful) ---
+configure (launchVulkanChooser) {
+    group = "LibGDX Tests" // Or "Vulkan Tests"
+    description = "Launches the Vulkan Test Chooser UI (which runs on LWJGL3)"
+}

@@ -46,3 +46,4 @@ include ":tests:gdx-tests-vulkan"
 rootProject.name = "libgdx"
 ///include ':backends:vulkan'
 include ':backends:gdx-backend-vulkan2'
+include ':tests:gdx-tests-vulkan-chooser'

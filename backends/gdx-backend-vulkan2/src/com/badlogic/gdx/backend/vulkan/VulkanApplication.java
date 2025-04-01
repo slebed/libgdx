@@ -19,7 +19,6 @@ package com.badlogic.gdx.backend.vulkan;
 import static org.lwjgl.glfw.GLFW.glfwDestroyWindow;
 import static org.lwjgl.glfw.GLFWVulkan.glfwGetRequiredInstanceExtensions;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-import static org.lwjgl.vulkan.EXTDebugUtils.vkCreateDebugUtilsMessengerEXT;
 import static org.lwjgl.vulkan.VK10.VK_FALSE;
 import static org.lwjgl.vulkan.VK10.VK_NULL_HANDLE;
 import static org.lwjgl.vulkan.VK10.VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
@@ -89,10 +88,7 @@ import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceQueueFamilyProperties;
 import static org.lwjgl.vulkan.KHRSwapchain.*; // For VK_KHR_SWAPCHAIN_EXTENSION_NAME
 
 import org.lwjgl.vulkan.VkPhysicalDeviceProperties;
-import org.lwjgl.vulkan.VkPhysicalDeviceFeatures;
 import org.lwjgl.vulkan.VkExtensionProperties;
-
-import java.util.Set;
 
 import org.lwjgl.vulkan.VkQueueFamilyProperties;
 import org.lwjgl.vulkan.VkSurfaceCapabilitiesKHR;
@@ -115,7 +111,7 @@ public class VulkanApplication implements VulkanApplicationBase {
     private final Array<Runnable> executedRunnables = new Array<Runnable>();
     private final Array<LifecycleListener> lifecycleListeners = new Array<LifecycleListener>();
     private static GLFWErrorCallback errorCallback;
-    private static GLVersion glVersion;
+
     private static Callback glDebugCallback;
 
     private VkPhysicalDevice physicalDevice; // You'll need logic to select this
@@ -129,8 +125,10 @@ public class VulkanApplication implements VulkanApplicationBase {
     private long debugMessenger;
     private boolean enableValidationLayers = false;
 
-    private static final Set<String> DEVICE_EXTENSIONS = Set.of(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-    private static final List<String> DESIRED_VALIDATION_LAYERS = List.of("VK_LAYER_KHRONOS_validation");
+    private static final Set<String> DEVICE_EXTENSIONS = Collections.singleton(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    //private static final Set<String> DEVICE_EXTENSIONS = Set.of(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    //private static final List<String> DESIRED_VALIDATION_LAYERS = List.of("VK_LAYER_KHRONOS_validation");
+    private static final List<String> DESIRED_VALIDATION_LAYERS = Collections.singletonList("VK_LAYER_KHRONOS_validation");
 
     static void initializeGlfw() {
         if (errorCallback == null) {
@@ -268,7 +266,7 @@ public class VulkanApplication implements VulkanApplicationBase {
     }
 
     public void loop() {
-        Array<VulkanWindow> closedWindows = new Array<VulkanWindow>();
+        Array<VulkanWindow> closedWindows = new Array<>();
         while (running && windows.size > 0) {
             // FIXME put it on a separate thread
             audio.update();
