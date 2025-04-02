@@ -21,6 +21,7 @@ dependencies {
     implementation project(":backends:gdx-backend-vulkan2") // Depend on your backend
     // Natives needed for running the tests (includes core gdx natives)
     implementation testnatives.desktop
+    implementation libraries.lwjgl3
     //implementation project(':backends') // Check dependencies.gradle if this name is correct
 }
 
@@ -43,4 +44,34 @@ configure (launchTestsVulkan) {
 // Optional: Distributable JAR task (adapt from gdx-tests-lwjgl3)
 tasks.register('dist', Jar) {
    // ... (copy contents from gdx-tests-lwjgl3/build.gradle if needed) ...
+}
+
+tasks.register('runVulkanSetupTest', JavaExec) {
+    dependsOn classes
+    dependsOn project(':tests:gdx-tests').classes
+    group = "Vulkan Tests"
+    description = "Runs VulkanSetupTest using the Vulkan backend"
+    mainClass = "com.badlogic.gdx.tests.vulkan.VulkanTestStarter"
+    // Assign the classpath to the task property
+    classpath = sourceSets.main.runtimeClasspath
+    workingDir = project(':tests:gdx-tests-android').file("assets")
+    args = ["VulkanSetupTest"]
+
+    // --- Add doFirst block to PRINT the classpath ---
+    doFirst {
+        println "-----------------------------------------------------"
+        println "Runtime Classpath for :tests:gdx-tests-vulkan task:"
+        classpath.each { File file -> println file.absolutePath }
+        println "-----------------------------------------------------"
+    }
+    // -------------------------------------------------
+
+    // Keep JVM args for LWJGL debugging ONLY
+    jvmArgs = [
+            "-Dorg.lwjgl.util.Debug=true",
+            "-Dorg.lwjgl.util.DebugLoader=true"
+    ]
+
+    standardInput = System.in
+    ignoreExitValue = true
 }

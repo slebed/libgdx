@@ -106,7 +106,9 @@ import org.lwjgl.vulkan.VkSurfaceFormatKHR;
 import org.lwjgl.vulkan.VkSwapchainCreateInfoKHR;
 
 public class VulkanGraphics extends AbstractGraphics implements Disposable {
-    final VulkanWindow window;
+    private final VulkanApplicationConfiguration config;
+    VulkanWindow window;
+    private final long windowHandle;
     private volatile boolean framebufferResized = false; // Flag for resize/vsync change
     private long swapchain = VK_NULL_HANDLE;
     private List<Long> swapchainImages; // VkImage handles
@@ -158,23 +160,19 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     GLFWFramebufferSizeCallback resizeCallback = new GLFWFramebufferSizeCallback() {
         @Override
         public void invoke(long windowHandle, final int width, final int height) {
-            // This callback might be invoked from a GLFW thread.
-            // Simply set a flag to be handled by the main render thread.
-            if (width > 0 && height > 0) {
-                // Check against current dimensions if needed to avoid redundant flags
-                // if (width != backBufferWidth || height != backBufferHeight) {
-                VulkanGraphics.this.framebufferResized = true;
-                System.out.println("Framebuffer resize requested: " + width + "x" + height);
-                // }
+            if (Gdx.graphics instanceof VulkanGraphics) {
+                ((VulkanGraphics) Gdx.graphics).framebufferResized(width, height);
             }
+            System.out.println("Framebuffer resize requested: " + width + "x" + height);
         }
     };
 
-    public VulkanGraphics(VulkanWindow window) {
-        this.window = window;
+    public VulkanGraphics(long windowHandle, VulkanApplicationConfiguration config) {
+        this.windowHandle = windowHandle;
+        this.config = config;
         updateFramebufferInfo(); // Get initial size info
 
-        GLFW.glfwSetFramebufferSizeCallback(window.getWindowHandle(), resizeCallback);
+        GLFW.glfwSetFramebufferSizeCallback(this.windowHandle, resizeCallback);
     }
 
     public VulkanWindow getWindow() {
@@ -184,16 +182,16 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     // Contains the logic previously in initiateVulkan()
     public void initializeSwapchainAndResources() {
         // Now it's safe to get these, assuming VulkanApplication initialized them
-        this.app = (VulkanApplication)Gdx.app; // Or get app reference passed differently
+        this.app = (VulkanApplication) Gdx.app; // Or get app reference passed differently
         this.vkInstance = app.getVulkanInstance();
         this.vkDevice = app.getVkDevice();
-        this.surface = app.getSurface(this.window.getWindowHandle()); // Surface is per-window! Need a way to get the right one.
+        this.surface = app.getSurface(this.windowHandle); // Surface is per-window! Need a way to get the right one.
         this.physicalDevice = vkDevice.getPhysicalDevice();
         this.rawDevice = vkDevice.getRawDevice();
         this.graphicsQueue = vkDevice.getGraphicsQueue();
         this.presentQueue = graphicsQueue; // Assuming same queue
 
-        if(this.vkDevice == null || this.surface == VK_NULL_HANDLE){
+        if (this.vkDevice == null || this.surface == VK_NULL_HANDLE) {
             throw new GdxRuntimeException("Cannot initialize VulkanGraphics resources before VkDevice and Surface are created.");
         }
 
@@ -347,6 +345,22 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         }
     }
 // Note: The allocation of actualExtent needs care if chooseSwapExtent is called within the main try-with-resources MemoryStack block. It might be better to allocate it outside or ensure the stack frame lives long enough. Allocating with VkExtent2D.create() might be safer if it's stored long-term. Let's store a copy in createSwapchain instead.
+
+    /**
+     * Called by the GLFW framebuffer resize callback. Should just set a flag
+     * to be handled by the render thread, as GLFW callbacks can occur on
+     * separate threads.
+     *
+     * @param width  New framebuffer width
+     * @param height New framebuffer height
+     */
+    private void framebufferResized(int width, int height) {
+        if (width > 0 && height > 0) {
+            this.framebufferResized = true;
+            // Using Gdx.app here might be risky if called very early or from wrong thread
+            // System.out.println("Framebuffer resize flagged: " + width + "x" + height);
+        }
+    }
 
     private void createImageViews(MemoryStack stack) {
         swapchainImageViews = new ArrayList<>(swapchainImages.size());
@@ -524,14 +538,40 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 // }
 
     void updateFramebufferInfo() {
-        GLFW.glfwGetFramebufferSize(window.getWindowHandle(), tmpBuffer, tmpBuffer2);
+        /*GLFW.glfwGetFramebufferSize(window.getWindowHandle(), tmpBuffer, tmpBuffer2);
         this.backBufferWidth = tmpBuffer.get(0);
         this.backBufferHeight = tmpBuffer2.get(0);
         GLFW.glfwGetWindowSize(window.getWindowHandle(), tmpBuffer, tmpBuffer2);
         VulkanGraphics.this.logicalWidth = tmpBuffer.get(0);
         VulkanGraphics.this.logicalHeight = tmpBuffer2.get(0);
         VulkanApplicationConfiguration config = window.getConfig();
-        bufferFormat = new BufferFormat(config.r, config.g, config.b, config.a, config.depth, config.stencil, config.samples, false);
+        bufferFormat = new BufferFormat(config.r, config.g, config.b, config.a, config.depth, config.stencil, config.samples, false);*/
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            IntBuffer pWidth = stack.mallocInt(1);
+            IntBuffer pHeight = stack.mallocInt(1);
+
+            // Use the stored windowHandle field
+            GLFW.glfwGetFramebufferSize(this.windowHandle, pWidth, pHeight);
+            this.backBufferWidth = pWidth.get(0);
+            this.backBufferHeight = pHeight.get(0);
+
+            // Also get logical size using the handle
+            GLFW.glfwGetWindowSize(this.windowHandle, pWidth, pHeight);
+            this.logicalWidth = pWidth.get(0);
+            this.logicalHeight = pHeight.get(0);
+
+            // Use System.out here as Gdx.app might not be fully ready
+            System.out.println("VulkanGraphics: Initial FB Size: " + backBufferWidth + "x" + backBufferHeight +
+                    ", Logical Size: " + logicalWidth + "x" + logicalHeight);
+        } // Buffers are freed automatically
+
+        // Ensure 'config' field exists and is set if you need it for BufferFormat
+        if (this.config != null) {
+            bufferFormat = new BufferFormat(config.r, config.g, config.b, config.a, config.depth, config.stencil, config.samples, false);
+        } else {
+            System.err.println("VulkanGraphics Warning: config field is null during updateFramebufferInfo!");
+            // Handle default buffer format?
+        }
     }
 
     void update() {
@@ -611,19 +651,21 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     @Override
     public int getWidth() {
-        if (window.getConfig().hdpiMode == HdpiMode.Pixels) {
-            return backBufferWidth;
+        if (this.config != null && this.config.hdpiMode == HdpiMode.Pixels) {
+            return backBufferWidth; // Use the stored back buffer width
         } else {
-            return logicalWidth;
+            // If config is null or mode isn't Pixels, return logical width
+            return logicalWidth; // Use the stored logical width
         }
     }
 
     @Override
     public int getHeight() {
-        if (window.getConfig().hdpiMode == HdpiMode.Pixels) {
-            return backBufferHeight;
+        if (this.config != null && this.config.hdpiMode == HdpiMode.Pixels) {
+            return backBufferHeight; // Use the stored back buffer height
         } else {
-            return logicalHeight;
+            // If config is null or mode isn't Pixels, return logical height
+            return logicalHeight; // Use the stored logical height
         }
     }
 
@@ -893,10 +935,12 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         }
     }
 
-    /** Sets the target framerate for the application, when using continuous rendering. Must be positive. The cpu sleeps as needed.
+    /**
+     * Sets the target framerate for the application, when using continuous rendering. Must be positive. The cpu sleeps as needed.
      * Use 0 to never sleep. If there are multiple windows, the value for the first window created is used for all. Default is 0.
      *
-     * @param fps fps */
+     * @param fps fps
+     */
     @Override
     public void setForegroundFPS(int fps) {
         getWindow().getConfig().foregroundFPS = fps;
@@ -949,9 +993,9 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     @Override
     public void dispose() {
-            cleanupVulkan(); // Call Vulkan resource cleanup
-            this.resizeCallback.free();
-            System.out.println("VulkanGraphics disposed.");
+        cleanupVulkan(); // Call Vulkan resource cleanup
+        this.resizeCallback.free();
+        System.out.println("VulkanGraphics disposed.");
     }
 
     // Method to clean up ONLY swapchain-related resources
@@ -1000,7 +1044,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         swapchain = VK_NULL_HANDLE; // Mark as destroyed
 
         // Command buffers were tied to framebuffers, clear the list
-        if(commandBuffers != null) {
+        if (commandBuffers != null) {
             commandBuffers.clear();
         }
 

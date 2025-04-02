@@ -177,6 +177,10 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         GLFW.glfwSetFramebufferSizeCallback(window.getWindowHandle(), resizeCallback);
     }
 
+    public VulkanGraphics(long windowHandle, VulkanApplicationConfiguration config) {
+        super();
+    }
+
     public VulkanWindow getWindow() {
         return window;
     }

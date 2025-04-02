@@ -38,7 +38,6 @@ import java.util.List;
 import com.badlogic.gdx.ApplicationLogger;
 import com.badlogic.gdx.backend.vulkan.audio.OpenALLwjgl3Audio;
 import com.badlogic.gdx.backend.vulkan.audio.VulkanAudio;
-import com.badlogic.gdx.graphics.glutils.GLVersion;
 
 import com.badlogic.gdx.utils.*;
 
@@ -74,8 +73,6 @@ import org.lwjgl.vulkan.VkLayerProperties;
 import java.util.Set; // For efficient checking
 import java.util.HashSet;
 import java.util.Collections;
-
-import static org.lwjgl.vulkan.EXTDebugUtils.*;
 
 import org.lwjgl.vulkan.VkDebugUtilsMessengerCallbackDataEXT;
 import org.lwjgl.vulkan.VkDebugUtilsMessengerCallbackEXT;
@@ -129,6 +126,8 @@ public class VulkanApplication implements VulkanApplicationBase {
     //private static final Set<String> DEVICE_EXTENSIONS = Set.of(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     //private static final List<String> DESIRED_VALIDATION_LAYERS = List.of("VK_LAYER_KHRONOS_validation");
     private static final List<String> DESIRED_VALIDATION_LAYERS = Collections.singletonList("VK_LAYER_KHRONOS_validation");
+
+    private VkDebugUtilsMessengerCallbackEXT debugCallbackInstance = null;
 
     static void initializeGlfw() {
         if (errorCallback == null) {
@@ -230,23 +229,49 @@ public class VulkanApplication implements VulkanApplicationBase {
 
         // 5. Create VulkanWindow and VulkanGraphics (Graphics init is deferred)
         //    Pass the handle we created earlier.
-        VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, config, this);
-        window.create(windowHandle); // This now creates VulkanGraphics internally
+        //VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, config, this);
+        // window.create(windowHandle); // This now creates VulkanGraphics internally
+        //windows.add(window);
+        //this.primaryWindowHandle = windowHandle; // Store if needed
+
+        // Option B (Often Cleaner): Create Graphics here, pass to Window
+        VulkanGraphics graphics = new VulkanGraphics(windowHandle, config); // Adjust constructor as needed
+        Gdx.graphics = graphics; // <<< --- SET THE STATIC FIELD ---
+
+        VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, config, this);//, graphics, input); // Window takes graphics/input
+        window.create(windowHandle); // Window might just store handle now
         windows.add(window);
-        this.primaryWindowHandle = windowHandle; // Store if needed
+        this.currentWindow = window; // Set current window
+        this.primaryWindowHandle = windowHandle;
 
-        // 6. Initialize Window-Specific Vulkan Resources (Swapchain etc.)
-        //    !! Call the deferred initialization method !!
-        window.getGraphics().initializeSwapchainAndResources();
+        VulkanInput input = createInput(window); // Create input, might need window later?
+        Gdx.input = input; // Set Gdx.input
 
-        // 7. Call Listener's create() - Can now potentially use Gdx.graphics safely
+        // ---> 7. Initialize Swapchain using the LOCAL 'graphics' variable <---
         try {
+            Gdx.app.log("VulkanApplication", "Initializing graphics resources...");
+            // Call the method on the 'graphics' variable (which IS a VulkanGraphics)
+            graphics.initializeSwapchainAndResources(); // <<<<------ CORRECT WAY TO CALL IT
+            Gdx.app.log("VulkanApplication", "Graphics resources initialized.");
+        } catch (Throwable e) {
+            // Handle fatal error during graphics setup
+            System.err.println("FATAL: Exception occurred during graphics resource initialization");
+            e.printStackTrace();
+            cleanup();
+            System.exit(-1);
+        }
+
+        // 8. Call Listener's create() (Gdx.graphics is set)
+        try {
+            Gdx.app.log("VulkanApplication", "Calling listener.create()...");
             listener.create();
-        } catch (Exception e) {
+            Gdx.app.log("VulkanApplication", "listener.create() completed.");
+        } catch (Throwable e) {
             throw new GdxRuntimeException("Exception occurred in ApplicationListener.create()", e);
         }
 
-        // 8. Start Main Loop
+        // 9. Start Main Loop
+        Gdx.app.log("VulkanApplication", "Starting main loop...");
         runMainLoop();
     }
 
@@ -269,7 +294,9 @@ public class VulkanApplication implements VulkanApplicationBase {
         Array<VulkanWindow> closedWindows = new Array<>();
         while (running && windows.size > 0) {
             // FIXME put it on a separate thread
-            audio.update();
+            if (audio!=null) {
+                audio.update();
+            }
 
             boolean haveWindowsRendered = false;
             closedWindows.clear();
@@ -353,7 +380,9 @@ public class VulkanApplication implements VulkanApplicationBase {
 
     protected void cleanup() {
         VulkanCursor.disposeSystemCursors();
-        audio.dispose();
+        if (audio!=null){
+            audio.dispose();
+        }
         errorCallback.free();
         errorCallback = null;
         if (glDebugCallback != null) {
@@ -366,11 +395,20 @@ public class VulkanApplication implements VulkanApplicationBase {
         if (vkDevice != null) {
             vkDevice.cleanup(); // Should call vkDestroyDevice internally
         }
-        // Destroy debug messenger if needed (requires instance and function pointer/helper)
+        // Destroy debug messenger BEFORE freeing the callback instance
         if (debugMessenger != VK_NULL_HANDLE && vulkanInstance != null) {
-            // Need the function pointer or LWJGL helper for vkDestroyDebugUtilsMessengerEXT
-            // Example using LWJGL static method:
             EXTDebugUtils.vkDestroyDebugUtilsMessengerEXT(vulkanInstance.getRawInstance(), debugMessenger, null);
+            if(Gdx.app != null) Gdx.app.log("VulkanApplication", "Debug messenger destroyed.");
+            else System.out.println("VulkanApplication: Debug messenger destroyed.");
+            debugMessenger = VK_NULL_HANDLE; // Avoid double destroy
+        }
+
+        // Free the callback instance AFTER it's no longer needed by the messenger
+        if (debugCallbackInstance != null) {
+            debugCallbackInstance.free(); // IMPORTANT
+            debugCallbackInstance = null;
+            if(Gdx.app != null) Gdx.app.log("VulkanApplication", "Debug callback freed.");
+            else System.out.println("VulkanApplication: Debug callback freed.");
         }
         if (vulkanInstance != null) {
             vulkanInstance.cleanup(); // Should call vkDestroyInstance internally
@@ -699,7 +737,7 @@ public class VulkanApplication implements VulkanApplicationBase {
         }
     }
 
-    private static final VkDebugUtilsMessengerCallbackEXT DEBUG_CALLBACK = new VkDebugUtilsMessengerCallbackEXT() {
+    /*private static final VkDebugUtilsMessengerCallbackEXT DEBUG_CALLBACK = new VkDebugUtilsMessengerCallbackEXT() {
         @Override
         public int invoke(int messageSeverity, int messageTypes, long pCallbackData, long pUserData) {
             VkDebugUtilsMessengerCallbackDataEXT callbackData = VkDebugUtilsMessengerCallbackDataEXT.create(pCallbackData);
@@ -719,36 +757,46 @@ public class VulkanApplication implements VulkanApplicationBase {
             // You could add breakpoints here based on severity for debugging
             return VK_FALSE; // Must return VK_FALSE
         }
-    };
+    };*/
 
     private void setupDebugMessenger(MemoryStack stack) {
-        if (!enableValidationLayers) return; // Should already be checked, but double-check
+        if (!enableValidationLayers) return;
+
+        // Create the callback instance lazily
+        if (this.debugCallbackInstance == null) {
+            this.debugCallbackInstance = new VkDebugUtilsMessengerCallbackEXT() {
+                @Override
+                public int invoke(int messageSeverity, int messageTypes, long pCallbackData, long pUserData) {
+                    VkDebugUtilsMessengerCallbackDataEXT callbackData = VkDebugUtilsMessengerCallbackDataEXT.create(pCallbackData);
+                    // ... your logging logic ...
+                    String message = "VULKAN DEBUG: " + callbackData.pMessageString();
+                    if(Gdx.app != null) Gdx.app.error("VulkanDebug", message);
+                    else System.err.println(message);
+                    return VK_FALSE;
+                }
+            };
+            if(Gdx.app != null) Gdx.app.log("VulkanApplication", "Debug callback instance created.");
+            else System.out.println("VulkanApplication: Debug callback instance created.");
+        }
 
         VkDebugUtilsMessengerCreateInfoEXT createInfo = VkDebugUtilsMessengerCreateInfoEXT.calloc(stack)
                 .sType$Default()
-                .messageSeverity( // Specify which message severities to receive
-                        //VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | // Uncomment for very detailed output
-                        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
-                .messageType( // Specify which message types to receive
-                        VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                                VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT)
-                .pfnUserCallback(DEBUG_CALLBACK) // Use the callback defined above
-                .pUserData(0); // Optional user data pointer
+                // ... set severities/types ...
+                .pfnUserCallback(this.debugCallbackInstance) // Use the instance field
+                .pUserData(0);
 
+        // ... rest of the method ...
         LongBuffer pDebugMessenger = stack.mallocLong(1);
-
-        // Use the static helper from LWJGL's EXTDebugUtils class
-        // Pass the raw VkInstance object
         int err = EXTDebugUtils.vkCreateDebugUtilsMessengerEXT(vulkanInstance.getRawInstance(), createInfo, null, pDebugMessenger);
-        if (err != VK_SUCCESS) {
-            // Don't make this fatal maybe? Log a warning.
-            System.err.println("WARNING: Failed to set up Vulkan debug messenger: error code " + err);
-            this.debugMessenger = VK_NULL_HANDLE; // Ensure it's null if creation fails
+        // ... handle error or success ...
+        if (err == VK_SUCCESS) {
+            this.debugMessenger = pDebugMessenger.get(0);
+            if(Gdx.app != null) Gdx.app.log("VulkanApplication", "Vulkan Debug Messenger setup complete.");
+            else System.out.println("VulkanApplication: Vulkan Debug Messenger setup complete.");
         } else {
-            this.debugMessenger = pDebugMessenger.get(0); // Store the handle
-            System.out.println("Vulkan Debug Messenger created.");
+            if(Gdx.app != null) Gdx.app.error("VulkanApplication", "Failed to set up Vulkan debug messenger: error code " + err);
+            else System.err.println("WARNING: Failed to set up Vulkan debug messenger: error code " + err);
+            this.debugMessenger = VK_NULL_HANDLE;
         }
     }
 

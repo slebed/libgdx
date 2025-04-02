@@ -91,12 +91,9 @@ public class VulkanChooserLauncher {
                             String javaBin = javaHome + File.separator + "bin" + File.separator + "java";
                             String classpath = System.getProperty("vulkan.test.classpath");
                             String assetsPath = System.getProperty("vulkan.test.assetsdir");
-                            // ---> Get the library path from the CURRENT (chooser) process <---
-                            String libraryPath = System.getProperty("java.library.path");
-                            // ------------------------------------------------------------------
 
-                            if (classpath == null || classpath.isEmpty()) { /* handle error */ }
-                            if (assetsPath == null || assetsPath.isEmpty()) { /* handle error */ }
+                            if (classpath == null || classpath.isEmpty()) { throw new IllegalStateException(/*...*/); }
+                            if (assetsPath == null || assetsPath.isEmpty()) { throw new IllegalStateException(/*...*/); }
 
                             String className = com.badlogic.gdx.tests.vulkan.VulkanTestStarter.class.getCanonicalName();
 
@@ -105,18 +102,16 @@ public class VulkanChooserLauncher {
                             command.add("-cp");
                             command.add(classpath);
 
-                            // ---> Add the java.library.path property for the subprocess <---
-                            if (libraryPath != null && !libraryPath.isEmpty()) {
-                                command.add("-Djava.library.path=" + libraryPath);
-                                System.out.println("Passing library path to subprocess: " + libraryPath);
-                            } else {
-                                System.err.println("Warning: Chooser's java.library.path was null or empty.");
-                                // The UnsatisfiedLinkError is likely if this happens
-                            }
-                            // ----------------------------------------------------------------
+                            // ---> Use LWJGL's specific property instead of java.library.path <---
+                            String tempDir = System.getProperty("java.io.tmpdir");
+                            command.add("-Dorg.lwjgl.librarypath=" + tempDir);
+                            // ---------------------------------------------------------------
 
-                            // Optional: Keep the extract path hint? Might be redundant if library path works.
-                            // String tempDir = System.getProperty("java.io.tmpdir");
+                            // Keep LWJGL Debug flags
+                            command.add("-Dorg.lwjgl.util.Debug=true");
+                            command.add("-Dorg.lwjgl.util.DebugLoader=true");
+
+                            // Keep extract path hint? Maybe remove if librarypath is set? Let's remove it for now.
                             // command.add("-Dorg.lwjgl.system.SharedLibraryExtractPath=" + tempDir);
 
                             command.add(className);
@@ -125,7 +120,6 @@ public class VulkanChooserLauncher {
                             System.out.println("Launching command: " + String.join(" ", command));
 
                             ProcessBuilder builder = new ProcessBuilder(command);
-
                             builder.directory(new File(assetsPath));
                             builder.inheritIO();
 

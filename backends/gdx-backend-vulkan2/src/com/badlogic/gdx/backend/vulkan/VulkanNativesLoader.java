@@ -17,14 +17,24 @@
 package com.badlogic.gdx.backend.vulkan;
 
 import com.badlogic.gdx.utils.GdxNativesLoader;
+import com.badlogic.gdx.utils.SharedLibraryLoader;
 
 public final class VulkanNativesLoader {
+	static public boolean loadCalled = false;
 
-	static {
-		System.setProperty("org.lwjgl.input.Mouse.allowNegativeMouseCoords", "true");
-	}
-
-	static public void load () {
-		GdxNativesLoader.load();
+	static public synchronized void load () {
+		if (loadCalled) {
+			System.out.println("[VulkanNativesLoader] load() already called."); // Log if called again
+			return;
+		}
+		System.out.println("[VulkanNativesLoader] load() called. Attempting GdxNativesLoader.load()..."); // Log entry
+		loadCalled = true;
+		try {
+			GdxNativesLoader.load();
+			System.out.println("[VulkanNativesLoader] GdxNativesLoader.load() completed WITHOUT throwing."); // Log success
+		} catch (Throwable t) {
+			System.err.println("[VulkanNativesLoader] GdxNativesLoader.load() THREW an exception!"); // Log failure
+			throw t; // Re-throw original error
+		}
 	}
 }

@@ -19,7 +19,6 @@ package com.badlogic.gdx.backends.vulkan;
 import static org.lwjgl.glfw.GLFW.glfwDestroyWindow;
 import static org.lwjgl.glfw.GLFWVulkan.glfwGetRequiredInstanceExtensions;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-import static org.lwjgl.vulkan.EXTDebugUtils.vkCreateDebugUtilsMessengerEXT;
 import static org.lwjgl.vulkan.VK10.VK_FALSE;
 import static org.lwjgl.vulkan.VK10.VK_NULL_HANDLE;
 import static org.lwjgl.vulkan.VK10.VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
@@ -89,10 +88,7 @@ import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceQueueFamilyProperties;
 import static org.lwjgl.vulkan.KHRSwapchain.*; // For VK_KHR_SWAPCHAIN_EXTENSION_NAME
 
 import org.lwjgl.vulkan.VkPhysicalDeviceProperties;
-import org.lwjgl.vulkan.VkPhysicalDeviceFeatures;
 import org.lwjgl.vulkan.VkExtensionProperties;
-
-import java.util.Set;
 
 import org.lwjgl.vulkan.VkQueueFamilyProperties;
 import org.lwjgl.vulkan.VkSurfaceCapabilitiesKHR;
@@ -232,23 +228,40 @@ public class VulkanApplication implements VulkanApplicationBase {
 
         // 5. Create VulkanWindow and VulkanGraphics (Graphics init is deferred)
         //    Pass the handle we created earlier.
-        VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, config, this);
-        window.create(windowHandle); // This now creates VulkanGraphics internally
+        //VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, config, this);
+        // window.create(windowHandle); // This now creates VulkanGraphics internally
+        //windows.add(window);
+        //this.primaryWindowHandle = windowHandle; // Store if needed
+
+        // Option B (Often Cleaner): Create Graphics here, pass to Window
+        VulkanGraphics graphics = new VulkanGraphics(windowHandle, config); // Adjust constructor as needed
+        Gdx.graphics = graphics; // <<< --- SET THE STATIC FIELD ---
+        VulkanInput input = createInput(null); // Create input, might need window later?
+        Gdx.input = input; // Set Gdx.input
+
+        VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, config, this, graphics, input); // Window takes graphics/input
+        window.create(windowHandle); // Window might just store handle now
         windows.add(window);
-        this.primaryWindowHandle = windowHandle; // Store if needed
+        this.currentWindow = window; // Set current window
+        // -------------------------------------------------------
+
+        this.primaryWindowHandle = windowHandle;
 
         // 6. Initialize Window-Specific Vulkan Resources (Swapchain etc.)
         //    !! Call the deferred initialization method !!
-        window.getGraphics().initializeSwapchainAndResources();
+        //window.getGraphics().initializeSwapchainAndResources();
+        Gdx.graphics.initializeSwapchainAndResources();
 
         // 7. Call Listener's create() - Can now potentially use Gdx.graphics safely
         try {
             listener.create();
-        } catch (Exception e) {
+            Gdx.app.log("VulkanApplication", "listener.create() completed.");
+        } catch (Throwable e) { // Catch Throwable for safety
             throw new GdxRuntimeException("Exception occurred in ApplicationListener.create()", e);
         }
 
         // 8. Start Main Loop
+        Gdx.app.log("VulkanApplication", "Starting main loop...");
         runMainLoop();
     }
 

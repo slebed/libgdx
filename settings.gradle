@@ -22,7 +22,7 @@ include ":backends:gdx-backend-lwjgl"
 include ":backends:gdx-backend-lwjgl3"
 include ":backends:gdx-backend-robovm"
 include ":backends:gdx-backend-robovm-metalangle"
-include ":backends:gdx-backend-vulkan"
+include ":backends:gdx-backend-vulkan2"
 include ":backends:gdx-backends-gwt"
 project(":backends:gdx-backends-gwt").name = "gdx-backend-gwt"
 
@@ -43,8 +43,9 @@ include ":tests:gdx-tests-iosrobovm"
 include ":tests:gdx-tests-lwjgl"
 include ":tests:gdx-tests-lwjgl3"
 include ":tests:gdx-tests-vulkan"
+include ":tests:gdx-tests-vulkan-chooser"
 
 rootProject.name = "libgdx"
 ///include ':backends:vulkan'
-include ':backends:gdx-backend-vulkan2'
-include ':tests:gdx-tests-vulkan-chooser'
+//include ':backends:gdx-backend-vulkan2'
+

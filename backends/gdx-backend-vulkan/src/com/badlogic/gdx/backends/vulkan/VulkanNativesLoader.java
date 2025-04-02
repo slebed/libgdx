@@ -25,6 +25,9 @@ public final class VulkanNativesLoader {
 	}
 
 	static public void load () {
+
+		System.out.println("HERE VulkanNativesLoader");
+
 		GdxNativesLoader.load();
 	}
 }

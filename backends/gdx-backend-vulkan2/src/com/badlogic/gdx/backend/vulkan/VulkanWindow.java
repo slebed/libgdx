@@ -44,7 +44,7 @@ public class VulkanWindow implements Disposable {
     final VulkanApplicationBase application;
     private boolean listenerInitialized = false;
     VulkanWindowListener windowListener;
-    private VulkanGraphics graphics;
+    //private VulkanGraphics graphics;
     private VulkanInput input;
     private final VulkanApplicationConfiguration config;
     private final Array<Runnable> runnables = new Array<Runnable>();
@@ -200,7 +200,7 @@ public class VulkanWindow implements Disposable {
     void create(long windowHandle) {
         this.windowHandle = windowHandle;
         this.input = application.createInput(this);
-        this.graphics = new VulkanGraphics(this);
+        //this.graphics = new VulkanGraphics(this);
 
         GLFW.glfwSetWindowFocusCallback(windowHandle, focusCallback);
         GLFW.glfwSetWindowIconifyCallback(windowHandle, iconifyCallback);
@@ -380,7 +380,7 @@ public class VulkanWindow implements Disposable {
     }
 
     VulkanGraphics getGraphics() {
-        return graphics;
+        return (VulkanGraphics) Gdx.graphics;
     }
 
     VulkanInput getInput() {
@@ -407,7 +407,7 @@ public class VulkanWindow implements Disposable {
         for (Runnable runnable : executedRunnables) {
             runnable.run();
         }
-        boolean shouldRender = executedRunnables.size > 0 || graphics.isContinuousRendering();
+        boolean shouldRender = executedRunnables.size > 0 || Gdx.graphics.isContinuousRendering();
         executedRunnables.clear();
 
         if (!iconified) input.update();
@@ -420,19 +420,19 @@ public class VulkanWindow implements Disposable {
         // In case glfw_async is used, we need to resize outside the GLFW
         if (asyncResized) {
             asyncResized = false;
-            graphics.updateFramebufferInfo();
+            //Gdx.graphics.updateFramebufferInfo();
             //graphics.gl20.glViewport(0, 0, graphics.getBackBufferWidth(), graphics.getBackBufferHeight());
-            listener.resize(graphics.getWidth(), graphics.getHeight());
-            graphics.update();
+            listener.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            //Gdx.graphics.update();
             listener.render();
             //GLFW.glfwSwapBuffers(windowHandle);
             return true;
         }
 
         if (shouldRender) {
-            graphics.update();
+            //graphics.update();
             listener.render();
-            GLFW.glfwSwapBuffers(windowHandle);
+            //GLFW.glfwSwapBuffers(windowHandle);
         }
 
         if (!iconified) input.prepareNext();
@@ -461,14 +461,14 @@ public class VulkanWindow implements Disposable {
     void initializeListener() {
         if (!listenerInitialized) {
             listener.create();
-            listener.resize(graphics.getWidth(), graphics.getHeight());
+            listener.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             listenerInitialized = true;
         }
     }
 
     void makeCurrent() {
         Gdx.input = input;
-        GLFW.glfwMakeContextCurrent(windowHandle);
+        //GLFW.glfwMakeContextCurrent(windowHandle);
     }
 
     @Override
@@ -476,7 +476,7 @@ public class VulkanWindow implements Disposable {
         listener.pause();
         listener.dispose();
         VulkanCursor.dispose(this);
-        graphics.dispose();
+        //graphics.dispose();
         input.dispose();
         GLFW.glfwSetWindowFocusCallback(windowHandle, null);
         GLFW.glfwSetWindowIconifyCallback(windowHandle, null);
