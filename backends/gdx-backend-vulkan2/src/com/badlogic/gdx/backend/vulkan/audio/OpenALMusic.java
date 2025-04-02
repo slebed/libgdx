@@ -24,8 +24,6 @@ import org.lwjgl.BufferUtils;
 import org.lwjgl.openal.AL11;
 
 import com.badlogic.gdx.audio.Music;
-import com.badlogic.gdx.backend.vulkan.audio.OpenALLwjgl3Audio;
-import com.badlogic.gdx.backend.vulkan.audio.OpenALUtils;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.utils.FloatArray;

@@ -16,10 +16,6 @@
 
 package com.badlogic.gdx.backend.vulkan.audio;
 
-import com.badlogic.gdx.backend.vulkan.audio.OggInputStream;
-import com.badlogic.gdx.backend.vulkan.audio.OpenALLwjgl3Audio;
-import com.badlogic.gdx.backend.vulkan.audio.OpenALMusic;
-import com.badlogic.gdx.backend.vulkan.audio.OpenALSound;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.GdxRuntimeException;

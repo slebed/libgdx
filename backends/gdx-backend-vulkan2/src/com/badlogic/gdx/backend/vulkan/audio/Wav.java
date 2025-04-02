@@ -20,9 +20,6 @@ import java.io.EOFException;
 import java.io.FilterInputStream;
 import java.io.IOException;
 
-import com.badlogic.gdx.backend.vulkan.audio.OpenALLwjgl3Audio;
-import com.badlogic.gdx.backend.vulkan.audio.OpenALMusic;
-import com.badlogic.gdx.backend.vulkan.audio.OpenALSound;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.StreamUtils;

@@ -17,8 +17,6 @@
 package com.badlogic.gdx.backend.vulkan.audio;
 
 import com.badlogic.gdx.audio.Sound;
-import com.badlogic.gdx.backend.vulkan.audio.OpenALLwjgl3Audio;
-import com.badlogic.gdx.backend.vulkan.audio.OpenALUtils;
 import com.badlogic.gdx.utils.BufferUtils;
 
 import java.nio.Buffer;

@@ -37,7 +37,7 @@ public class VulkanNet implements Net {
 
 	NetJavaImpl netJavaImpl;
 
-	public VulkanNet(VulkanApplicationConfiguration configuration) {
+	public VulkanNet (VulkanApplicationConfiguration configuration) {
 		netJavaImpl = new NetJavaImpl(configuration.maxNetThreads);
 	}
 

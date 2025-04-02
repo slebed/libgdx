@@ -24,9 +24,6 @@ import javazoom.jl.decoder.Header;
 import javazoom.jl.decoder.MP3Decoder;
 import javazoom.jl.decoder.OutputBuffer;
 
-import com.badlogic.gdx.backend.vulkan.audio.OpenALLwjgl3Audio;
-import com.badlogic.gdx.backend.vulkan.audio.OpenALMusic;
-import com.badlogic.gdx.backend.vulkan.audio.OpenALSound;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 

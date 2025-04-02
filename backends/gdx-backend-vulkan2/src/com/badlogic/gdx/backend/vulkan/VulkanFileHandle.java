@@ -25,11 +25,11 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
 /** @author mzechner
  * @author Nathan Sweet */
 public final class VulkanFileHandle extends FileHandle {
-	public VulkanFileHandle(String fileName, FileType type) {
+	public VulkanFileHandle (String fileName, FileType type) {
 		super(fileName, type);
 	}
 
-	public VulkanFileHandle(File file, FileType type) {
+	public VulkanFileHandle (File file, FileType type) {
 		super(file, type);
 	}
 

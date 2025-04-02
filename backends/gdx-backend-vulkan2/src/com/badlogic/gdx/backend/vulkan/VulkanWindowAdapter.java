@@ -1,8 +1,6 @@
 
 package com.badlogic.gdx.backend.vulkan;
 
-
-
 /** Convenience implementation of {@link VulkanWindowListener}. Derive from this class and only overwrite the methods you are
  * interested in.
  * @author badlogic */

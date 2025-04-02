@@ -127,7 +127,7 @@ public class DefaultVulkanInput extends AbstractInput implements VulkanInput {
 		}
 	};
 
-	public DefaultVulkanInput(VulkanWindow window) {
+	public DefaultVulkanInput (VulkanWindow window) {
 		this.window = window;
 		windowHandleChanged(window.getWindowHandle());
 	}
