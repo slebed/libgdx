@@ -17,7 +17,6 @@
 package com.badlogic.gdx.backend.vulkan;
 
 import com.badlogic.gdx.utils.GdxNativesLoader;
-import com.badlogic.gdx.utils.SharedLibraryLoader;
 
 public final class VulkanNativesLoader {
 	static public boolean loadCalled = false;

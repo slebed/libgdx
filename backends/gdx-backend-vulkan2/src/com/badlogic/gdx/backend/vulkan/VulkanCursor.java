@@ -39,7 +39,7 @@ public class VulkanCursor implements Cursor {
 	GLFWImage glfwImage;
 	final long glfwCursor;
 
-	VulkanCursor(VulkanWindow window, Pixmap pixmap, int xHotspot, int yHotspot) {
+	VulkanCursor (VulkanWindow window, Pixmap pixmap, int xHotspot, int yHotspot) {
 		this.window = window;
 		if (pixmap.getFormat() != Pixmap.Format.RGBA8888) {
 			throw new GdxRuntimeException("Cursor image pixmap is not in RGBA8888 format.");

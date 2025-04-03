@@ -1,25 +1,25 @@
 plugins {
-    id 'java-library'
+	id 'java-library'
 }
 java {
-    sourceCompatibility JavaVersion.VERSION_11
-    targetCompatibility JavaVersion.VERSION_11
+	sourceCompatibility JavaVersion.VERSION_11
+	targetCompatibility JavaVersion.VERSION_11
 }
 dependencies {
-    // Core :gdx dependency should come from ../build.gradle's configure block
+	// Core :gdx dependency should come from ../build.gradle's configure block
 
-    // LWJGL dependencies
-    api "org.lwjgl:lwjgl:$versions.lwjgl3"
-    api "org.lwjgl:lwjgl-glfw:$versions.lwjgl3"
-    api "org.lwjgl:lwjgl-vulkan:$versions.lwjgl3"
-    api "org.lwjgl:lwjgl-openal:$versions.lwjgl3"
-    api "org.lwjgl:lwjgl-stb:$versions.lwjgl3"
-    api "org.lwjgl:lwjgl-jemalloc:$versions.lwjgl3"
+	// LWJGL dependencies
+	api "org.lwjgl:lwjgl:$versions.lwjgl3"
+	api "org.lwjgl:lwjgl-glfw:$versions.lwjgl3"
+	api "org.lwjgl:lwjgl-vulkan:$versions.lwjgl3"
+	api "org.lwjgl:lwjgl-openal:$versions.lwjgl3"
+	api "org.lwjgl:lwjgl-stb:$versions.lwjgl3"
+	api "org.lwjgl:lwjgl-jemalloc:$versions.lwjgl3"
 
-    // Audio dependencies
-    api "com.badlogicgames.jlayer:jlayer:$versions.jlayer"
-    api "org.jcraft:jorbis:$versions.jorbis"
+	// Audio dependencies
+	api "com.badlogicgames.jlayer:jlayer:$versions.jlayer"
+	api "org.jcraft:jorbis:$versions.jorbis"
 
-    // Desktop natives dependency
-    api gdxnatives.desktop
+	// Desktop natives dependency
+	api gdxnatives.desktop
 }

@@ -52,7 +52,7 @@ public class GlfwTest {
 			throw new RuntimeException("Couldn't create window");
 		}
 		glfwMakeContextCurrent(windowHandle);
-		//GL.createCapabilities();
+		// GL.createCapabilities();
 		glfwSwapInterval(1);
 		glfwShowWindow(windowHandle);
 

@@ -36,11 +36,11 @@ public class VulkanPreferences implements Preferences {
 	private final Properties properties = new Properties();
 	private final FileHandle file;
 
-	public VulkanPreferences(String name, String directory) {
+	public VulkanPreferences (String name, String directory) {
 		this(new VulkanFileHandle(new File(directory, name), FileType.External));
 	}
 
-	public VulkanPreferences(FileHandle file) {
+	public VulkanPreferences (FileHandle file) {
 		this.file = file;
 		if (!file.exists()) return;
 		InputStream in = null;

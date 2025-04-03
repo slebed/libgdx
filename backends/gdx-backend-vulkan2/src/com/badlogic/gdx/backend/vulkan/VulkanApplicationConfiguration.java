@@ -246,8 +246,8 @@ public class VulkanApplicationConfiguration extends VulkanWindowConfiguration {
 	public static DisplayMode getDisplayMode (Monitor monitor) {
 		VulkanApplication.initializeGlfw();
 		GLFWVidMode videoMode = GLFW.glfwGetVideoMode(((VulkanGraphics.VulkanMonitor)monitor).monitorHandle);
-		return new VulkanGraphics.VulkanDisplayMode(((VulkanGraphics.VulkanMonitor)monitor).monitorHandle, videoMode.width(), videoMode.height(),
-			videoMode.refreshRate(), videoMode.redBits() + videoMode.greenBits() + videoMode.blueBits());
+		return new VulkanGraphics.VulkanDisplayMode(((VulkanGraphics.VulkanMonitor)monitor).monitorHandle, videoMode.width(),
+			videoMode.height(), videoMode.refreshRate(), videoMode.redBits() + videoMode.greenBits() + videoMode.blueBits());
 	}
 
 	/** @return the available {@link DisplayMode}s of the primary monitor */
@@ -270,8 +270,9 @@ public class VulkanApplicationConfiguration extends VulkanWindowConfiguration {
 		DisplayMode[] result = new DisplayMode[videoModes.limit()];
 		for (int i = 0; i < result.length; i++) {
 			GLFWVidMode videoMode = videoModes.get(i);
-			result[i] = new VulkanGraphics.VulkanDisplayMode(((VulkanGraphics.VulkanMonitor)monitor).monitorHandle, videoMode.width(),
-				videoMode.height(), videoMode.refreshRate(), videoMode.redBits() + videoMode.greenBits() + videoMode.blueBits());
+			result[i] = new VulkanGraphics.VulkanDisplayMode(((VulkanGraphics.VulkanMonitor)monitor).monitorHandle,
+				videoMode.width(), videoMode.height(), videoMode.refreshRate(),
+				videoMode.redBits() + videoMode.greenBits() + videoMode.blueBits());
 		}
 		return result;
 	}
@@ -293,7 +294,7 @@ public class VulkanApplicationConfiguration extends VulkanWindowConfiguration {
 		return monitors;
 	}
 
-	static VulkanGraphics.VulkanMonitor toVulkanMonitor(long glfwMonitor) {
+	static VulkanGraphics.VulkanMonitor toVulkanMonitor (long glfwMonitor) {
 		IntBuffer tmp = BufferUtils.createIntBuffer(1);
 		IntBuffer tmp2 = BufferUtils.createIntBuffer(1);
 		GLFW.glfwGetMonitorPos(glfwMonitor, tmp, tmp2);
