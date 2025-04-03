@@ -259,10 +259,14 @@ public class VulkanWindow implements Disposable {
 
     /** Sets the visibility of the window. Invisible windows will still call their {@link ApplicationListener} */
     public void setVisible(boolean visible) {
+        System.out.println("[VulkanWindow] setVisible called with: " + visible);
         if (visible) {
+            System.out.println("[VulkanWindow] Attempting glfwShowWindow...");
             GLFW.glfwShowWindow(windowHandle);
+            System.out.println("[VulkanWindow] glfwShowWindow call finished.");
         } else {
             GLFW.glfwHideWindow(windowHandle);
+            System.out.println("[VulkanWindow] glfwHideWindow call finished.");
         }
     }
 
@@ -397,9 +401,9 @@ public class VulkanWindow implements Disposable {
     }
 
     boolean update() {
-        if (!listenerInitialized) {
-            initializeListener();
-        }
+        //if (!listenerInitialized) {
+        //    initializeListener();
+        //}
         synchronized (runnables) {
             executedRunnables.addAll(runnables);
             runnables.clear();
@@ -418,7 +422,7 @@ public class VulkanWindow implements Disposable {
         }
 
         // In case glfw_async is used, we need to resize outside the GLFW
-        if (asyncResized) {
+        /*if (asyncResized) {
             asyncResized = false;
             //Gdx.graphics.updateFramebufferInfo();
             //graphics.gl20.glViewport(0, 0, graphics.getBackBufferWidth(), graphics.getBackBufferHeight());
@@ -427,12 +431,18 @@ public class VulkanWindow implements Disposable {
             listener.render();
             //GLFW.glfwSwapBuffers(windowHandle);
             return true;
+        }*/
+
+        if (Gdx.graphics instanceof VulkanGraphics) { // Check if graphics is valid and our type
+            if (((VulkanGraphics)Gdx.graphics).framebufferResized) { // Access the flag
+                // Don't trigger recreate here, drawFrame will handle it
+                shouldRender = true; // Ensure we attempt to draw to trigger recreation
+            }
         }
 
         if (shouldRender) {
-            //graphics.update();
-            listener.render();
-            //GLFW.glfwSwapBuffers(windowHandle);
+            // Call the main drawing method on the graphics instance
+            ((VulkanGraphics)Gdx.graphics).drawFrame();
         }
 
         if (!iconified) input.prepareNext();
@@ -467,7 +477,7 @@ public class VulkanWindow implements Disposable {
     }
 
     void makeCurrent() {
-        Gdx.input = input;
+        //Gdx.input = input;
         //GLFW.glfwMakeContextCurrent(windowHandle);
     }
 

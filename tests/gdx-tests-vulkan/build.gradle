@@ -46,22 +46,22 @@ tasks.register('dist', Jar) {
    // ... (copy contents from gdx-tests-lwjgl3/build.gradle if needed) ...
 }
 
-tasks.register('runVulkanSetupTest', JavaExec) {
+tasks.register('runVulkanTest', JavaExec) {
     dependsOn classes
     dependsOn project(':tests:gdx-tests').classes
     group = "Vulkan Tests"
-    description = "Runs VulkanSetupTest using the Vulkan backend"
+    description = "Runs VulkanQuadTest using the Vulkan backend"
     mainClass = "com.badlogic.gdx.tests.vulkan.VulkanTestStarter"
     // Assign the classpath to the task property
     classpath = sourceSets.main.runtimeClasspath
     workingDir = project(':tests:gdx-tests-android').file("assets")
-    args = ["VulkanSetupTest"]
+    args = ["VulkanQuadTest"]
 
     // --- Add doFirst block to PRINT the classpath ---
     doFirst {
-        println "-----------------------------------------------------"
-        println "Runtime Classpath for :tests:gdx-tests-vulkan task:"
-        classpath.each { File file -> println file.absolutePath }
+        //println "-----------------------------------------------------"
+        //println "Runtime Classpath for :tests:gdx-tests-vulkan task:"
+        //classpath.each { File file -> println file.absolutePath }
         println "-----------------------------------------------------"
     }
     // -------------------------------------------------

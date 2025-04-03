@@ -1,6 +1,7 @@
 package com.badlogic.gdx.backend.vulkan;
 
 import static org.lwjgl.system.MemoryStack.stackPush;
+import static org.lwjgl.vulkan.KHRSwapchain.VK_KHR_SWAPCHAIN_EXTENSION_NAME;
 import static org.lwjgl.vulkan.VK10.*;
 import static org.lwjgl.vulkan.VK10.VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 import static org.lwjgl.vulkan.VK10.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -38,14 +39,31 @@ public class VkDevice implements VkResource {
     private final VkQueue graphicsQueue;
     private final VkPhysicalDevice physicalDevice;
     private final int queueFamilyIndex;
-    private final long commandPool;
+    //private final long commandPool;
+    private long graphicsCommandPool = VK_NULL_HANDLE;
 
-    private VkDevice(VkDeviceHandle deviceHandle, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, long commandPool, int queueFamilyIndex) {
+    private VkDevice(VkDeviceHandle deviceHandle, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, long graphicsCommandPoolHandle, int queueFamilyIndex) {
         this.deviceHandle = deviceHandle;
         this.graphicsQueue = graphicsQueue;
         this.physicalDevice = physicalDevice;
-        this.commandPool = commandPool;
+        this.graphicsCommandPool = graphicsCommandPoolHandle; // <<< --- Assign the handle passed from Builder
         this.queueFamilyIndex = queueFamilyIndex;
+
+        /*try (MemoryStack stack = stackPush()) {
+            VkCommandPoolCreateInfo poolInfo = VkCommandPoolCreateInfo.calloc(stack)
+                    .sType(VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO)
+                    // Flag allows resetting individual command buffers
+                    .flags(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT)
+                    // Use the queue family index you used to create the device/queue
+                    .queueFamilyIndex(yourGraphicsQueueFamilyIndex); // Replace with actual index
+
+            LongBuffer pCommandPool = stack.mallocLong(1);
+            VkMemoryUtil.vkCheck(vkCreateCommandPool(rawDeviceHandle, poolInfo, null, pCommandPool),
+                    "Failed to create command pool");
+            this.graphicsCommandPool = pCommandPool.get(0);
+            System.out.println("Graphics Command Pool created: " + this.graphicsCommandPool);
+        }*/
+        System.out.println("VkDevice created. Graphics Command Pool Handle: " + this.graphicsCommandPool); // Log stored handle
     }
 
     public long getHandle() {
@@ -65,16 +83,23 @@ public class VkDevice implements VkResource {
     }
 
     public long getCommandPool() {
-        return commandPool;
+        return this.graphicsCommandPool;
     }
 
     @Override
     public void cleanup() {
-        VkMemoryUtil.safeDestroyCommandPool(commandPool, deviceHandle);
-        // CRITICAL: Ensure device is destroyed! Add this line if missing:
+        System.out.println("Cleaning up VkDevice...");
+        // Destroy command pool FIRST
+        if (graphicsCommandPool != VK_NULL_HANDLE) {
+            vkDestroyCommandPool(deviceHandle, graphicsCommandPool, null);
+            System.out.println("Graphics Command Pool destroyed.");
+        }
+        // THEN Destroy the logical device itself
         if (deviceHandle != null) {
             vkDestroyDevice(deviceHandle, null);
+            System.out.println("Logical Device destroyed.");
         }
+        System.out.println("VkDevice cleanup finished.");
     }
 
     public int getQueueFamilyIndex() {
@@ -100,48 +125,51 @@ public class VkDevice implements VkResource {
                 FloatBuffer queuePriorities = stack.floats(1.0f);
 
                 VkDeviceQueueCreateInfo.Buffer queueCreateInfo = VkDeviceQueueCreateInfo.calloc(1, stack)
-                    .sType(VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO)
-                    .queueFamilyIndex(queueFamilyIndex)
-                    .pQueuePriorities(queuePriorities);
+                        .sType$Default() // Use sType$Default() for convenience
+                        .queueFamilyIndex(queueFamilyIndex)
+                        .pQueuePriorities(queuePriorities);
 
-                // Check if the device supports the VK_KHR_swapchain extension
-                PointerBuffer requiredExtensions = stack.pointers(stack.UTF8("VK_KHR_swapchain"));
+                // Define required device extensions (swapchain is essential)
+                PointerBuffer requiredExtensions = stack.mallocPointer(1);
+                requiredExtensions.put(0, stack.UTF8(VK_KHR_SWAPCHAIN_EXTENSION_NAME));
+                // Add other required extensions here if needed later
 
                 VkDeviceCreateInfo createInfo = VkDeviceCreateInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)
-                    .pQueueCreateInfos(queueCreateInfo)
-                    .ppEnabledExtensionNames(requiredExtensions)
-                    .pEnabledFeatures(null);
+                        .sType$Default()
+                        .pQueueCreateInfos(queueCreateInfo)
+                        .ppEnabledExtensionNames(requiredExtensions) // Pass the buffer
+                        .pEnabledFeatures(null); // Enable features later if needed
 
                 PointerBuffer pDevice = stack.mallocPointer(1);
                 VkMemoryUtil.vkCheck(
-                    vkCreateDevice(physicalDevice, createInfo, null, pDevice),
-                    "Failed to create logical device"
+                        vkCreateDevice(physicalDevice, createInfo, null, pDevice),
+                        "Failed to create logical device"
                 );
-
+                // Use your inner class or LWJGL's VkDevice directly
                 VkDeviceHandle device = new VkDeviceHandle(pDevice.get(0), physicalDevice, createInfo);
 
                 PointerBuffer pQueue = stack.mallocPointer(1);
-                vkGetDeviceQueue(device, queueFamilyIndex, 0, pQueue);
+                vkGetDeviceQueue(device, queueFamilyIndex, 0, pQueue); // Queue index 0 within the family
                 VkQueue graphicsQueue = new VkQueue(pQueue.get(0), device);
 
-                // Create Command Pool
+                // --- Create Command Pool Correctly HERE ---
                 VkCommandPoolCreateInfo poolInfo = VkCommandPoolCreateInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO)
-                    .queueFamilyIndex(queueFamilyIndex)
-                    .flags(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+                        .sType$Default()
+                        .queueFamilyIndex(queueFamilyIndex)
+                        .flags(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT); // Or maybe TRANSIENT?
 
                 LongBuffer pCommandPool = stack.mallocLong(1);
                 VkMemoryUtil.vkCheck(
-                    vkCreateCommandPool(device, poolInfo, null, pCommandPool),
-                    "Failed to create command pool"
+                        vkCreateCommandPool(device, poolInfo, null, pCommandPool),
+                        "Failed to create command pool"
                 );
-                long commandPool = pCommandPool.get(0);
+                long commandPoolHandle = pCommandPool.get(0); // Get the handle
+                // -----------------------------------------
 
-                return new VkDevice(device, graphicsQueue, physicalDevice, commandPool, this.queueFamilyIndex);
+                // Pass the created handle to the constructor
+                return new VkDevice(device, graphicsQueue, physicalDevice, commandPoolHandle, this.queueFamilyIndex);
             }
         }
-
     }
 
     private static class VkDeviceHandle extends org.lwjgl.vulkan.VkDevice {
@@ -199,25 +227,30 @@ public class VkDevice implements VkResource {
     }
 
     public VkCommandBuffer beginSingleTimeCommands() {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            // Allocate command buffer
+        try (MemoryStack stack = stackPush()) {
+            long poolToUse = this.graphicsCommandPool; // Use correct field
+            if (poolToUse == VK_NULL_HANDLE) {
+                throw new IllegalStateException("Command pool not initialized before beginSingleTimeCommands");
+            }
+
             VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
-                .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
-                .commandPool(commandPool) // We'll need to create this later
-                .commandBufferCount(1);
+                    .sType$Default() // <<< --- ADDED sType --- <<<
+                    .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
+                    .commandPool(poolToUse) // Use correct field
+                    .commandBufferCount(1);
 
             PointerBuffer pCommandBuffer = stack.mallocPointer(1);
-            VkMemoryUtil.vkCheck(vkAllocateCommandBuffers(deviceHandle, allocInfo, pCommandBuffer), "Failed to allocate command buffer");
+            VkMemoryUtil.vkCheck(vkAllocateCommandBuffers(deviceHandle, allocInfo, pCommandBuffer),
+                    "Failed to allocate single time command buffer");
 
-            VkCommandBuffer commandBuffer = new VkCommandBuffer(pCommandBuffer.get(0), deviceHandle);
+            VkCommandBuffer commandBuffer = new VkCommandBuffer(pCommandBuffer.get(0), deviceHandle); // Create wrapper
 
-            // Begin command buffer recording
             VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
-                .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+                    .sType$Default()
+                    .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-            vkBeginCommandBuffer(commandBuffer, beginInfo);
+            VkMemoryUtil.vkCheck(vkBeginCommandBuffer(commandBuffer, beginInfo), // Use wrapper
+                    "Failed to begin single time command buffer");
 
             return commandBuffer;
         }
@@ -225,18 +258,26 @@ public class VkDevice implements VkResource {
 
     public void endSingleTimeCommands(VkCommandBuffer commandBuffer) {
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            vkEndCommandBuffer(commandBuffer);
+            long poolToUse = this.graphicsCommandPool; // Use correct field
+            if (poolToUse == VK_NULL_HANDLE) {
+                throw new IllegalStateException("Command pool not initialized before endSingleTimeCommands");
+            }
 
-            // Submit to queue
+            VkMemoryUtil.vkCheck(vkEndCommandBuffer(commandBuffer), // Use wrapper
+                    "Failed to end single time command buffer");
+
             VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
-                .pCommandBuffers(stack.pointers(commandBuffer));
+                    .sType$Default()
+                    // Need PointerBuffer containing the handle for submission
+                    .pCommandBuffers(stack.pointers(commandBuffer.address())); // Get handle address for buffer
 
-            vkQueueSubmit(graphicsQueue, submitInfo, VK_NULL_HANDLE);
-            vkQueueWaitIdle(graphicsQueue);
+            VkMemoryUtil.vkCheck(vkQueueSubmit(graphicsQueue, submitInfo, VK_NULL_HANDLE),
+                    "Failed to submit single time command buffer");
+            VkMemoryUtil.vkCheck(vkQueueWaitIdle(graphicsQueue),
+                    "Queue wait idle failed after single time command");
 
-            // Free the command buffer
-            vkFreeCommandBuffers(deviceHandle, commandPool, commandBuffer);
+            // Free using PointerBuffer containing the handle
+            vkFreeCommandBuffers(deviceHandle, poolToUse, stack.pointers(commandBuffer.address())); // Pass handle in buffer
         }
     }
 

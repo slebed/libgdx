@@ -358,6 +358,7 @@ public class GdxTests {
                 InternationalFontsTest.class,
                 PngTest.class,
                 VulkanSetupTest.class,
+                VulkanQuadTest.class,
                 JsonTest.class,
                 QuadTreeFloatTest.class,
                 QuadTreeFloatNearestTest.class

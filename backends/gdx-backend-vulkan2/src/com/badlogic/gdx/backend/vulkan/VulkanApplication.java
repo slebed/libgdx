@@ -18,6 +18,11 @@ package com.badlogic.gdx.backend.vulkan;
 
 import static org.lwjgl.glfw.GLFW.glfwDestroyWindow;
 import static org.lwjgl.glfw.GLFWVulkan.glfwGetRequiredInstanceExtensions;
+import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
+import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT;
+import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
 import static org.lwjgl.vulkan.VK10.VK_FALSE;
 import static org.lwjgl.vulkan.VK10.VK_NULL_HANDLE;
@@ -49,6 +54,7 @@ import org.lwjgl.system.Callback;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.EXTDebugUtils;
+import org.lwjgl.vulkan.KHRSurface;
 import org.lwjgl.vulkan.VkPhysicalDevice;
 
 import com.badlogic.gdx.Application;
@@ -120,7 +126,7 @@ public class VulkanApplication implements VulkanApplicationBase {
     private long window;
     private VulkanWindow gdxWindow;
     private long debugMessenger;
-    private boolean enableValidationLayers = false;
+    private boolean enableValidationLayers = true;
 
     private static final Set<String> DEVICE_EXTENSIONS = Collections.singleton(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     //private static final Set<String> DEVICE_EXTENSIONS = Set.of(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
@@ -219,7 +225,9 @@ public class VulkanApplication implements VulkanApplicationBase {
 
         // 4. Initialize Gdx Subsystems (Audio, Files, etc.)
         //    (Moved later as they don't depend on Vulkan core)
-        if (!config.disableAudio) { /* ... audio setup ... */ } else {
+        if (!config.disableAudio) {
+            this.audio = createAudio(config);
+        } else {
             this.audio = new MockAudio();
         }
         Gdx.audio = audio;
@@ -227,19 +235,13 @@ public class VulkanApplication implements VulkanApplicationBase {
         this.net = Gdx.net = new VulkanNet(config);
         this.clipboard = new VulkanClipboard();
 
-        // 5. Create VulkanWindow and VulkanGraphics (Graphics init is deferred)
-        //    Pass the handle we created earlier.
-        //VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, config, this);
-        // window.create(windowHandle); // This now creates VulkanGraphics internally
-        //windows.add(window);
-        //this.primaryWindowHandle = windowHandle; // Store if needed
-
-        // Option B (Often Cleaner): Create Graphics here, pass to Window
         VulkanGraphics graphics = new VulkanGraphics(windowHandle, config); // Adjust constructor as needed
         Gdx.graphics = graphics; // <<< --- SET THE STATIC FIELD ---
 
         VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, config, this);//, graphics, input); // Window takes graphics/input
         window.create(windowHandle); // Window might just store handle now
+        window.setVisible(config.initialVisible);
+
         windows.add(window);
         this.currentWindow = window; // Set current window
         this.primaryWindowHandle = windowHandle;
@@ -292,10 +294,15 @@ public class VulkanApplication implements VulkanApplicationBase {
 
     public void loop() {
         Array<VulkanWindow> closedWindows = new Array<>();
+        long frameCount = 0; // Add counter
         while (running && windows.size > 0) {
             // FIXME put it on a separate thread
-            if (audio!=null) {
+            if (audio != null) {
                 audio.update();
+            }
+
+            if (++frameCount % 120 == 0) { // Print every ~2 seconds
+                System.out.println("[VulkanApplication] loop() iteration: " + frameCount);
             }
 
             boolean haveWindowsRendered = false;
@@ -363,6 +370,8 @@ public class VulkanApplication implements VulkanApplicationBase {
                 //sync.sync(targetFramerate); // sleep as needed to meet the target framerate
             }
         }
+
+        System.out.println("[VulkanApplication] loop() finished after " + frameCount + " iterations."); // Log exit
     }
 
     protected void cleanupWindows() {
@@ -379,41 +388,86 @@ public class VulkanApplication implements VulkanApplicationBase {
     }
 
     protected void cleanup() {
-        VulkanCursor.disposeSystemCursors();
-        if (audio!=null){
+        // Use Gdx.app logger if available, otherwise System.out/err for cleanup messages
+        final boolean useGdxLog = (Gdx.app != null && Gdx.app.getApplicationLogger() != null);
+        final String logTag = "VulkanApplication";
+
+        if(useGdxLog) Gdx.app.log(logTag, "Starting cleanup..."); else System.out.println("[" + logTag + "] Starting cleanup...");
+
+        // 1. Cleanup LibGDX windows (this should handle disposing listeners and destroying GLFW windows)
+        // Ensure cleanupWindows() iterates through 'windows' array and calls dispose() on each VulkanWindow
+        cleanupWindows(); // Assuming this method correctly disposes all VulkanWindow instances
+        if(useGdxLog) Gdx.app.log(logTag, "Window cleanup finished."); else System.out.println("[" + logTag + "] Window cleanup finished.");
+
+        // 2. Dispose Audio
+        if (audio != null) {
             audio.dispose();
-        }
-        errorCallback.free();
-        errorCallback = null;
-        if (glDebugCallback != null) {
-            glDebugCallback.free();
-            glDebugCallback = null;
-        }
-        if (window != 0) {
-            glfwDestroyWindow(window);
-        }
-        if (vkDevice != null) {
-            vkDevice.cleanup(); // Should call vkDestroyDevice internally
-        }
-        // Destroy debug messenger BEFORE freeing the callback instance
-        if (debugMessenger != VK_NULL_HANDLE && vulkanInstance != null) {
-            EXTDebugUtils.vkDestroyDebugUtilsMessengerEXT(vulkanInstance.getRawInstance(), debugMessenger, null);
-            if(Gdx.app != null) Gdx.app.log("VulkanApplication", "Debug messenger destroyed.");
-            else System.out.println("VulkanApplication: Debug messenger destroyed.");
-            debugMessenger = VK_NULL_HANDLE; // Avoid double destroy
+            if(useGdxLog) Gdx.app.log(logTag, "Audio disposed."); else System.out.println("[" + logTag + "] Audio disposed.");
+            audio = null; // Nullify after dispose
         }
 
-        // Free the callback instance AFTER it's no longer needed by the messenger
+        // 3. Cleanup Vulkan Device (destroys logical device, command pool)
+        // This should happen AFTER windows using device resources are gone.
+        if (vkDevice != null) {
+            vkDevice.cleanup();
+            if(useGdxLog) Gdx.app.log(logTag, "VkDevice cleanup called."); else System.out.println("[" + logTag + "] VkDevice cleanup called.");
+            vkDevice = null; // Nullify after cleanup
+        }
+
+        // 4. Destroy Debug Messenger (needs VkInstance handle)
+        if (debugMessenger != VK_NULL_HANDLE && vulkanInstance != null) {
+            EXTDebugUtils.vkDestroyDebugUtilsMessengerEXT(vulkanInstance.getRawInstance(), debugMessenger, null);
+            if(useGdxLog) Gdx.app.log(logTag, "Debug messenger destroyed."); else System.out.println("[" + logTag + "] Debug messenger destroyed.");
+        } // Don't nullify debugMessenger handle here yet, need it for check below
+        // Note: If vulkanInstance is null here but messenger isn't VK_NULL_HANDLE, it indicates an issue.
+
+        // 5. Free Debug Callback instance object (if created)
         if (debugCallbackInstance != null) {
-            debugCallbackInstance.free(); // IMPORTANT
+            debugCallbackInstance.free();
+            if(useGdxLog) Gdx.app.log(logTag, "Debug callback freed."); else System.out.println("[" + logTag + "] Debug callback freed.");
             debugCallbackInstance = null;
-            if(Gdx.app != null) Gdx.app.log("VulkanApplication", "Debug callback freed.");
-            else System.out.println("VulkanApplication: Debug callback freed.");
         }
+
+        // 6. *** Destroy Vulkan Surface BEFORE Instance ***
+        if (primarySurface != VK_NULL_HANDLE) {
+            if (vulkanInstance != null) {
+                KHRSurface.vkDestroySurfaceKHR(vulkanInstance.getRawInstance(), primarySurface, null);
+                if(useGdxLog) Gdx.app.log(logTag, "Primary surface destroyed."); else System.out.println("[" + logTag + "] Primary surface destroyed.");
+            } else {
+                // Log error if instance is already gone but surface wasn't destroyed
+                if(useGdxLog) Gdx.app.error(logTag, "Cannot destroy surface - Vulkan instance already null!");
+                else System.err.println("[" + logTag + "] ERROR: Cannot destroy surface - Vulkan instance already null!");
+            }
+            primarySurface = VK_NULL_HANDLE; // Nullify handle
+        }
+
+        // 7. Destroy Vulkan Instance
         if (vulkanInstance != null) {
-            vulkanInstance.cleanup(); // Should call vkDestroyInstance internally
+            vulkanInstance.cleanup(); // This internally calls vkDestroyInstance
+            if(useGdxLog) Gdx.app.log(logTag, "Vulkan instance cleaned up."); else System.out.println("[" + logTag + "] Vulkan instance cleaned up.");
+            vulkanInstance = null;
         }
+
+        // 8. Cleanup GLFW Callbacks
+        if (errorCallback != null) {
+            errorCallback.free();
+            errorCallback = null; // Set static field to null
+            if(useGdxLog) Gdx.app.log(logTag, "GLFW error callback freed."); else System.out.println("[" + logTag + "] GLFW error callback freed.");
+        }
+        if (glDebugCallback != null) { // If you use this anywhere
+            glDebugCallback.free();
+            glDebugCallback = null;
+            if(useGdxLog) Gdx.app.log(logTag, "GL debug callback freed."); else System.out.println("[" + logTag + "] GL debug callback freed.");
+        }
+
+        // 9. Terminate GLFW (AFTER all windows destroyed and surface destroyed)
         GLFW.glfwTerminate();
+        if(useGdxLog) Gdx.app.log(logTag, "GLFW terminated."); else System.out.println("[" + logTag + "] GLFW terminated.");
+
+        // Dispose system cursors if needed (can happen late)
+        VulkanCursor.disposeSystemCursors();
+
+        if(useGdxLog) Gdx.app.log(logTag, "Cleanup finished."); else System.out.println("[" + logTag + "] Cleanup finished.");
     }
 
     public VulkanInstance getVulkanInstance() {
@@ -602,6 +656,7 @@ public class VulkanApplication implements VulkanApplicationBase {
         VulkanApplicationConfiguration appConfig = VulkanApplicationConfiguration.copy(this.config);
         appConfig.setWindowConfiguration(config);
         if (appConfig.title == null) appConfig.title = listener.getClass().getSimpleName();
+        System.out.println("Creating new window with title: " + appConfig.title);
         return createWindow(appConfig, listener, windows.get(0).getWindowHandle());
     }
 
@@ -619,6 +674,7 @@ public class VulkanApplication implements VulkanApplicationBase {
                 }
             });
         }
+        System.out.println("CreateWindow HERE!!!");
         return window;
     }
 
@@ -626,7 +682,7 @@ public class VulkanApplication implements VulkanApplicationBase {
         long windowHandle = createGlfwWindow(config, sharedContext);
         window.create(windowHandle);
         window.setVisible(config.initialVisible);
-
+System.out.println("HERE!!!!!!!!!!");
         if (currentWindow != null) {
             // the call above to createGlfwWindow switches the OpenGL context to the newly created window,
             // ensure that the invariant "currentWindow is the window with the current active OpenGL context" holds
@@ -653,6 +709,9 @@ public class VulkanApplication implements VulkanApplicationBase {
         }
 
         System.out.println("Vulkan-compatible window created. Window handle: " + window);
+
+        GLFW.glfwSetWindowPos(window, 100, 100); // Set position explicitly
+        System.out.println("Window position explicitly set to 100, 100.");
 
         return window;
     }
@@ -770,20 +829,31 @@ public class VulkanApplication implements VulkanApplicationBase {
                     VkDebugUtilsMessengerCallbackDataEXT callbackData = VkDebugUtilsMessengerCallbackDataEXT.create(pCallbackData);
                     // ... your logging logic ...
                     String message = "VULKAN DEBUG: " + callbackData.pMessageString();
-                    if(Gdx.app != null) Gdx.app.error("VulkanDebug", message);
+                    if (Gdx.app != null) Gdx.app.error("VulkanDebug", message);
                     else System.err.println(message);
                     return VK_FALSE;
                 }
             };
-            if(Gdx.app != null) Gdx.app.log("VulkanApplication", "Debug callback instance created.");
+            if (Gdx.app != null)
+                Gdx.app.log("VulkanApplication", "Debug callback instance created.");
             else System.out.println("VulkanApplication: Debug callback instance created.");
         }
 
         VkDebugUtilsMessengerCreateInfoEXT createInfo = VkDebugUtilsMessengerCreateInfoEXT.calloc(stack)
                 .sType$Default()
-                // ... set severities/types ...
-                .pfnUserCallback(this.debugCallbackInstance) // Use the instance field
+                // ---> ADD or CORRECT these lines <---
+                .messageSeverity( // Specify which message severities to receive
+                        //VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | // Optional: very detailed output
+                        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                                VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) // Must be non-zero!
+                .messageType( // Specify which message types to receive
+                        VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                                VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT) // Must be non-zero!
+                // ---------------------------------
+                .pfnUserCallback(this.debugCallbackInstance)
                 .pUserData(0);
+
 
         // ... rest of the method ...
         LongBuffer pDebugMessenger = stack.mallocLong(1);
@@ -791,11 +861,14 @@ public class VulkanApplication implements VulkanApplicationBase {
         // ... handle error or success ...
         if (err == VK_SUCCESS) {
             this.debugMessenger = pDebugMessenger.get(0);
-            if(Gdx.app != null) Gdx.app.log("VulkanApplication", "Vulkan Debug Messenger setup complete.");
+            if (Gdx.app != null)
+                Gdx.app.log("VulkanApplication", "Vulkan Debug Messenger setup complete.");
             else System.out.println("VulkanApplication: Vulkan Debug Messenger setup complete.");
         } else {
-            if(Gdx.app != null) Gdx.app.error("VulkanApplication", "Failed to set up Vulkan debug messenger: error code " + err);
-            else System.err.println("WARNING: Failed to set up Vulkan debug messenger: error code " + err);
+            if (Gdx.app != null)
+                Gdx.app.error("VulkanApplication", "Failed to set up Vulkan debug messenger: error code " + err);
+            else
+                System.err.println("WARNING: Failed to set up Vulkan debug messenger: error code " + err);
             this.debugMessenger = VK_NULL_HANDLE;
         }
     }

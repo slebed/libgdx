@@ -1,12 +1,9 @@
-package com.badlogic.gdx.tests; // Or com.badlogic.gdx.tests.vulkan if you prefer grouping
+package com.badlogic.gdx.tests;
 
-import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.graphics.Color; // If using ScreenUtils
 import com.badlogic.gdx.tests.utils.GdxTest;
-import com.badlogic.gdx.utils.ScreenUtils;
 
-public class VulkanSetupTest extends GdxTest { // Or implement ApplicationListener
+public class VulkanSetupTest extends GdxTest {
 
     @Override
     public void create() {
@@ -22,12 +19,7 @@ public class VulkanSetupTest extends GdxTest { // Or implement ApplicationListen
 
     @Override
     public void render() {
-        // Clear the screen simply to show the window is responsive and rendering loop works.
-        // Replace with your Vulkan clear mechanism if not using Gdx.gl abstraction yet.
-        //ScreenUtils.clear(0.1f, 0.1f, 0.2f, 1f); // Uses Gdx.gl.glClearColor/glClear
 
-        // Maybe add a log message occasionally to confirm render loop runs
-        // Gdx.app.log("VulkanSetupTest", "render() frame");
     }
 
     @Override
@@ -35,5 +27,4 @@ public class VulkanSetupTest extends GdxTest { // Or implement ApplicationListen
         Gdx.app.log("VulkanSetupTest", "dispose() called.");
     }
 
-    // Implement resize(), pause(), resume() if needed, perhaps just with logging.
 }
