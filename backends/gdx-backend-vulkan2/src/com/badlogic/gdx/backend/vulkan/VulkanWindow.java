@@ -16,6 +16,8 @@
 
 package com.badlogic.gdx.backend.vulkan;
 
+import static org.lwjgl.vulkan.VK10.VK_NULL_HANDLE;
+
 import java.nio.IntBuffer;
 
 import com.badlogic.gdx.*;
@@ -483,23 +485,66 @@ public class VulkanWindow implements Disposable {
 
     @Override
     public void dispose() {
-        listener.pause();
-        listener.dispose();
+        final String logTag = "VulkanWindow";
+        final boolean useGdxLog = (Gdx.app != null && Gdx.app.getApplicationLogger() != null); // Check once
+        logInfo(logTag, "Disposing window " + windowHandle, useGdxLog);
+
+        // --- Listener pause/dispose is handled by VulkanApplication ---
+        // listener.pause();  // REMOVE
+        // listener.dispose(); // REMOVE
+
+        // --- Dispose Input Handler (should unregister input callbacks) ---
+        if (input != null) {
+            input.dispose();
+            logInfo(logTag, "Input disposed for window " + windowHandle, useGdxLog);
+        }
+
+        // --- Dispose Cursors for this window ---
         VulkanCursor.dispose(this);
-        //graphics.dispose();
-        input.dispose();
+        logInfo(logTag, "Cursors disposed for window " + windowHandle, useGdxLog);
+
+        // --- Nullify other window-specific GLFW callbacks (belt-and-suspenders) ---
+        // These might be redundant if input.dispose() clears everything, but are safe.
         GLFW.glfwSetWindowFocusCallback(windowHandle, null);
         GLFW.glfwSetWindowIconifyCallback(windowHandle, null);
+        GLFW.glfwSetWindowMaximizeCallback(windowHandle, null);
         GLFW.glfwSetWindowCloseCallback(windowHandle, null);
         GLFW.glfwSetDropCallback(windowHandle, null);
-        GLFW.glfwDestroyWindow(windowHandle);
+        GLFW.glfwSetWindowRefreshCallback(windowHandle, null);
+        // Explicitly nullify input ones IF input.dispose() doesn't guarantee it
+        // GLFW.glfwSetKeyCallback(windowHandle, null);
+        // GLFW.glfwSetCharCallback(windowHandle, null);
+        // GLFW.glfwSetMouseButtonCallback(windowHandle, null);
+        // GLFW.glfwSetCursorPosCallback(windowHandle, null);
+        // GLFW.glfwSetScrollCallback(windowHandle, null);
+        logInfo(logTag, "GLFW callbacks nulled for window " + windowHandle, useGdxLog);
 
-        focusCallback.free();
-        iconifyCallback.free();
-        maximizeCallback.free();
-        closeCallback.free();
-        dropCallback.free();
-        refreshCallback.free();
+        // --- Destroy the GLFW Window Handle ---
+        if (windowHandle != VK_NULL_HANDLE) { // Check against 0L
+            GLFW.glfwDestroyWindow(windowHandle);
+            logInfo(logTag, "GLFW window handle " + windowHandle + " destroyed.", useGdxLog);
+            windowHandle = VK_NULL_HANDLE; // Nullify the handle
+        }
+
+        // --- Free the callback instances ---
+        // Add null checks in case creation failed
+        if(focusCallback != null) focusCallback.free();
+        if(iconifyCallback != null) iconifyCallback.free();
+        if(maximizeCallback != null) maximizeCallback.free();
+        if(closeCallback != null) closeCallback.free();
+        if(dropCallback != null) dropCallback.free();
+        if(refreshCallback != null) refreshCallback.free();
+        logInfo(logTag, "Callback instances freed for window.", useGdxLog);
+
+        // --- Graphics instance is disposed by VulkanApplication ---
+        // //graphics.dispose(); // REMOVE / KEEP COMMENTED
+
+        logInfo(logTag, "dispose() finished for window.", useGdxLog);
+    }
+
+    // Helper method for consistent logging during cleanup
+    private void logInfo(String tag, String message, boolean useGdx) {
+        if(useGdx) Gdx.app.log(tag, message); else System.out.println("[" + tag + "] " + message);
     }
 
     @Override

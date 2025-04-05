@@ -7,13 +7,7 @@ import static org.lwjgl.vulkan.VK10.VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 import static org.lwjgl.vulkan.VK10.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 import static org.lwjgl.vulkan.VK10.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 import static org.lwjgl.vulkan.VK10.VK_NULL_HANDLE;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_SUBMIT_INFO;
 import static org.lwjgl.vulkan.VK10.vkAllocateCommandBuffers;
 import static org.lwjgl.vulkan.VK10.vkBeginCommandBuffer;
 import static org.lwjgl.vulkan.VK10.vkCreateCommandPool;
@@ -33,7 +27,7 @@ import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
 
-public class VkDevice implements VkResource {
+public class VulkanDevice implements VkResource {
 
     private final VkDeviceHandle deviceHandle;
     private final VkQueue graphicsQueue;
@@ -42,7 +36,7 @@ public class VkDevice implements VkResource {
     //private final long commandPool;
     private long graphicsCommandPool = VK_NULL_HANDLE;
 
-    private VkDevice(VkDeviceHandle deviceHandle, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, long graphicsCommandPoolHandle, int queueFamilyIndex) {
+    private VulkanDevice(VkDeviceHandle deviceHandle, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, long graphicsCommandPoolHandle, int queueFamilyIndex) {
         this.deviceHandle = deviceHandle;
         this.graphicsQueue = graphicsQueue;
         this.physicalDevice = physicalDevice;
@@ -63,7 +57,7 @@ public class VkDevice implements VkResource {
             this.graphicsCommandPool = pCommandPool.get(0);
             System.out.println("Graphics Command Pool created: " + this.graphicsCommandPool);
         }*/
-        System.out.println("VkDevice created. Graphics Command Pool Handle: " + this.graphicsCommandPool); // Log stored handle
+        System.out.println("VulkanDevice created. Graphics Command Pool Handle: " + this.graphicsCommandPool); // Log stored handle
     }
 
     public long getHandle() {
@@ -88,7 +82,7 @@ public class VkDevice implements VkResource {
 
     @Override
     public void cleanup() {
-        System.out.println("Cleaning up VkDevice...");
+        System.out.println("Cleaning up VulkanDevice...");
         // Destroy command pool FIRST
         if (graphicsCommandPool != VK_NULL_HANDLE) {
             vkDestroyCommandPool(deviceHandle, graphicsCommandPool, null);
@@ -99,7 +93,7 @@ public class VkDevice implements VkResource {
             vkDestroyDevice(deviceHandle, null);
             System.out.println("Logical Device destroyed.");
         }
-        System.out.println("VkDevice cleanup finished.");
+        System.out.println("VulkanDevice cleanup finished.");
     }
 
     public int getQueueFamilyIndex() {
@@ -120,7 +114,7 @@ public class VkDevice implements VkResource {
             return this;
         }
 
-        public VkDevice build() {
+        public VulkanDevice build() {
             try (MemoryStack stack = stackPush()) {
                 FloatBuffer queuePriorities = stack.floats(1.0f);
 
@@ -145,7 +139,7 @@ public class VkDevice implements VkResource {
                         vkCreateDevice(physicalDevice, createInfo, null, pDevice),
                         "Failed to create logical device"
                 );
-                // Use your inner class or LWJGL's VkDevice directly
+                // Use your inner class or LWJGL's VulkanDevice directly
                 VkDeviceHandle device = new VkDeviceHandle(pDevice.get(0), physicalDevice, createInfo);
 
                 PointerBuffer pQueue = stack.mallocPointer(1);
@@ -167,7 +161,7 @@ public class VkDevice implements VkResource {
                 // -----------------------------------------
 
                 // Pass the created handle to the constructor
-                return new VkDevice(device, graphicsQueue, physicalDevice, commandPoolHandle, this.queueFamilyIndex);
+                return new VulkanDevice(device, graphicsQueue, physicalDevice, commandPoolHandle, this.queueFamilyIndex);
             }
         }
     }

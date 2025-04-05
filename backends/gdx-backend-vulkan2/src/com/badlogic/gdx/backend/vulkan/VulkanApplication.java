@@ -16,7 +16,6 @@ package com.badlogic.gdx.backend.vulkan;
  * limitations under the License.
  ******************************************************************************/
 
-import static org.lwjgl.glfw.GLFW.glfwDestroyWindow;
 import static org.lwjgl.glfw.GLFWVulkan.glfwGetRequiredInstanceExtensions;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
@@ -76,7 +75,7 @@ import com.badlogic.gdx.utils.SharedLibraryLoader;
 
 import org.lwjgl.vulkan.VkLayerProperties;
 
-import java.util.Set; // For efficient checking
+import java.util.Set;
 import java.util.HashSet;
 import java.util.Collections;
 
@@ -118,7 +117,7 @@ public class VulkanApplication implements VulkanApplicationBase {
     private static Callback glDebugCallback;
 
     private VkPhysicalDevice physicalDevice; // You'll need logic to select this
-    private VkDevice vkDevice;
+    private VulkanDevice vulkanDevice;
     // Maybe a map for surfaces if supporting multiple windows: Map<Long, Long> windowSurfaces = new HashMap<>();
     private long primarySurface = VK_NULL_HANDLE; // For the first window
     private final VulkanClipboard clipboard;
@@ -180,9 +179,9 @@ public class VulkanApplication implements VulkanApplicationBase {
             this.physicalDevice = selectPhysicalDevice(stack); // Implement this selection logic
             System.out.println("Physical Device selected.");
 
-            // --- Create Logical Device (VkDevice wrapper) ---
+            // --- Create Logical Device (VulkanDevice wrapper) ---
             QueueFamilyIndices indices = findQueueFamilies(physicalDevice, stack); // Implement this
-            this.vkDevice = new VkDevice.Builder()
+            this.vulkanDevice = new VulkanDevice.Builder()
                     .setPhysicalDevice(physicalDevice)
                     .setQueueFamilyIndex(indices.graphicsFamily) // Assuming graphics==present for now
                     // Add required device extensions (like swapchain) to builder if not hardcoded
@@ -388,94 +387,143 @@ public class VulkanApplication implements VulkanApplicationBase {
     }
 
     protected void cleanup() {
-        // Use Gdx.app logger if available, otherwise System.out/err for cleanup messages
-        final boolean useGdxLog = (Gdx.app != null && Gdx.app.getApplicationLogger() != null);
         final String logTag = "VulkanApplication";
+        // Use System.out/err during cleanup as Gdx.app might become null unexpectedly
+        System.out.println("[" + logTag + "] Starting cleanup...");
 
-        if(useGdxLog) Gdx.app.log(logTag, "Starting cleanup..."); else System.out.println("[" + logTag + "] Starting cleanup...");
+        // 1. Dispose Listener FIRST (Prevents listener code running during shutdown)
+        if (currentWindow != null && currentWindow.getListener() != null) {
+            try {
+                currentWindow.getListener().pause();
+                currentWindow.getListener().dispose();
+                System.out.println("[" + logTag + "] ApplicationListener disposed.");
+            } catch (Throwable t) {
+                System.err.println("[" + logTag + "] ERROR: Exception during listener dispose.");
+                t.printStackTrace();
+            }
+        }
 
-        // 1. Cleanup LibGDX windows (this should handle disposing listeners and destroying GLFW windows)
-        // Ensure cleanupWindows() iterates through 'windows' array and calls dispose() on each VulkanWindow
-        cleanupWindows(); // Assuming this method correctly disposes all VulkanWindow instances
-        if(useGdxLog) Gdx.app.log(logTag, "Window cleanup finished."); else System.out.println("[" + logTag + "] Window cleanup finished.");
+        // 2. Dispose All Windows (Calls VulkanWindow.dispose())
+        // IMPORTANT: Ensure VulkanWindow.dispose() ONLY cleans up window-specific things like
+        //            input callbacks (via input.dispose()) and the GLFW window handle (glfwDestroyWindow).
+        //            It should *NOT* dispose the shared Gdx.graphics instance.
+        cleanupWindows(); // Calls dispose() on each VulkanWindow
+        System.out.println("[" + logTag + "] Window cleanup finished.");
 
-        // 2. Dispose Audio
+        // 3. Dispose Graphics Resources EXPLICITLY and wait for GPU idle
+        // Access the single graphics instance via Gdx static.
+        if (Gdx.graphics instanceof VulkanGraphics) {
+            System.out.println("[" + logTag + "] Disposing VulkanGraphics...");
+            try {
+                // VulkanGraphics.dispose() MUST call cleanupVulkan(),
+                // which MUST call vkDeviceWaitIdle() FIRST, then destroy
+                // pipeline, layout, shaders, buffers, memory, swapchain resources, sync objects.
+                ((VulkanGraphics)Gdx.graphics).dispose();
+                System.out.println("[" + logTag + "] VulkanGraphics disposed.");
+            } catch (Throwable t) {
+                System.err.println("[" + logTag + "] ERROR: Exception during graphics dispose.");
+                t.printStackTrace();
+            }
+        } else if (Gdx.graphics != null) {
+            System.err.println("[" + logTag + "] WARNING: Gdx.graphics was not VulkanGraphics?");
+        }
+
+        // 4. Dispose Audio (Can happen after graphics)
         if (audio != null) {
             audio.dispose();
-            if(useGdxLog) Gdx.app.log(logTag, "Audio disposed."); else System.out.println("[" + logTag + "] Audio disposed.");
-            audio = null; // Nullify after dispose
+            System.out.println("[" + logTag + "] Audio disposed.");
+            audio = null;
         }
 
-        // 3. Cleanup Vulkan Device (destroys logical device, command pool)
-        // This should happen AFTER windows using device resources are gone.
-        if (vkDevice != null) {
-            vkDevice.cleanup();
-            if(useGdxLog) Gdx.app.log(logTag, "VkDevice cleanup called."); else System.out.println("[" + logTag + "] VkDevice cleanup called.");
-            vkDevice = null; // Nullify after cleanup
+        // 5. Cleanup Vulkan Logical Device (AFTER graphics resources are destroyed and GPU is idle)
+        // VulkanDevice.cleanup() should destroy command pool THEN logical device.
+        if (vulkanDevice != null) {
+            System.out.println("[" + logTag + "] Cleaning up VulkanDevice...");
+            vulkanDevice.cleanup();
+            System.out.println("[" + logTag + "] VulkanDevice cleanup finished.");
+            vulkanDevice = null;
         }
 
-        // 4. Destroy Debug Messenger (needs VkInstance handle)
+        // 6. Destroy Debug Messenger (Requires Instance handle)
         if (debugMessenger != VK_NULL_HANDLE && vulkanInstance != null) {
             EXTDebugUtils.vkDestroyDebugUtilsMessengerEXT(vulkanInstance.getRawInstance(), debugMessenger, null);
-            if(useGdxLog) Gdx.app.log(logTag, "Debug messenger destroyed."); else System.out.println("[" + logTag + "] Debug messenger destroyed.");
-        } // Don't nullify debugMessenger handle here yet, need it for check below
-        // Note: If vulkanInstance is null here but messenger isn't VK_NULL_HANDLE, it indicates an issue.
+            System.out.println("[" + logTag + "] Debug messenger destroyed.");
+            debugMessenger = VK_NULL_HANDLE;
+        } else if (debugMessenger != VK_NULL_HANDLE) {
+            System.err.println("[" + logTag + "] ERROR: Cannot destroy debug messenger, Vulkan instance is null!");
+        }
 
-        // 5. Free Debug Callback instance object (if created)
+        // 7. Free Debug Callback instance object
         if (debugCallbackInstance != null) {
             debugCallbackInstance.free();
-            if(useGdxLog) Gdx.app.log(logTag, "Debug callback freed."); else System.out.println("[" + logTag + "] Debug callback freed.");
+            System.out.println("[" + logTag + "] Debug callback freed.");
             debugCallbackInstance = null;
         }
 
-        // 6. *** Destroy Vulkan Surface BEFORE Instance ***
-        if (primarySurface != VK_NULL_HANDLE) {
-            if (vulkanInstance != null) {
-                KHRSurface.vkDestroySurfaceKHR(vulkanInstance.getRawInstance(), primarySurface, null);
-                if(useGdxLog) Gdx.app.log(logTag, "Primary surface destroyed."); else System.out.println("[" + logTag + "] Primary surface destroyed.");
-            } else {
-                // Log error if instance is already gone but surface wasn't destroyed
-                if(useGdxLog) Gdx.app.error(logTag, "Cannot destroy surface - Vulkan instance already null!");
-                else System.err.println("[" + logTag + "] ERROR: Cannot destroy surface - Vulkan instance already null!");
-            }
-            primarySurface = VK_NULL_HANDLE; // Nullify handle
+        // 8. Destroy Vulkan Surface (Requires Instance handle)
+        if (primarySurface != VK_NULL_HANDLE && vulkanInstance != null) {
+            KHRSurface.vkDestroySurfaceKHR(vulkanInstance.getRawInstance(), primarySurface, null);
+            System.out.println("[" + logTag + "] Primary surface destroyed.");
+            primarySurface = VK_NULL_HANDLE;
+        } else if (primarySurface != VK_NULL_HANDLE) {
+            System.err.println("[" + logTag + "] ERROR: Cannot destroy surface - Vulkan instance already null!");
         }
 
-        // 7. Destroy Vulkan Instance
+        // 9. Destroy Vulkan Instance
         if (vulkanInstance != null) {
-            vulkanInstance.cleanup(); // This internally calls vkDestroyInstance
-            if(useGdxLog) Gdx.app.log(logTag, "Vulkan instance cleaned up."); else System.out.println("[" + logTag + "] Vulkan instance cleaned up.");
+            vulkanInstance.cleanup(); // Calls vkDestroyInstance
+            System.out.println("[" + logTag + "] Vulkan instance cleaned up.");
             vulkanInstance = null;
         }
 
-        // 8. Cleanup GLFW Callbacks
+        // 10. Cleanup GLFW Callbacks
+        // Static error callback needs null check before free if load fails early
         if (errorCallback != null) {
             errorCallback.free();
             errorCallback = null; // Set static field to null
-            if(useGdxLog) Gdx.app.log(logTag, "GLFW error callback freed."); else System.out.println("[" + logTag + "] GLFW error callback freed.");
+            System.out.println("[" + logTag + "] GLFW error callback freed.");
         }
-        if (glDebugCallback != null) { // If you use this anywhere
-            glDebugCallback.free();
-            glDebugCallback = null;
-            if(useGdxLog) Gdx.app.log(logTag, "GL debug callback freed."); else System.out.println("[" + logTag + "] GL debug callback freed.");
-        }
+        if (glDebugCallback != null) { /* ... free ... */ }
 
-        // 9. Terminate GLFW (AFTER all windows destroyed and surface destroyed)
+        // 11. Terminate GLFW (Must be AFTER windows/surfaces are destroyed)
         GLFW.glfwTerminate();
-        if(useGdxLog) Gdx.app.log(logTag, "GLFW terminated."); else System.out.println("[" + logTag + "] GLFW terminated.");
+        System.out.println("[" + logTag + "] GLFW terminated.");
 
-        // Dispose system cursors if needed (can happen late)
+        // 12. Dispose system cursors
         VulkanCursor.disposeSystemCursors();
 
-        if(useGdxLog) Gdx.app.log(logTag, "Cleanup finished."); else System.out.println("[" + logTag + "] Cleanup finished.");
+        // Log finished BEFORE nullifying statics
+        System.out.println("[" + logTag + "] Cleanup finished.");
+
+        // 13. Nullify Gdx statics LAST to prevent NPEs during cleanup logging/calls
+        Gdx.app = null;
+        Gdx.graphics = null;
+        Gdx.input = null;
+        Gdx.audio = null;
+        Gdx.files = null;
+        Gdx.net = null;
+    }
+
+    // Helper logging methods (if not already present)
+    private void logInfo(String tag, String message) {
+        if (Gdx.app != null && Gdx.app.getApplicationLogger() != null) Gdx.app.log(tag, message);
+        else System.out.println("[" + tag + "] " + message);
+    }
+    private void logError(String tag, String message) {
+        if (Gdx.app != null && Gdx.app.getApplicationLogger() != null) Gdx.app.error(tag, message);
+        else System.err.println("[" + tag + "] ERROR: " + message);
+    }
+    private void logError(String tag, String message, Throwable t) {
+        if (Gdx.app != null && Gdx.app.getApplicationLogger() != null) Gdx.app.error(tag, message, t);
+        else { System.err.println("[" + tag + "] ERROR: " + message); t.printStackTrace(); }
     }
 
     public VulkanInstance getVulkanInstance() {
         return vulkanInstance;
     }
 
-    public VkDevice getVkDevice() {
-        return vkDevice;
+    public VulkanDevice getVkDevice() {
+        return vulkanDevice;
     }
 
     // Surface getter needs to know which window's surface is needed

@@ -46,7 +46,7 @@ public class VkMemoryUtil {
 	 *
 	 * @param handle The Vulkan handle to destroy.
 	 * @param device The Vulkan device associated with the object. */
-	// public static void safeDestroy(long handle, org.lwjgl.vulkan.VkDevice device) {
+	// public static void safeDestroy(long handle, org.lwjgl.vulkan.VulkanDevice device) {
 	// if (handle != VK_NULL_HANDLE) {
 	// vkDestroyDevice(device, null);
 	// }

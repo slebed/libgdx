@@ -22,103 +22,7 @@ import static org.lwjgl.vulkan.KHRSurface.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 import static org.lwjgl.vulkan.KHRSurface.VK_PRESENT_MODE_FIFO_KHR;
 import static org.lwjgl.vulkan.KHRSurface.VK_PRESENT_MODE_IMMEDIATE_KHR;
 import static org.lwjgl.vulkan.KHRSurface.VK_PRESENT_MODE_MAILBOX_KHR;
-import static org.lwjgl.vulkan.VK10.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-import static org.lwjgl.vulkan.VK10.VK_ATTACHMENT_LOAD_OP_CLEAR;
-import static org.lwjgl.vulkan.VK10.VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-import static org.lwjgl.vulkan.VK10.VK_ATTACHMENT_STORE_OP_DONT_CARE;
-import static org.lwjgl.vulkan.VK10.VK_ATTACHMENT_STORE_OP_STORE;
-import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_A_BIT;
-import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_B_BIT;
-import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_G_BIT;
-import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_R_BIT;
-import static org.lwjgl.vulkan.VK10.VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-import static org.lwjgl.vulkan.VK10.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-import static org.lwjgl.vulkan.VK10.VK_COMPARE_OP_LESS_OR_EQUAL;
-import static org.lwjgl.vulkan.VK10.VK_COMPONENT_SWIZZLE_IDENTITY;
-import static org.lwjgl.vulkan.VK10.VK_CULL_MODE_NONE;
-import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_SCISSOR;
-import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_VIEWPORT;
-import static org.lwjgl.vulkan.VK10.VK_FENCE_CREATE_SIGNALED_BIT;
-import static org.lwjgl.vulkan.VK10.VK_FORMAT_B8G8R8A8_SRGB;
-import static org.lwjgl.vulkan.VK10.VK_FORMAT_R32G32B32_SFLOAT;
-import static org.lwjgl.vulkan.VK10.VK_FORMAT_R32G32_SFLOAT;
-import static org.lwjgl.vulkan.VK10.VK_FRONT_FACE_CLOCKWISE;
-import static org.lwjgl.vulkan.VK10.VK_IMAGE_ASPECT_COLOR_BIT;
-import static org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-import static org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_UNDEFINED;
-import static org.lwjgl.vulkan.VK10.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-import static org.lwjgl.vulkan.VK10.VK_IMAGE_VIEW_TYPE_2D;
-import static org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT16;
-import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-import static org.lwjgl.vulkan.VK10.VK_NULL_HANDLE;
-import static org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_GRAPHICS;
-import static org.lwjgl.vulkan.VK10.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-import static org.lwjgl.vulkan.VK10.VK_POLYGON_MODE_FILL;
-import static org.lwjgl.vulkan.VK10.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-import static org.lwjgl.vulkan.VK10.VK_SAMPLE_COUNT_1_BIT;
-import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT;
-import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT;
-import static org.lwjgl.vulkan.VK10.VK_SHARING_MODE_EXCLUSIVE;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_SUBMIT_INFO;
-import static org.lwjgl.vulkan.VK10.VK_SUBPASS_CONTENTS_INLINE;
-import static org.lwjgl.vulkan.VK10.VK_SUBPASS_EXTERNAL;
-import static org.lwjgl.vulkan.VK10.VK_SUCCESS;
-import static org.lwjgl.vulkan.VK10.VK_VERTEX_INPUT_RATE_VERTEX;
-import static org.lwjgl.vulkan.VK10.vkAllocateCommandBuffers;
-import static org.lwjgl.vulkan.VK10.vkAllocateMemory;
-import static org.lwjgl.vulkan.VK10.vkBeginCommandBuffer;
-import static org.lwjgl.vulkan.VK10.vkBindBufferMemory;
-import static org.lwjgl.vulkan.VK10.vkCmdBeginRenderPass;
-import static org.lwjgl.vulkan.VK10.vkCmdBindIndexBuffer;
-import static org.lwjgl.vulkan.VK10.vkCmdBindPipeline;
-import static org.lwjgl.vulkan.VK10.vkCmdBindVertexBuffers;
-import static org.lwjgl.vulkan.VK10.vkCmdCopyBuffer;
-import static org.lwjgl.vulkan.VK10.vkCmdDrawIndexed;
-import static org.lwjgl.vulkan.VK10.vkCmdEndRenderPass;
-import static org.lwjgl.vulkan.VK10.vkCmdSetScissor;
-import static org.lwjgl.vulkan.VK10.vkCmdSetViewport;
-import static org.lwjgl.vulkan.VK10.vkCreateBuffer;
-import static org.lwjgl.vulkan.VK10.vkCreateFence;
-import static org.lwjgl.vulkan.VK10.vkCreateFramebuffer;
-import static org.lwjgl.vulkan.VK10.vkCreateGraphicsPipelines;
-import static org.lwjgl.vulkan.VK10.vkCreateImageView;
-import static org.lwjgl.vulkan.VK10.vkCreatePipelineLayout;
-import static org.lwjgl.vulkan.VK10.vkCreateRenderPass;
-import static org.lwjgl.vulkan.VK10.vkCreateSemaphore;
-import static org.lwjgl.vulkan.VK10.vkCreateShaderModule;
-import static org.lwjgl.vulkan.VK10.vkDestroyBuffer;
-import static org.lwjgl.vulkan.VK10.vkDestroyPipeline;
-import static org.lwjgl.vulkan.VK10.vkDestroyPipelineLayout;
-import static org.lwjgl.vulkan.VK10.vkDestroyShaderModule;
-import static org.lwjgl.vulkan.VK10.vkDeviceWaitIdle;
-import static org.lwjgl.vulkan.VK10.vkEndCommandBuffer;
-import static org.lwjgl.vulkan.VK10.vkFreeCommandBuffers;
-import static org.lwjgl.vulkan.VK10.vkFreeMemory;
-import static org.lwjgl.vulkan.VK10.vkGetBufferMemoryRequirements;
-import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceMemoryProperties;
-import static org.lwjgl.vulkan.VK10.vkMapMemory;
-import static org.lwjgl.vulkan.VK10.vkQueueSubmit;
-import static org.lwjgl.vulkan.VK10.vkQueueWaitIdle;
-import static org.lwjgl.vulkan.VK10.vkResetCommandBuffer;
-import static org.lwjgl.vulkan.VK10.vkResetFences;
-import static org.lwjgl.vulkan.VK10.vkUnmapMemory;
-import static org.lwjgl.vulkan.VK10.vkWaitForFences;
+import static org.lwjgl.vulkan.VK10.*;
 
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
@@ -127,7 +31,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.badlogic.gdx.AbstractGraphics;
-import com.badlogic.gdx.Application;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
@@ -150,7 +53,6 @@ import com.badlogic.gdx.graphics.glutils.HdpiMode;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.utils.Disposable;
 
-import org.lwjgl.system.Configuration;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.KHRSurface;
@@ -159,14 +61,23 @@ import org.lwjgl.vulkan.VkAttachmentDescription;
 import org.lwjgl.vulkan.VkAttachmentReference;
 import org.lwjgl.vulkan.VkBufferCopy;
 import org.lwjgl.vulkan.VkBufferCreateInfo;
+import org.lwjgl.vulkan.VkBufferImageCopy;
 import org.lwjgl.vulkan.VkClearValue;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkCommandBufferAllocateInfo;
 import org.lwjgl.vulkan.VkCommandBufferBeginInfo;
+import org.lwjgl.vulkan.VkDescriptorImageInfo;
+import org.lwjgl.vulkan.VkDescriptorPoolCreateInfo;
+import org.lwjgl.vulkan.VkDescriptorPoolSize;
+import org.lwjgl.vulkan.VkDescriptorSetAllocateInfo;
+import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
+import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
 import org.lwjgl.vulkan.VkExtent2D;
 import org.lwjgl.vulkan.VkFenceCreateInfo;
 import org.lwjgl.vulkan.VkFramebufferCreateInfo;
 import org.lwjgl.vulkan.VkGraphicsPipelineCreateInfo;
+import org.lwjgl.vulkan.VkImageCreateInfo;
+import org.lwjgl.vulkan.VkImageMemoryBarrier;
 import org.lwjgl.vulkan.VkImageViewCreateInfo;
 import org.lwjgl.vulkan.VkMemoryAllocateInfo;
 import org.lwjgl.vulkan.VkMemoryRequirements;
@@ -188,6 +99,7 @@ import org.lwjgl.vulkan.VkQueue;
 import org.lwjgl.vulkan.VkRect2D;
 import org.lwjgl.vulkan.VkRenderPassBeginInfo;
 import org.lwjgl.vulkan.VkRenderPassCreateInfo;
+import org.lwjgl.vulkan.VkSamplerCreateInfo;
 import org.lwjgl.vulkan.VkSemaphoreCreateInfo;
 import org.lwjgl.vulkan.VkShaderModuleCreateInfo;
 import org.lwjgl.vulkan.VkSubmitInfo;
@@ -199,6 +111,7 @@ import org.lwjgl.vulkan.VkSwapchainCreateInfoKHR;
 import org.lwjgl.vulkan.VkVertexInputAttributeDescription;
 import org.lwjgl.vulkan.VkVertexInputBindingDescription;
 import org.lwjgl.vulkan.VkViewport;
+import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 public class VulkanGraphics extends AbstractGraphics implements Disposable {
     private final VulkanApplicationConfiguration config;
@@ -222,11 +135,11 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     // Assuming access to VulkanApplication components
     private VulkanApplication app = (VulkanApplication) Gdx.app; // Or get via constructor arg
     private VulkanInstance vkInstance = app.getVulkanInstance(); // Need getter in VulkanApplication
-    private VkDevice vkDevice = app.getVkDevice();           // Need getter in VulkanApplication
+    private VulkanDevice vulkanDevice = app.getVkDevice();           // Need getter in VulkanApplication
     private long surface;     // Need getter in VulkanApplication
-    private VkPhysicalDevice physicalDevice = vkDevice.getPhysicalDevice(); // Get from VkDevice wrapper
-    private org.lwjgl.vulkan.VkDevice rawDevice = vkDevice.getRawDevice(); // Get raw device from VkDevice wrapper
-    private VkQueue graphicsQueue = vkDevice.getGraphicsQueue();       // Get from VkDevice wrapper
+    private VkPhysicalDevice physicalDevice = vulkanDevice.getPhysicalDevice(); // Get from VulkanDevice wrapper
+    private org.lwjgl.vulkan.VkDevice rawDevice = vulkanDevice.getRawDevice(); // Get raw device from VulkanDevice wrapper
+    private VkQueue graphicsQueue = vulkanDevice.getGraphicsQueue();       // Get from VulkanDevice wrapper
     private VkQueue presentQueue = graphicsQueue; // Assume graphics and present are the same for simplicity
     private GLVersion glVersion;
     private volatile int backBufferWidth;
@@ -252,14 +165,26 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     IntBuffer tmpBuffer = BufferUtils.createIntBuffer(1);
     IntBuffer tmpBuffer2 = BufferUtils.createIntBuffer(1);
 
+    private long textureImage = VK_NULL_HANDLE;
+    private long textureImageMemory = VK_NULL_HANDLE;
+    private int textureImageFormat = VK_FORMAT_R8G8B8A8_SRGB;
+    private long textureImageView = VK_NULL_HANDLE; // <<< ADD THIS
+    private long textureSampler = VK_NULL_HANDLE;   // <<< ADD THIS
+    private long descriptorSetLayout = VK_NULL_HANDLE; // <<< ADD THIS
+    private long descriptorPool = VK_NULL_HANDLE;      // <<< ADD THIS
+    private long descriptorSet = VK_NULL_HANDLE;
+
     private final float[] quadVertices = {
-            // Position      // Color
-            -0.5f, -0.5f,    1.0f, 0.0f, 0.0f, // 0: Bottom Left (Red)
-            0.5f, -0.5f,    0.0f, 1.0f, 0.0f, // 1: Bottom Right (Green)
-            0.5f,  0.5f,    0.0f, 0.0f, 1.0f, // 2: Top Right (Blue)
-            -0.5f,  0.5f,    1.0f, 1.0f, 1.0f  // 3: Top Left (White)
+            // Position      // Color          // TexCoord (UV)
+            -0.5f, -0.5f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+            0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f,
+            0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f,
+            -0.5f, 0.5f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f
+            // Note: Vulkan's default screen coord Y is often down, while texture V coord is often up.
+            // You might need to flip V coordinates (0,0 top-left -> 1,1 bottom-right) depending on your image loading and coordinate system.
+            // This example assumes V=0 is top, V=1 is bottom of texture. Adjust if needed!
     };
-    private final short[] quadIndices = { 0, 1, 2, 2, 3, 0 };
+    private final short[] quadIndices = {0, 1, 2, 2, 3, 0};
 
     // Handles for the final GPU buffers & memory
     private long vertexBuffer = VK_NULL_HANDLE;
@@ -304,15 +229,15 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         // Now it's safe to get these, assuming VulkanApplication initialized them
         this.app = (VulkanApplication) Gdx.app; // Or get app reference passed differently
         this.vkInstance = app.getVulkanInstance();
-        this.vkDevice = app.getVkDevice();
+        this.vulkanDevice = app.getVkDevice();
         this.surface = app.getSurface(this.windowHandle); // Surface is per-window! Need a way to get the right one.
-        this.physicalDevice = vkDevice.getPhysicalDevice();
-        this.rawDevice = vkDevice.getRawDevice();
-        this.graphicsQueue = vkDevice.getGraphicsQueue();
+        this.physicalDevice = vulkanDevice.getPhysicalDevice();
+        this.rawDevice = vulkanDevice.getRawDevice();
+        this.graphicsQueue = vulkanDevice.getGraphicsQueue();
         this.presentQueue = graphicsQueue; // Assuming same queue
 
-        if (this.vkDevice == null || this.surface == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Cannot initialize VulkanGraphics resources before VkDevice and Surface are created.");
+        if (this.vulkanDevice == null || this.surface == VK_NULL_HANDLE) {
+            throw new GdxRuntimeException("Cannot initialize VulkanGraphics resources before VulkanDevice and Surface are created.");
         }
 
         System.out.println("VulkanGraphics: Initializing swapchain and resources...");
@@ -325,6 +250,20 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             System.out.println("RenderPass created.");
             createShaderModules();
             System.out.println("Shader modules created.");
+            createTextureImage();
+            System.out.println("Texture image created.");
+            createTextureImageView(); // <<< ADD CALL
+            System.out.println("Texture image view created.");
+            createTextureSampler();   // <<< ADD CALL
+            System.out.println("Texture sampler created.");
+            createDescriptorSetLayout(); // Create layout definition
+            System.out.println("Descriptor set layout created.");
+            createDescriptorPool();      // Create pool
+            System.out.println("Descriptor pool created.");
+            createDescriptorSet();       // Allocate set from pool using layout
+            System.out.println("Descriptor set created.");
+            updateDescriptorSet();
+            System.out.println("Descriptor set updated.");
             createGraphicsPipeline();
             System.out.println("Graphics pipeline created.");
             createFramebuffers(stack);
@@ -393,7 +332,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
                 .imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT); // Add other usages if needed (e.g., transfer_dst)
 
         // Check queue families (assuming graphics and present are the same for simplicity)
-        int queueFamilyIndex = vkDevice.getQueueFamilyIndex(); // Need getter in VkDevice
+        int queueFamilyIndex = vulkanDevice.getQueueFamilyIndex(); // Need getter in VulkanDevice
         createInfo.imageSharingMode(VK_SHARING_MODE_EXCLUSIVE) // Or CONCURRENT if needed
                 .pQueueFamilyIndices(null); // Ignored for EXCLUSIVE
 
@@ -583,7 +522,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         commandBuffers = new ArrayList<>(swapchainFramebuffers.size());
         VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack)
                 .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
-                .commandPool(vkDevice.getCommandPool()) // Use pool from VkDevice
+                .commandPool(vulkanDevice.getCommandPool()) // Use pool from VulkanDevice
                 .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
                 .commandBufferCount(swapchainFramebuffers.size()); // Allocate one per framebuffer
 
@@ -622,72 +561,161 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     // --- Need cleanupVulkan() method for dispose() and error handling ---
     private void cleanupVulkan() {
-        if (rawDevice != null) {
-            vkDeviceWaitIdle(rawDevice);
-        } else {
-            return; // Nothing to clean if device is gone
+        final String logTag = "VulkanGraphics";
+        // Use Gdx.app logger if available, otherwise System.out/err
+        final boolean useGdxLog = (Gdx.app != null && Gdx.app.getApplicationLogger() != null);
+
+        // Check if already cleaned or device is invalid
+        if (rawDevice == null) {
+            System.out.println("[" + logTag + "] Already cleaned or device object is null.");
+            return;
         }
 
+        // 1. Wait for GPU to finish all operations using these resources
+        logInfo(logTag, "Waiting for device idle before graphics cleanup...", useGdxLog);
+        vkDeviceWaitIdle(rawDevice); // MUST BE FIRST!
+        logInfo(logTag, "Device idle. Proceeding with graphics cleanup...", useGdxLog);
+
+        // 2. Destroy Pipeline and related objects
+        cleanupPipelineLayout();      // Destroys Pipeline and Pipeline Layout
+        cleanupShaderModules();       // Destroys Shader Modules
+
+        // 3. Destroy Descriptor Pool and Layout (Sets are implicitly freed with Pool)
+        cleanupDescriptorPool();      // <<<--- ADDED (Calls vkDestroyDescriptorPool)
+        cleanupDescriptorSetLayout(); // <<<--- ADDED (Calls vkDestroyDescriptorSetLayout)
+
+        // 4. Destroy Texture Resources
+        cleanupTextureSampler();      // Destroys Sampler
+        cleanupTextureImageView();    // Destroys ImageView
+        cleanupTextureImage();        // Destroys Image and Frees Memory (Remove duplicate call below)
+
+        // 5. Destroy Geometry Buffers
+        cleanupGeometryBuffers();     // Destroys Buffers and Frees Memory
+
+        // 6. Destroy Swapchain Resources (Helper should handle all these)
+        cleanupSwapChainRelatedResources(); // Destroys Framebuffers, RenderPass, ImageViews, Swapchain
+
+        // 7. Destroy Synchronization Objects
+        cleanupSyncObjects();         // Destroys Semaphores, Fences
+
+        // --- Ensure Redundant Cleanup is Removed ---
+        // These are likely handled by cleanupSwapChainRelatedResources now:
+        // if (swapchainFramebuffers != null) { ... }
+        // VkMemoryUtil.safeDestroyRenderPass(renderPass, rawDevice);
+        // if (swapchainImageViews != null) { ... }
+        // VkMemoryUtil.safeDestroySwapchain(swapchain, rawDevice);
+        // And the second cleanupTextureImage() call
+        // ---------------------------------------------
+
+        // Command Pool is destroyed later by VulkanDevice.cleanup()
+
+        // Nullify handles (Helpers should ideally do this too, but can be done here)
+        graphicsPipeline = VK_NULL_HANDLE;
+        pipelineLayout = VK_NULL_HANDLE;
+        vertShaderModule = VK_NULL_HANDLE;
+        fragShaderModule = VK_NULL_HANDLE;
+        descriptorPool = VK_NULL_HANDLE;
+        descriptorSetLayout = VK_NULL_HANDLE;
+        descriptorSet = VK_NULL_HANDLE; // Set becomes invalid when pool destroyed
+        textureSampler = VK_NULL_HANDLE;
+        textureImageView = VK_NULL_HANDLE;
+        textureImage = VK_NULL_HANDLE;
+        textureImageMemory = VK_NULL_HANDLE;
+        vertexBuffer = VK_NULL_HANDLE;
+        vertexBufferMemory = VK_NULL_HANDLE;
+        indexBuffer = VK_NULL_HANDLE;
+        indexBufferMemory = VK_NULL_HANDLE;
+        renderPass = VK_NULL_HANDLE; // Should be nulled in cleanupSwapChainRelatedResources
+        swapchain = VK_NULL_HANDLE;  // Should be nulled in cleanupSwapChainRelatedResources
+        imageAvailableSemaphore = VK_NULL_HANDLE;
+        renderFinishedSemaphore = VK_NULL_HANDLE;
+        inFlightFence = VK_NULL_HANDLE;
+        // etc. for lists like swapchainImageViews, swapchainFramebuffers if not nulled in helpers
+
+        rawDevice = null; // Mark this instance as cleaned
+        logInfo(logTag, "VulkanGraphics cleanup finished.", useGdxLog);
+    }
+
+    private void logInfo(String tag, String message, boolean useGdx) {
+        if (useGdx) Gdx.app.log(tag, message);
+        else System.out.println("[" + tag + "] " + message);
+    }
+
+    private void cleanupSyncObjects() {
+        final String logTag = "VulkanGraphics";
+        final boolean useGdxLog = (Gdx.app != null && Gdx.app.getApplicationLogger() != null);
+        logInfo(logTag, "Cleaning up sync objects...", useGdxLog);
+
+        // Check if device exists before proceeding
+        if (rawDevice == null) {
+            logInfo(logTag, "Device already null in cleanupSyncObjects.", useGdxLog);
+            // Ensure handles are null anyway
+            imageAvailableSemaphore = VK_NULL_HANDLE;
+            renderFinishedSemaphore = VK_NULL_HANDLE;
+            inFlightFence = VK_NULL_HANDLE;
+            return;
+        }
+
+        // Using safeDestroy avoids explicit null checks for handles
+        VkMemoryUtil.safeDestroySemaphore(imageAvailableSemaphore, rawDevice);
+        imageAvailableSemaphore = VK_NULL_HANDLE;
+
+        VkMemoryUtil.safeDestroySemaphore(renderFinishedSemaphore, rawDevice);
+        renderFinishedSemaphore = VK_NULL_HANDLE;
+
+        VkMemoryUtil.safeDestroyFence(inFlightFence, rawDevice);
+        inFlightFence = VK_NULL_HANDLE;
+
+        logInfo(logTag, "Sync objects destroyed.", useGdxLog);
+    }
+
+    /**
+     * Destroys the Vulkan graphics pipeline and its layout.
+     */
+    private void cleanupPipelineLayout() {
+        final String logTag = "VulkanGraphics";
+        final boolean useGdxLog = (Gdx.app != null && Gdx.app.getApplicationLogger() != null);
+        logInfo(logTag, "Cleaning up pipeline and layout...", useGdxLog);
+
+        if (rawDevice == null) { /* ... log error/return ... */
+            return;
+        }
+
+        // Destroy Pipeline first (depends on Layout)
         if (graphicsPipeline != VK_NULL_HANDLE) {
             vkDestroyPipeline(rawDevice, graphicsPipeline, null);
             graphicsPipeline = VK_NULL_HANDLE;
         }
+        // Then destroy Layout
         if (pipelineLayout != VK_NULL_HANDLE) {
             vkDestroyPipelineLayout(rawDevice, pipelineLayout, null);
             pipelineLayout = VK_NULL_HANDLE;
         }
+        logInfo(logTag, "Pipeline and layout destroyed.", useGdxLog);
+    }
+
+    /**
+     * Destroys the Vulkan shader modules.
+     */
+    private void cleanupShaderModules() {
+        final String logTag = "VulkanGraphics";
+        final boolean useGdxLog = (Gdx.app != null && Gdx.app.getApplicationLogger() != null);
+        logInfo(logTag, "Cleaning up shader modules...", useGdxLog);
+
+        if (rawDevice == null) { /* ... log error/return ... */
+            return;
+        }
 
         if (vertShaderModule != VK_NULL_HANDLE) {
             vkDestroyShaderModule(rawDevice, vertShaderModule, null);
-            System.out.println("Vertex shader module destroyed."); // Optional log
-            vertShaderModule = VK_NULL_HANDLE; // Nullify handle after destruction
+            vertShaderModule = VK_NULL_HANDLE;
         }
         if (fragShaderModule != VK_NULL_HANDLE) {
             vkDestroyShaderModule(rawDevice, fragShaderModule, null);
-            System.out.println("Fragment shader module destroyed."); // Optional log
-            fragShaderModule = VK_NULL_HANDLE; // Nullify handle after destruction
+            fragShaderModule = VK_NULL_HANDLE;
         }
-
-        cleanupSwapChainRelatedResources(); // Cleanup swapchain stuff first
-        cleanupGeometryBuffers();
-
-        // Destroy Sync Objects
-        VkMemoryUtil.safeDestroySemaphore(imageAvailableSemaphore, rawDevice);
-        VkMemoryUtil.safeDestroySemaphore(renderFinishedSemaphore, rawDevice);
-        VkMemoryUtil.safeDestroyFence(inFlightFence, rawDevice);
-
-        // Command buffers are implicitly freed when the pool is destroyed
-        // VkMemoryUtil.safeDestroyCommandPool(commandPool, rawDevice); // Don't destroy here, owned by VkDevice
-
-        if (swapchainFramebuffers != null) {
-            for (long framebuffer : swapchainFramebuffers) {
-                VkMemoryUtil.safeDestroyFramebuffer(framebuffer, rawDevice);
-            }
-        }
-        VkMemoryUtil.safeDestroyRenderPass(renderPass, rawDevice);
-        if (swapchainImageViews != null) {
-            for (long imageView : swapchainImageViews) {
-                VkMemoryUtil.safeDestroyImageView(imageView, rawDevice);
-            }
-        }
-        VkMemoryUtil.safeDestroySwapchain(swapchain, rawDevice);
-
-        // Reset handles
-        swapchain = VK_NULL_HANDLE;
-        renderPass = VK_NULL_HANDLE;
-        imageAvailableSemaphore = VK_NULL_HANDLE;
-        renderFinishedSemaphore = VK_NULL_HANDLE;
-        inFlightFence = VK_NULL_HANDLE;
-
-        System.out.println("Vulkan sync objects destroyed.");
+        logInfo(logTag, "Shader modules destroyed.", useGdxLog);
     }
-
-// --- Add to dispose() method in VulkanGraphics ---
-// @Override
-// public void dispose() {
-//    cleanupVulkan();
-//    this.resizeCallback.free();
-// }
 
     void updateFramebufferInfo() {
         /*GLFW.glfwGetFramebufferSize(window.getWindowHandle(), tmpBuffer, tmpBuffer2);
@@ -805,7 +833,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
                     .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO);
             // Optional flags: .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-            vkCheck(vkBeginCommandBuffer(commandBuffer, beginInfo),                    "Failed to begin recording command buffer!");
+            vkCheck(vkBeginCommandBuffer(commandBuffer, beginInfo), "Failed to begin recording command buffer!");
 
             // --- Begin Render Pass ---
             VkRenderPassBeginInfo renderPassInfo = VkRenderPassBeginInfo.calloc(stack)
@@ -827,7 +855,16 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
-            VkViewport.Buffer viewport = VkViewport.calloc(1, stack)
+            VkViewport.Buffer viewport = VkViewport.calloc(1, stack);
+            viewport.x(0.0f);
+            viewport.y((float) swapchainExtent.height()); // Set Y to height
+            viewport.width((float) swapchainExtent.width());
+            viewport.height(-(float) swapchainExtent.height()); // Set height to NEGATIVE height
+            viewport.minDepth(0.0f);
+            viewport.maxDepth(1.0f);
+            vkCmdSetViewport(commandBuffer, 0, viewport);
+
+            /*VkViewport.Buffer viewport = VkViewport.calloc(1, stack)
                     .x(0.0f)
                     .y(0.0f) // Y can sometimes be height for inverted viewport, but 0 standard
                     .width((float) swapchainExtent.width())
@@ -835,7 +872,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
                     .minDepth(0.0f)
                     .maxDepth(1.0f);
             vkCmdSetViewport(commandBuffer, 0, viewport); // Viewport index 0
-
+*/
             // 3. Set Dynamic Scissor State
             VkRect2D.Buffer scissor = VkRect2D.calloc(1, stack);
             scissor.offset().set(0, 0);
@@ -851,6 +888,16 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             // 5. Bind the Index Buffer
             // Use VK_INDEX_TYPE_UINT16 because quadIndices was short[]
             vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+            LongBuffer pDescriptorSets = stack.longs(descriptorSet); // Handle from createDescriptorSet()
+            vkCmdBindDescriptorSets(
+                    commandBuffer,
+                    VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    pipelineLayout, // Layout used for the pipeline
+                    0,              // First set index
+                    pDescriptorSets, // Buffer containing the descriptor set handle(s)
+                    null            // No dynamic offsets
+            );
 
             // 6. Issue the Draw Call!
             vkCmdDrawIndexed(
@@ -882,7 +929,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             submitInfo.pWaitDstStageMask(waitStages);
 
             // Specify command buffer to submit
-            submitInfo.pCommandBuffers(stack.pointers(commandBuffer));
+            submitInfo.pCommandBuffers(stack.pointers(commandBuffer.address()));
 
             // Specify which semaphores to signal once command buffer finishes
             LongBuffer signalSemaphores = stack.longs(renderFinishedSemaphore);
@@ -938,6 +985,16 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
      */
     private void recreateSwapChain() {
         try (MemoryStack stack = stackPush()) {
+
+            IntBuffer pWidth = stack.mallocInt(1);
+            IntBuffer pHeight = stack.mallocInt(1);
+            GLFW.glfwGetFramebufferSize(this.windowHandle, pWidth, pHeight);
+            if (pWidth.get(0) == 0 || pHeight.get(0) == 0) {
+                Gdx.app.log("VulkanGraphics", "Skipping swapchain recreation for zero size (minimized?).");
+                framebufferResized = false; // Reset flag as we 'handled' it by doing nothing
+                return; // Exit the method
+            }
+
             // Wait until current resources are no longer in use
             Gdx.app.log("VulkanGraphics", "Recreating SwapChain...");
             vkDeviceWaitIdle(rawDevice);
@@ -1383,7 +1440,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     @Override
     public void requestRendering() {
-        window.requestRendering();
+        // window.requestRendering();
     }
 
     @Override
@@ -1414,59 +1471,6 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         }
         System.out.println("VulkanGraphics disposed.");
     }
-
-    // Method to clean up ONLY swapchain-related resources
-    /*private void cleanupSwapChainRelatedResources() {
-        // Wait for device idle ONLY IF resources actually exist
-        if (rawDevice != null && swapchain != VK_NULL_HANDLE) {
-            vkDeviceWaitIdle(rawDevice);
-        } else if (rawDevice == null) {
-            return; // Cannot cleanup if device doesn't exist
-        }
-
-
-        // Don't destroy sync objects here - they are usually reusable
-        // VkMemoryUtil.safeDestroySemaphore(imageAvailableSemaphore, rawDevice);
-        // VkMemoryUtil.safeDestroySemaphore(renderFinishedSemaphore, rawDevice);
-        // VkMemoryUtil.safeDestroyFence(inFlightFence, rawDevice);
-
-        // Command buffers might need to be freed/reset depending on dependencies
-        // If just resizing, often reusable. If render pass changes, need reallocation.
-        // For simplicity now, we assume they might be invalid if framebuffers change.
-        // NOTE: We allocated them per framebuffer, so they MUST be dealt with.
-        // We can't easily free individual buffers allocated from a pool without resetting the pool,
-        // or using VK_COMMAND_POOL_CREATE_FREE_COMMAND_BUFFER_BIT.
-        // Simplest safe approach for now: rely on pool reset/destroy or recreate pool.
-        // Since pool is in VkDevice, let's assume command buffers need re-recording but not freeing here.
-        // If recreation logic re-allocates command buffers, the old ones become dangling references if not freed.
-        // --> Safer to re-allocate command buffers in recreateSwapChain AFTER cleaning framebuffers.
-
-        if (swapchainFramebuffers != null) {
-            for (long framebuffer : swapchainFramebuffers) {
-                VkMemoryUtil.safeDestroyFramebuffer(framebuffer, rawDevice);
-            }
-            swapchainFramebuffers.clear();
-        }
-        // RenderPass *might* be reusable if only extent changes, but safer to recreate if format could change.
-        VkMemoryUtil.safeDestroyRenderPass(renderPass, rawDevice);
-        renderPass = VK_NULL_HANDLE; // Mark as destroyed
-
-        if (swapchainImageViews != null) {
-            for (long imageView : swapchainImageViews) {
-                VkMemoryUtil.safeDestroyImageView(imageView, rawDevice);
-            }
-            swapchainImageViews.clear();
-        }
-        VkMemoryUtil.safeDestroySwapchain(swapchain, rawDevice);
-        swapchain = VK_NULL_HANDLE; // Mark as destroyed
-
-        // Command buffers were tied to framebuffers, clear the list
-        if (commandBuffers != null) {
-            commandBuffers.clear();
-        }
-
-        System.out.println("Cleaned up swapchain-related resources.");
-    }*/
 
     public static class VulkanDisplayMode extends DisplayMode {
         final long monitorHandle;
@@ -1604,7 +1608,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
      */
     private void copyBuffer(long srcBuffer, long dstBuffer, long size) {
         // ... Pre-checks ...
-        long commandPool = vkDevice.getCommandPool();
+        long commandPool = vulkanDevice.getCommandPool();
         // ...
 
         try (MemoryStack stack = stackPush()) {
@@ -1674,7 +1678,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             PointerBuffer pData = stack.mallocPointer(1); // Reusable buffer for mapped memory pointer
 
             // --- Vertex Buffer ---
-            long vertexDataSize = (long)quadVertices.length * Float.BYTES;
+            long vertexDataSize = (long) quadVertices.length * Float.BYTES;
 
             // 1. Create Staging Buffer (Host Visible)
             long stagingBuffer = createBuffer(vertexDataSize,
@@ -1705,7 +1709,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             Gdx.app.log("VulkanGraphics", "Vertex buffer created successfully.");
 
             // --- Index Buffer ---
-            long indexDataSize = (long)quadIndices.length * Short.BYTES;
+            long indexDataSize = (long) quadIndices.length * Short.BYTES;
 
             // 1. Create Staging Buffer
             stagingBuffer = createBuffer(indexDataSize,
@@ -1790,8 +1794,8 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     private void createShaderModules() {
         System.out.println("Creating shader modules...");
-        String vertPath = "data/vulkan/shaders/vert.spv"; // Use forward slashes
-        String fragPath = "data/vulkan/shaders/frag.spv";
+        String vertPath = "data/vulkan/shaders/textured.vert.spv"; // Use forward slashes
+        String fragPath = "data/vulkan/shaders/textured.frag.spv";
 
         com.badlogic.gdx.files.FileHandle vertFileHandle = Gdx.files.internal(vertPath);
         com.badlogic.gdx.files.FileHandle fragFileHandle = Gdx.files.internal(fragPath);
@@ -1846,23 +1850,23 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             VkVertexInputBindingDescription.Buffer bindingDescription = VkVertexInputBindingDescription.calloc(1, stack);
             bindingDescription.get(0)
                     .binding(0) // Index of the buffer binding (we'll use binding 0 in vkCmdBindVertexBuffers)
-                    .stride(5 * Float.BYTES) // Bytes between consecutive vertices (X,Y + R,G,B = 5 floats)
+                    .stride(7 * Float.BYTES) // Bytes between consecutive vertices (X,Y + R,G,B = 5 floats)
                     .inputRate(VK_VERTEX_INPUT_RATE_VERTEX); // Move to next data entry for each vertex
 
             // Attribute Descriptions (format of each attribute within a vertex)
-            VkVertexInputAttributeDescription.Buffer attributeDescriptions = VkVertexInputAttributeDescription.calloc(2, stack);
+            VkVertexInputAttributeDescription.Buffer attributeDescriptions = VkVertexInputAttributeDescription.calloc(3, stack);
             // Position Attribute (location = 0 in shader)
             attributeDescriptions.get(0)
-                    .binding(0) // Which binding description this attribute uses
-                    .location(0) // Corresponds to layout(location = 0) in shader
-                    .format(VK_FORMAT_R32G32_SFLOAT) // Format is vec2 (2 * 32-bit float)
-                    .offset(0); // Offset in bytes from the start of the vertex data
-            // Color Attribute (location = 1 in shader)
+                    .binding(0).location(0).format(VK_FORMAT_R32G32_SFLOAT).offset(0);
+            // Color (Location 1) - Offset remains the same (after Pos)
             attributeDescriptions.get(1)
-                    .binding(0)
-                    .location(1) // Corresponds to layout(location = 1) in shader
-                    .format(VK_FORMAT_R32G32B32_SFLOAT) // Format is vec3 (3 * 32-bit float)
-                    .offset(2 * Float.BYTES); // Offset after the position data (2 floats)
+                    .binding(0).location(1).format(VK_FORMAT_R32G32B32_SFLOAT).offset(2 * Float.BYTES);
+            // Texture Coordinate (Location 2) - <<<--- ADD THIS ATTRIBUTE ---<<<
+            attributeDescriptions.get(2)
+                    .binding(0) // Same buffer binding
+                    .location(2) // Corresponds to layout(location = 2) in vertex shader
+                    .format(VK_FORMAT_R32G32_SFLOAT) // Format is vec2 (UV)
+                    .offset(5 * Float.BYTES); // Offset after Pos (2 floats) + Color (3 floats)
 
             // Combine binding and attributes
             VkPipelineVertexInputStateCreateInfo vertexInputInfo = VkPipelineVertexInputStateCreateInfo.calloc(stack)
@@ -1895,8 +1899,8 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
                     .lineWidth(1.0f)
                     .cullMode(VK_CULL_MODE_NONE) // Disable back-face culling for simple quad
                     // .cullMode(VK_CULL_MODE_BACK_BIT) // Or enable if needed
-                    .frontFace(VK_FRONT_FACE_CLOCKWISE) // Define which winding order is front-facing (CHECK YOUR INDICES/VERTICES!)
-                    // .frontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
+                    //.frontFace(VK_FRONT_FACE_CLOCKWISE) // Define which winding order is front-facing (CHECK YOUR INDICES/VERTICES!)
+                    .frontFace(VK_FRONT_FACE_COUNTER_CLOCKWISE)
                     .depthBiasEnable(false);
 
             // === 6. Multisample State ===
@@ -1943,7 +1947,8 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             // === 10. Pipeline Layout ===
             // Defines uniforms and push constants (none for this simple shader)
             VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
-                    .sType$Default(); // No descriptor sets or push constants needed
+                    .sType$Default() // No descriptor sets or push constants needed
+                    .pSetLayouts(stack.longs(descriptorSetLayout));
 
             LongBuffer pPipelineLayout = stack.mallocLong(1);
             VkMemoryUtil.vkCheck(vkCreatePipelineLayout(rawDevice, pipelineLayoutInfo, null, pPipelineLayout),
@@ -1968,14 +1973,539 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             // .basePipelineHandle(VK_NULL_HANDLE) // Optional for pipeline derivation
             // .basePipelineIndex(-1);
 
+            //LongBuffer pGraphicsPipeline = stack.mallocLong(1);
+            //VkMemoryUtil.vkCheck(vkCreateGraphicsPipelines(rawDevice, VK_NULL_HANDLE, pipelineInfo, null, pGraphicsPipeline),
+            //        "Failed to create graphics pipeline");
+            //graphicsPipeline = pGraphicsPipeline.get(0); // Store the handle in class field
+
+            if (this.graphicsPipeline != VK_NULL_HANDLE) {
+                vkDestroyPipeline(rawDevice, this.graphicsPipeline, null);
+            }
+            // ----------------------------------------------------
             LongBuffer pGraphicsPipeline = stack.mallocLong(1);
-            VkMemoryUtil.vkCheck(vkCreateGraphicsPipelines(rawDevice, VK_NULL_HANDLE, pipelineInfo, null, pGraphicsPipeline),
+            vkCheck(vkCreateGraphicsPipelines(rawDevice, VK_NULL_HANDLE, pipelineInfo, null, pGraphicsPipeline),
                     "Failed to create graphics pipeline");
-            graphicsPipeline = pGraphicsPipeline.get(0); // Store the handle in class field
+            graphicsPipeline = pGraphicsPipeline.get(0);
 
             Gdx.app.log("VulkanGraphics", "Graphics pipeline created successfully.");
 
         } // MemoryStack frees all structs allocated with .calloc(stack)
+    }
+
+    private void createTextureImage() {
+        Gdx.app.log("VulkanGraphics", "Creating texture image...");
+        Pixmap originalPixmap = null; // To dispose original if needed
+        Pixmap rgbaPixmap = null;     // The one we upload
+        try (MemoryStack stack = stackPush()) {
+
+            // 1. Load Image with Pixmap
+            // Ensure the file exists in assets! Use jpg or png as appropriate.
+            FileHandle file = Gdx.files.internal("data/badlogic.jpg");
+            if (!file.exists()) {
+                throw new GdxRuntimeException("badlogic.jpg not found in assets folder!");
+            }
+            originalPixmap = new Pixmap(file);
+            Gdx.app.log("TextureLoad", "Pixmap format: " + originalPixmap.getFormat());
+            if (originalPixmap.getFormat() != Pixmap.Format.RGBA8888) {
+                Gdx.app.log("TextureLoad", "Converting Pixmap to RGBA8888...");
+                rgbaPixmap = new Pixmap(originalPixmap.getWidth(), originalPixmap.getHeight(), Pixmap.Format.RGBA8888);
+                rgbaPixmap.setBlending(Pixmap.Blending.None); // Important: Disable blending for direct copy
+                rgbaPixmap.drawPixmap(originalPixmap, 0, 0); // Draw original onto new RGBA pixmap
+                // We don't need the original anymore
+                originalPixmap.dispose();
+                originalPixmap = null; // Help GC
+            } else {
+                // Pixmap was already RGBA8888, just use it directly
+                rgbaPixmap = originalPixmap;
+                originalPixmap = null; // Don't dispose it twice later
+            }
+            int texWidth = rgbaPixmap.getWidth();
+            int texHeight = rgbaPixmap.getHeight();
+            // Pixmap format is RGBA8888, which corresponds to VK_FORMAT_R8G8B8A8_SRGB or _UNORM
+            // SRGB is usually correct for color textures from files.
+            int vkFormat = VK_FORMAT_R8G8B8A8_SRGB; // Or VK_FORMAT_R8G8B8A8_UNORM
+            long imageSize = (long) texWidth * texHeight * 4; // 4 bytes per pixel (RGBA)
+
+            ByteBuffer pixelBuffer = rgbaPixmap.getPixels();
+
+            // 2. Create Staging Buffer
+            LongBuffer pStagingMemory = stack.mallocLong(1);
+            long stagingBuffer = createBuffer(imageSize,
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                    pStagingMemory);
+            long stagingMemory = pStagingMemory.get(0);
+
+            // 3. Copy Pixmap data to Staging Buffer
+            PointerBuffer pData = stack.mallocPointer(1);
+            vkCheck(vkMapMemory(rawDevice, stagingMemory, 0, imageSize, 0, pData), "Failed to map staging buffer memory");
+            ByteBuffer stagingByteBuffer = MemoryUtil.memByteBuffer(pData.get(0), (int) imageSize);
+            stagingByteBuffer.put(pixelBuffer); // Copy data from Pixmap's buffer
+            vkUnmapMemory(rawDevice, stagingMemory);
+
+            // 4. Create Vulkan Image
+            VkImageCreateInfo imageInfo = VkImageCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .imageType(VK_IMAGE_TYPE_2D)
+                    .format(vkFormat)
+                    .mipLevels(1) // No mipmaps for now
+                    .arrayLayers(1)
+                    .samples(VK_SAMPLE_COUNT_1_BIT)
+                    .tiling(VK_IMAGE_TILING_OPTIMAL) // Best for GPU access
+                    .usage(VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT) // Dest for copy, Sampled for shader
+                    .sharingMode(VK_SHARING_MODE_EXCLUSIVE)
+                    .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED); // Will transition layout
+            imageInfo.extent().width(texWidth).height(texHeight).depth(1);
+
+            LongBuffer pTextureImage = stack.mallocLong(1);
+            vkCheck(vkCreateImage(rawDevice, imageInfo, null, pTextureImage), "Failed to create texture image");
+            textureImage = pTextureImage.get(0);
+
+            // 5. Allocate and Bind Image Memory (Device Local)
+            VkMemoryRequirements memRequirements = VkMemoryRequirements.malloc(stack);
+            vkGetImageMemoryRequirements(rawDevice, textureImage, memRequirements);
+
+            int memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits(), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+            VkMemoryAllocateInfo allocInfo = VkMemoryAllocateInfo.calloc(stack)
+                    .sType$Default()
+                    .allocationSize(memRequirements.size())
+                    .memoryTypeIndex(memoryTypeIndex);
+
+            LongBuffer pTextureImageMemory = stack.mallocLong(1);
+            vkCheck(vkAllocateMemory(rawDevice, allocInfo, null, pTextureImageMemory), "Failed to allocate texture image memory");
+            textureImageMemory = pTextureImageMemory.get(0);
+
+            vkCheck(vkBindImageMemory(rawDevice, textureImage, textureImageMemory, 0), "Failed to bind texture image memory");
+
+            // 6. Perform Layout Transitions and Copy using Command Buffer
+            // Transition UNDEFINED -> TRANSFER_DST_OPTIMAL
+            transitionImageLayout(textureImage, vkFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+            // Copy from staging buffer to image
+            copyBufferToImage(stagingBuffer, textureImage, texWidth, texHeight);
+
+            // Transition TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
+            transitionImageLayout(textureImage, vkFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+            // 7. Cleanup Staging Buffer and Pixmap
+            vkDestroyBuffer(rawDevice, stagingBuffer, null);
+            vkFreeMemory(rawDevice, stagingMemory, null);
+            //pixmap.dispose(); // Free Pixmap native memory
+
+            Gdx.app.log("VulkanGraphics", "Texture image created and data uploaded.");
+
+        } catch (Exception e) {
+            cleanupTextureImage(); // Attempt cleanup if error occurred
+            throw new GdxRuntimeException("Failed to create texture image", e);
+        }finally {
+            // 8. Dispose final Pixmap instance
+            if (rgbaPixmap != null) {
+                rgbaPixmap.dispose();
+            }
+            // Original should have been disposed already if conversion happened
+            if (originalPixmap != null) {
+                originalPixmap.dispose(); // Should not happen, but safety check
+            }
+        }
+    }
+
+// --- Need NEW Helper Methods ---
+
+    /**
+     * Submits commands to transition an image's layout
+     */
+    private void transitionImageLayout(long image, int format, int oldLayout, int newLayout) {
+        try (MemoryStack stack = stackPush()) {
+            VkCommandBuffer commandBuffer = beginSingleTimeCommands(); // Use helper from VulkanDevice
+
+            VkImageMemoryBarrier.Buffer barrier = VkImageMemoryBarrier.calloc(1, stack)
+                    .sType$Default()
+                    .oldLayout(oldLayout)
+                    .newLayout(newLayout)
+                    .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED) // Ignore ownership transfer
+                    .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                    .image(image);
+
+            // Define subresource range (for color image, level 0, layer 0)
+            barrier.subresourceRange()
+                    .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT) // Use DEPTH_BIT for depth images
+                    .baseMipLevel(0)
+                    .levelCount(1)
+                    .baseArrayLayer(0)
+                    .layerCount(1);
+
+            int sourceStage;
+            int destinationStage;
+
+            // Define pipeline stages and access masks based on layout transition
+            if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+                barrier.srcAccessMask(0); // No need to wait on previous operations
+                barrier.dstAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT); // Write access for transfer
+
+                sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT; // Earliest possible stage
+                destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT; // Transfer operations stage
+            } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+                barrier.srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT); // Wait for transfer write to finish
+                barrier.dstAccessMask(VK_ACCESS_SHADER_READ_BIT);    // Read access for shader
+
+                sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+                destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT; // Stage where sampling happens
+            } else {
+                throw new IllegalArgumentException("Unsupported layout transition!");
+            }
+
+            vkCmdPipelineBarrier(
+                    commandBuffer,
+                    sourceStage, destinationStage, // Pipeline stages (match masks)
+                    0, // No dependency flags
+                    null, // No memory barriers
+                    null, // No buffer barriers
+                    barrier // The image barrier
+            );
+
+            endSingleTimeCommands(commandBuffer); // Use helper from VulkanDevice
+        }
+    }
+
+    /**
+     * Submits commands to copy buffer data to an image
+     */
+    private void copyBufferToImage(long buffer, long image, int width, int height) {
+        try (MemoryStack stack = stackPush()) {
+            VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+            VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack)
+                    .bufferOffset(0)         // Start at beginning of buffer
+                    .bufferRowLength(0)      // Tightly packed data
+                    .bufferImageHeight(0)    // Tightly packed data
+                    .imageSubresource(is -> is
+                            .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                            .mipLevel(0)
+                            .baseArrayLayer(0)
+                            .layerCount(1))
+                    .imageOffset(off -> off.set(0, 0, 0)) // Start at corner of image
+                    .imageExtent(ext -> ext.set(width, height, 1)); // Dimensions to copy
+
+            vkCmdCopyBufferToImage(
+                    commandBuffer,
+                    buffer,
+                    image,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, // Image must be in this layout for copy
+                    region
+            );
+
+            endSingleTimeCommands(commandBuffer);
+        }
+    }
+
+    private void cleanupTextureImage() {
+        System.out.println("Cleaning up texture image...");
+        // Image View and Sampler will be cleaned later
+        if (textureImage != VK_NULL_HANDLE) vkDestroyImage(rawDevice, textureImage, null);
+        if (textureImageMemory != VK_NULL_HANDLE) vkFreeMemory(rawDevice, textureImageMemory, null);
+        textureImage = VK_NULL_HANDLE;
+        textureImageMemory = VK_NULL_HANDLE;
+    }
+
+    /**
+     * Allocates and begins recording a primary command buffer for a single-time submission.
+     * Uses the graphics queue's command pool.
+     *
+     * @return The VkCommandBuffer wrapper object that has begun recording.
+     * @throws GdxRuntimeException on failure.
+     */
+    private VkCommandBuffer beginSingleTimeCommands() {
+        long commandPool = vulkanDevice.getCommandPool(); // Assumes vulkanDevice field and getter are valid
+        if (commandPool == VK_NULL_HANDLE) {
+            throw new GdxRuntimeException("Command pool handle is VK_NULL_HANDLE in beginSingleTimeCommands!");
+        }
+
+        try (MemoryStack stack = stackPush()) {
+            VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack)
+                    .sType$Default() // Set Structure Type
+                    .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
+                    .commandPool(commandPool)
+                    .commandBufferCount(1);
+
+            PointerBuffer pCommandBuffer = stack.mallocPointer(1);
+            vkCheck(vkAllocateCommandBuffers(rawDevice, allocInfo, pCommandBuffer),
+                    "Failed to allocate single time command buffer");
+            long commandBufferHandle = pCommandBuffer.get(0);
+
+            // Create the LWJGL wrapper object
+            VkCommandBuffer commandBuffer = new VkCommandBuffer(commandBufferHandle, rawDevice);
+
+            VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
+                    .sType$Default()
+                    .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT); // Flag for single use
+
+            vkCheck(vkBeginCommandBuffer(commandBuffer, beginInfo), // Use wrapper object
+                    "Failed to begin single time command buffer");
+
+            return commandBuffer; // Return the wrapper for recording
+        }
+    }
+
+    /**
+     * Ends recording, submits, waits for completion, and frees a single-time command buffer.
+     *
+     * @param commandBuffer The VkCommandBuffer object returned by beginSingleTimeCommands.
+     * @throws GdxRuntimeException on failure.
+     */
+    private void endSingleTimeCommands(VkCommandBuffer commandBuffer) {
+        long commandPool = vulkanDevice.getCommandPool(); // Assumes vulkanDevice field and getter are valid
+        if (commandPool == VK_NULL_HANDLE) {
+            // Log error maybe, but allow potential cleanup if possible? Throwing is safer.
+            throw new GdxRuntimeException("Command pool handle is VK_NULL_HANDLE in endSingleTimeCommands!");
+        }
+        if (commandBuffer == null) {
+            throw new IllegalArgumentException("Provided commandBuffer cannot be null in endSingleTimeCommands");
+        }
+
+        try (MemoryStack stack = stackPush()) {
+            // 1. End recording
+            vkCheck(vkEndCommandBuffer(commandBuffer), // Use wrapper object
+                    "Failed to end single time command buffer");
+
+            // 2. Prepare submission info
+            VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
+                    .sType$Default()
+                    // vkQueueSubmit needs a PointerBuffer containing the command buffer *handle*
+                    .pCommandBuffers(stack.pointers(commandBuffer.address())); // Get handle via address()
+
+            // 3. Submit to the graphics queue
+            vkCheck(vkQueueSubmit(graphicsQueue, submitInfo, VK_NULL_HANDLE), // No fence needed, we wait for idle
+                    "Failed to submit single time command buffer");
+
+            // 4. Wait for the queue to finish executing the command
+            vkCheck(vkQueueWaitIdle(graphicsQueue),
+                    "Queue wait idle failed after single time command");
+
+            // 5. Free the command buffer
+            // vkFreeCommandBuffers expects a PointerBuffer containing the handle(s)
+            vkFreeCommandBuffers(rawDevice, commandPool, stack.pointers(commandBuffer.address()));
+
+        } catch (Exception e) {
+            // Log or handle potential exceptions during cleanup/wait
+            throw new GdxRuntimeException("Failed during endSingleTimeCommands", e);
+        }
+    }
+
+    private void createTextureImageView() {
+        Gdx.app.log("VulkanGraphics", "Creating texture image view...");
+        try (MemoryStack stack = stackPush()) {
+            VkImageViewCreateInfo viewInfo = VkImageViewCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .image(textureImage) // The VkImage handle created previously
+                    .viewType(VK_IMAGE_VIEW_TYPE_2D) // Treat it as a standard 2D texture
+                    .format(textureImageFormat);     // Format MUST match the VkImage format
+
+            // Define which color channels map to which (standard identity mapping)
+            viewInfo.components()
+                    .r(VK_COMPONENT_SWIZZLE_IDENTITY)
+                    .g(VK_COMPONENT_SWIZZLE_IDENTITY)
+                    .b(VK_COMPONENT_SWIZZLE_IDENTITY)
+                    .a(VK_COMPONENT_SWIZZLE_IDENTITY);
+
+            // Define which part of the image is accessible
+            viewInfo.subresourceRange()
+                    .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT) // It's a color image
+                    .baseMipLevel(0)                     // Start at mip level 0
+                    .levelCount(1)                       // Only one mip level for now
+                    .baseArrayLayer(0)                   // Start at array layer 0
+                    .layerCount(1);                      // Only one array layer
+
+            LongBuffer pTextureImageView = stack.mallocLong(1);
+            vkCheck(vkCreateImageView(rawDevice, viewInfo, null, pTextureImageView),
+                    "Failed to create texture image view");
+            textureImageView = pTextureImageView.get(0); // Store the handle
+
+            Gdx.app.log("VulkanGraphics", "Texture image view created.");
+        } catch (Exception e) {
+            cleanupTextureImageView(); // Add corresponding cleanup helper if needed
+            throw new GdxRuntimeException("Failed to create texture image view", e);
+        }
+    }
+
+    private void cleanupTextureImageView() {
+        if (textureImageView != VK_NULL_HANDLE) {
+            vkDestroyImageView(rawDevice, textureImageView, null);
+            textureImageView = VK_NULL_HANDLE;
+            System.out.println("Texture image view destroyed.");
+        }
+    }
+
+    private void createTextureSampler() {
+        Gdx.app.log("VulkanGraphics", "Creating texture sampler...");
+        try (MemoryStack stack = stackPush()) {
+
+            // Optional: Query device properties for anisotropy limits if you plan to use it
+            // VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.malloc(stack);
+            // vkGetPhysicalDeviceProperties(physicalDevice, properties);
+            // float maxAnisotropy = properties.limits().maxSamplerAnisotropy();
+            // properties.free(); // If allocated manually
+
+            VkSamplerCreateInfo samplerInfo = VkSamplerCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .magFilter(VK_FILTER_LINEAR) // Filtering when magnifying
+                    .minFilter(VK_FILTER_LINEAR) // Filtering when minifying
+                    .addressModeU(VK_SAMPLER_ADDRESS_MODE_REPEAT) // Wrap mode for U (s) coord
+                    .addressModeV(VK_SAMPLER_ADDRESS_MODE_REPEAT) // Wrap mode for V (t) coord
+                    .addressModeW(VK_SAMPLER_ADDRESS_MODE_REPEAT) // Wrap mode for W (r) coord (for 3D)
+                    .anisotropyEnable(false) // Disable anisotropic filtering for now
+                    // .maxAnisotropy(1.0f)   // Max anisotropy level (if enabled)
+                    .borderColor(VK_BORDER_COLOR_INT_OPAQUE_BLACK) // Border color for clamp modes
+                    .unnormalizedCoordinates(false) // Use normalized coords [0, 1]
+                    .compareEnable(false)           // No depth comparison
+                    .compareOp(VK_COMPARE_OP_ALWAYS)
+                    .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR) // Mipmap filtering (even if levels=1)
+                    .mipLodBias(0.0f)
+                    .minLod(0.0f)
+                    .maxLod(0.0f); // Max mip level to use (set > 0 if generating mipmaps)
+
+            LongBuffer pTextureSampler = stack.mallocLong(1);
+            vkCheck(vkCreateSampler(rawDevice, samplerInfo, null, pTextureSampler),
+                    "Failed to create texture sampler");
+            textureSampler = pTextureSampler.get(0); // Store the handle
+
+            Gdx.app.log("VulkanGraphics", "Texture sampler created.");
+
+        } catch (Exception e) {
+            cleanupTextureSampler(); // Add corresponding cleanup helper
+            throw new GdxRuntimeException("Failed to create texture sampler", e);
+        }
+    }
+
+    // Add cleanup method (call from cleanupVulkan)
+    private void cleanupTextureSampler() {
+        if (textureSampler != VK_NULL_HANDLE) {
+            vkDestroySampler(rawDevice, textureSampler, null);
+            textureSampler = VK_NULL_HANDLE;
+            System.out.println("Texture sampler destroyed.");
+        }
+    }
+
+    private void createDescriptorSetLayout() {
+        Gdx.app.log("VulkanGraphics", "Creating descriptor set layout...");
+        try (MemoryStack stack = stackPush()) {
+            VkDescriptorSetLayoutBinding.Buffer samplerLayoutBinding = VkDescriptorSetLayoutBinding.calloc(1, stack);
+            samplerLayoutBinding.get(0)
+                    .binding(0) // Corresponds to layout(binding = 0) in shader
+                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                    .descriptorCount(1) // We have one sampler descriptor
+                    .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT) // Only needed in fragment shader
+                    .pImmutableSamplers(null); // Not using immutable samplers
+
+            VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .pBindings(samplerLayoutBinding);
+
+            LongBuffer pDescriptorSetLayout = stack.mallocLong(1);
+            vkCheck(vkCreateDescriptorSetLayout(rawDevice, layoutInfo, null, pDescriptorSetLayout),
+                    "Failed to create descriptor set layout");
+            descriptorSetLayout = pDescriptorSetLayout.get(0);
+
+            Gdx.app.log("VulkanGraphics", "Descriptor set layout created.");
+        } catch (Exception e) {
+            cleanupDescriptorSetLayout(); // Add corresponding cleanup
+            throw new GdxRuntimeException("Failed to create descriptor set layout", e);
+        }
+    }
+
+    // Add cleanup method (call from cleanupVulkan)
+    private void cleanupDescriptorSetLayout() {
+        if (descriptorSetLayout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(rawDevice, descriptorSetLayout, null);
+            descriptorSetLayout = VK_NULL_HANDLE;
+            System.out.println("Descriptor set layout destroyed.");
+        }
+    }
+
+    private void createDescriptorPool() {
+        Gdx.app.log("VulkanGraphics", "Creating descriptor pool...");
+        try (MemoryStack stack = stackPush()) {
+            // Define the types and counts of descriptors the pool will contain
+            VkDescriptorPoolSize.Buffer poolSize = VkDescriptorPoolSize.calloc(1, stack);
+            poolSize.get(0)
+                    .type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                    .descriptorCount(1); // Enough for one descriptor of this type (adjust if using more sets/textures)
+
+            VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .pPoolSizes(poolSize)
+                    .maxSets(1); // Maximum number of SETS that can be allocated from this pool
+            // Optional flag: .flags(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT)
+
+            LongBuffer pDescriptorPool = stack.mallocLong(1);
+            vkCheck(vkCreateDescriptorPool(rawDevice, poolInfo, null, pDescriptorPool),
+                    "Failed to create descriptor pool");
+            descriptorPool = pDescriptorPool.get(0);
+
+            Gdx.app.log("VulkanGraphics", "Descriptor pool created.");
+        } catch (Exception e) {
+            cleanupDescriptorPool(); // Add corresponding cleanup
+            throw new GdxRuntimeException("Failed to create descriptor pool", e);
+        }
+    }
+
+    // Add cleanup method (call from cleanupVulkan BEFORE device destroy)
+    private void cleanupDescriptorPool() {
+        if (descriptorPool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(rawDevice, descriptorPool, null);
+            descriptorPool = VK_NULL_HANDLE;
+            System.out.println("Descriptor pool destroyed.");
+        }
+    }
+
+    private void createDescriptorSet() {
+        Gdx.app.log("VulkanGraphics", "Allocating descriptor set...");
+        try (MemoryStack stack = stackPush()) {
+            VkDescriptorSetAllocateInfo allocInfo = VkDescriptorSetAllocateInfo.calloc(stack)
+                    .sType$Default()
+                    .descriptorPool(descriptorPool)
+                    .pSetLayouts(stack.longs(descriptorSetLayout)); // Use the layout created earlier
+
+            LongBuffer pDescriptorSet = stack.mallocLong(1);
+            // Note: Use vkAllocateDescriptorSets (plural)
+            vkCheck(vkAllocateDescriptorSets(rawDevice, allocInfo, pDescriptorSet),
+                    "Failed to allocate descriptor set");
+            descriptorSet = pDescriptorSet.get(0);
+
+            Gdx.app.log("VulkanGraphics", "Descriptor set allocated.");
+        } catch (Exception e) {
+            // No explicit cleanup needed for the set, pool cleanup handles it
+            throw new GdxRuntimeException("Failed to allocate descriptor set", e);
+        }
+    }
+
+    private void updateDescriptorSet() {
+        Gdx.app.log("VulkanGraphics", "Updating descriptor set...");
+        try (MemoryStack stack = stackPush()) {
+            // Describe the image/sampler resource to bind
+            VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack)
+                    .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) // Layout image is in
+                    .imageView(textureImageView) // The image view handle
+                    .sampler(textureSampler);   // The sampler handle
+
+            // Describe the write operation
+            VkWriteDescriptorSet.Buffer descriptorWrite = VkWriteDescriptorSet.calloc(1, stack);
+            descriptorWrite.get(0)
+                    .sType$Default()
+                    .dstSet(descriptorSet) // The set to write to
+                    .dstBinding(0)         // The binding index within the set (matches layout)
+                    .dstArrayElement(0)    // First element if binding is an array
+                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                    .descriptorCount(1)    // Updating one descriptor
+                    .pImageInfo(imageInfo); // Link to the image/sampler info
+
+            // Perform the update
+            vkUpdateDescriptorSets(rawDevice, descriptorWrite, null); // null for copies
+
+            Gdx.app.log("VulkanGraphics", "Descriptor set updated.");
+        } catch (Exception e) {
+            throw new GdxRuntimeException("Failed to update descriptor set", e);
+        }
     }
 
 }
