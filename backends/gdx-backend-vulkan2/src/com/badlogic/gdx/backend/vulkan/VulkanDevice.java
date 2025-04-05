@@ -1,5 +1,6 @@
 package com.badlogic.gdx.backend.vulkan;
 
+import static com.badlogic.gdx.backend.vulkan.VkMemoryUtil.vkCheck;
 import static org.lwjgl.system.MemoryStack.stackPush;
 import static org.lwjgl.vulkan.KHRSwapchain.VK_KHR_SWAPCHAIN_EXTENSION_NAME;
 import static org.lwjgl.vulkan.VK10.*;
@@ -19,6 +20,9 @@ import static org.lwjgl.vulkan.VK10.vkGetDeviceQueue;
 import static org.lwjgl.vulkan.VK10.vkQueueSubmit;
 import static org.lwjgl.vulkan.VK10.vkQueueWaitIdle;
 
+import com.badlogic.gdx.utils.Disposable;
+import com.badlogic.gdx.utils.GdxRuntimeException;
+
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.*;
@@ -26,15 +30,16 @@ import org.lwjgl.vulkan.*;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
+import java.util.function.Consumer;
 
-public class VulkanDevice implements VkResource {
+public class VulkanDevice implements VkResource, Disposable {
 
     private final VkDeviceHandle deviceHandle;
     private final VkQueue graphicsQueue;
     private final VkPhysicalDevice physicalDevice;
     private final int queueFamilyIndex;
-    //private final long commandPool;
     private long graphicsCommandPool = VK_NULL_HANDLE;
+    //private final long commandPool;
 
     private VulkanDevice(VkDeviceHandle deviceHandle, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice, long graphicsCommandPoolHandle, int queueFamilyIndex) {
         this.deviceHandle = deviceHandle;
@@ -43,20 +48,6 @@ public class VulkanDevice implements VkResource {
         this.graphicsCommandPool = graphicsCommandPoolHandle; // <<< --- Assign the handle passed from Builder
         this.queueFamilyIndex = queueFamilyIndex;
 
-        /*try (MemoryStack stack = stackPush()) {
-            VkCommandPoolCreateInfo poolInfo = VkCommandPoolCreateInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO)
-                    // Flag allows resetting individual command buffers
-                    .flags(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT)
-                    // Use the queue family index you used to create the device/queue
-                    .queueFamilyIndex(yourGraphicsQueueFamilyIndex); // Replace with actual index
-
-            LongBuffer pCommandPool = stack.mallocLong(1);
-            VkMemoryUtil.vkCheck(vkCreateCommandPool(rawDeviceHandle, poolInfo, null, pCommandPool),
-                    "Failed to create command pool");
-            this.graphicsCommandPool = pCommandPool.get(0);
-            System.out.println("Graphics Command Pool created: " + this.graphicsCommandPool);
-        }*/
         System.out.println("VulkanDevice created. Graphics Command Pool Handle: " + this.graphicsCommandPool); // Log stored handle
     }
 
@@ -135,7 +126,7 @@ public class VulkanDevice implements VkResource {
                         .pEnabledFeatures(null); // Enable features later if needed
 
                 PointerBuffer pDevice = stack.mallocPointer(1);
-                VkMemoryUtil.vkCheck(
+                vkCheck(
                         vkCreateDevice(physicalDevice, createInfo, null, pDevice),
                         "Failed to create logical device"
                 );
@@ -153,7 +144,7 @@ public class VulkanDevice implements VkResource {
                         .flags(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT); // Or maybe TRANSIENT?
 
                 LongBuffer pCommandPool = stack.mallocLong(1);
-                VkMemoryUtil.vkCheck(
+                vkCheck(
                         vkCreateCommandPool(device, poolInfo, null, pCommandPool),
                         "Failed to create command pool"
                 );
@@ -209,7 +200,7 @@ public class VulkanDevice implements VkResource {
                 .pCode(shaderCodeBuffer);
 
             LongBuffer pShaderModule = stack.mallocLong(1);
-            VkMemoryUtil.vkCheck(
+            vkCheck(
                 vkCreateShaderModule(this.deviceHandle, createInfo, null, pShaderModule),
                 "Failed to create shader module."
             );
@@ -234,7 +225,7 @@ public class VulkanDevice implements VkResource {
                     .commandBufferCount(1);
 
             PointerBuffer pCommandBuffer = stack.mallocPointer(1);
-            VkMemoryUtil.vkCheck(vkAllocateCommandBuffers(deviceHandle, allocInfo, pCommandBuffer),
+            vkCheck(vkAllocateCommandBuffers(deviceHandle, allocInfo, pCommandBuffer),
                     "Failed to allocate single time command buffer");
 
             VkCommandBuffer commandBuffer = new VkCommandBuffer(pCommandBuffer.get(0), deviceHandle); // Create wrapper
@@ -243,7 +234,7 @@ public class VulkanDevice implements VkResource {
                     .sType$Default()
                     .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-            VkMemoryUtil.vkCheck(vkBeginCommandBuffer(commandBuffer, beginInfo), // Use wrapper
+            vkCheck(vkBeginCommandBuffer(commandBuffer, beginInfo), // Use wrapper
                     "Failed to begin single time command buffer");
 
             return commandBuffer;
@@ -257,7 +248,7 @@ public class VulkanDevice implements VkResource {
                 throw new IllegalStateException("Command pool not initialized before endSingleTimeCommands");
             }
 
-            VkMemoryUtil.vkCheck(vkEndCommandBuffer(commandBuffer), // Use wrapper
+            vkCheck(vkEndCommandBuffer(commandBuffer), // Use wrapper
                     "Failed to end single time command buffer");
 
             VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
@@ -265,9 +256,9 @@ public class VulkanDevice implements VkResource {
                     // Need PointerBuffer containing the handle for submission
                     .pCommandBuffers(stack.pointers(commandBuffer.address())); // Get handle address for buffer
 
-            VkMemoryUtil.vkCheck(vkQueueSubmit(graphicsQueue, submitInfo, VK_NULL_HANDLE),
+            vkCheck(vkQueueSubmit(graphicsQueue, submitInfo, VK_NULL_HANDLE),
                     "Failed to submit single time command buffer");
-            VkMemoryUtil.vkCheck(vkQueueWaitIdle(graphicsQueue),
+            vkCheck(vkQueueWaitIdle(graphicsQueue),
                     "Queue wait idle failed after single time command");
 
             // Free using PointerBuffer containing the handle
@@ -275,7 +266,103 @@ public class VulkanDevice implements VkResource {
         }
     }
 
+    /**
+     * Executes a sequence of Vulkan commands recorded by the provided Consumer
+     * using a temporary, single-use command buffer.
+     * Handles allocation, beginning, ending, submission, waiting, and freeing.
+     * Assumes the graphics queue can handle these commands (e.g., transfers, barriers).
+     *
+     * @param recorder A Consumer lambda that accepts a VkCommandBuffer and records commands into it.
+     */
+    public void executeSingleTimeCommands(Consumer<VkCommandBuffer> recorder) {
+        if (graphicsCommandPool == VK_NULL_HANDLE) {
+            throw new GdxRuntimeException("Command pool handle is VK_NULL_HANDLE in executeSingleTimeCommands!");
+        }
+        if (graphicsQueue == null) {
+            throw new GdxRuntimeException("Graphics queue is null in executeSingleTimeCommands!");
+        }
 
+        VkCommandBuffer commandBuffer = null; // Hold the wrapper object
+
+        try (MemoryStack stack = stackPush()) {
+            // 1. Allocate Command Buffer
+            VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack)
+                    .sType$Default()
+                    .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
+                    .commandPool(graphicsCommandPool)
+                    .commandBufferCount(1);
+
+            PointerBuffer pCommandBuffer = stack.mallocPointer(1);
+            vkCheck(vkAllocateCommandBuffers(deviceHandle, allocInfo, pCommandBuffer),
+                    "Failed to allocate single time command buffer");
+            long commandBufferHandle = pCommandBuffer.get(0);
+            commandBuffer = new VkCommandBuffer(commandBufferHandle, deviceHandle); // Create wrapper
+
+            // 2. Begin Command Buffer
+            VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack)
+                    .sType$Default()
+                    .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT); // Single use flag
+
+            vkCheck(vkBeginCommandBuffer(commandBuffer, beginInfo),
+                    "Failed to begin single time command buffer");
+
+            // 3. Record Commands (using the provided lambda)
+            // Use try-finally to ensure vkEndCommandBuffer is always called
+            try {
+                recorder.accept(commandBuffer);
+            } finally {
+                // 4. End Command Buffer
+                vkCheck(vkEndCommandBuffer(commandBuffer),
+                        "Failed to end single time command buffer");
+            }
+
+
+            // 5. Submit Command Buffer
+            VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack)
+                    .sType$Default()
+                    .pCommandBuffers(stack.pointers(commandBuffer.address())); // Submit the handle
+
+            // Submit to the graphics queue, no fence needed as we wait for idle
+            vkCheck(vkQueueSubmit(graphicsQueue, submitInfo, VK_NULL_HANDLE),
+                    "Failed to submit single time command buffer");
+
+            // 6. Wait for Execution to Finish
+            // NOTE: vkQueueWaitIdle is simple but can cause stalls. For high-performance
+            // scenarios, using fences is better, but for one-off init tasks, this is often acceptable.
+            vkCheck(vkQueueWaitIdle(graphicsQueue),
+                    "Queue wait idle failed after single time command");
+
+        } catch (Exception e) {
+            // Log or handle potential exceptions during setup/execution
+            // Re-throw as a runtime exception
+            throw new GdxRuntimeException("Failed during executeSingleTimeCommands", e);
+
+        } finally {
+            // 7. Free Command Buffer (always runs)
+            if (commandBuffer != null && graphicsCommandPool != VK_NULL_HANDLE) {
+                // Use a PointerBuffer allocated on the heap temporarily or use another stack frame
+                // Using the heap here is safer if the try-with-resources stack was already closed by an exception
+                PointerBuffer pSingleCommandBuffer = org.lwjgl.BufferUtils.createPointerBuffer(1);
+                pSingleCommandBuffer.put(0, commandBuffer.address());
+                vkFreeCommandBuffers(deviceHandle, graphicsCommandPool, pSingleCommandBuffer);
+            }
+        }
+    }
+
+    @Override
+    public void dispose() {
+        // Cleanup device resources (command pool, etc.)
+        // ... existing cleanup ...
+        if (graphicsCommandPool != VK_NULL_HANDLE) {
+            vkDestroyCommandPool(deviceHandle, graphicsCommandPool, null);
+            // commandPool = VK_NULL_HANDLE; // Reset field if needed
+        }
+        // Destroy device itself
+        if (deviceHandle != null) {
+            vkDestroyDevice(deviceHandle, null);
+            // rawDevice = null; // Reset field if needed
+        }
+    }
 }
 
 

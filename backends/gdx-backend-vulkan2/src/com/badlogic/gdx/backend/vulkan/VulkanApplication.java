@@ -16,13 +16,18 @@ package com.badlogic.gdx.backend.vulkan;
  * limitations under the License.
  ******************************************************************************/
 
+import static com.badlogic.gdx.backend.vulkan.VkMemoryUtil.vkCheck;
 import static org.lwjgl.glfw.GLFWVulkan.glfwGetRequiredInstanceExtensions;
+import static org.lwjgl.system.MemoryStack.stackPush;
+import static org.lwjgl.util.vma.Vma.vmaCreateAllocator;
+import static org.lwjgl.util.vma.Vma.vmaDestroyAllocator;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+import static org.lwjgl.vulkan.VK10.VK_API_VERSION_1_0;
 import static org.lwjgl.vulkan.VK10.VK_FALSE;
 import static org.lwjgl.vulkan.VK10.VK_NULL_HANDLE;
 import static org.lwjgl.vulkan.VK10.VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
@@ -52,6 +57,8 @@ import org.lwjgl.glfw.GLFWVulkan;
 import org.lwjgl.system.Callback;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
+import org.lwjgl.util.vma.VmaAllocatorCreateInfo;
+import org.lwjgl.util.vma.VmaVulkanFunctions;
 import org.lwjgl.vulkan.EXTDebugUtils;
 import org.lwjgl.vulkan.KHRSurface;
 import org.lwjgl.vulkan.VkPhysicalDevice;
@@ -128,9 +135,9 @@ public class VulkanApplication implements VulkanApplicationBase {
     private boolean enableValidationLayers = true;
 
     private static final Set<String> DEVICE_EXTENSIONS = Collections.singleton(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-    //private static final Set<String> DEVICE_EXTENSIONS = Set.of(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-    //private static final List<String> DESIRED_VALIDATION_LAYERS = List.of("VK_LAYER_KHRONOS_validation");
     private static final List<String> DESIRED_VALIDATION_LAYERS = Collections.singletonList("VK_LAYER_KHRONOS_validation");
+
+    private long vmaAllocator = VK_NULL_HANDLE;
 
     private VkDebugUtilsMessengerCallbackEXT debugCallbackInstance = null;
 
@@ -149,7 +156,7 @@ public class VulkanApplication implements VulkanApplicationBase {
     }
 
     private void initializeVulkanCore(long windowHandle) {
-        try (MemoryStack stack = MemoryStack.stackPush()) {
+        try (MemoryStack stack = stackPush()) {
             // --- Create Instance ---
             List<String> requiredExtensions = getRequiredInstanceExtensions(stack);
             List<String> validationLayers = getValidationLayers(); // Get based on config
@@ -170,7 +177,7 @@ public class VulkanApplication implements VulkanApplicationBase {
             // --- Create Surface ---
             LongBuffer pSurface = stack.mallocLong(1);
             int err = GLFWVulkan.glfwCreateWindowSurface(vulkanInstance.getRawInstance(), windowHandle, null, pSurface);
-            VkMemoryUtil.vkCheck(err, "Failed to create window surface");
+            vkCheck(err, "Failed to create window surface");
             this.primarySurface = pSurface.get(0); // Store the surface handle
             // If using map: windowSurfaces.put(windowHandle, this.primarySurface);
             System.out.println("Window Surface created.");
@@ -187,6 +194,14 @@ public class VulkanApplication implements VulkanApplicationBase {
                     // Add required device extensions (like swapchain) to builder if not hardcoded
                     .build(); // Builder creates device, queues, command pool
             System.out.println("Logical Device created.");
+
+            if (this.vulkanInstance != null && this.vulkanDevice != null) {
+                createVmaAllocator(this.vulkanInstance, this.vulkanDevice);
+                // createVmaAllocator should log success or throw on failure internally
+            } else {
+                // Should not happen if prior steps succeeded, but good defensive check
+                throw new GdxRuntimeException("Cannot create VMA Allocator: Instance or Device is null!");
+            }
 
         } catch (Exception e) {
             // Handle core init failure - cleanup might be needed
@@ -208,6 +223,89 @@ public class VulkanApplication implements VulkanApplicationBase {
     }
 
     public VulkanApplication(ApplicationListener listener, VulkanApplicationConfiguration config) {
+        // 1. Basic Setup
+        initializeGlfw();
+        setApplicationLogger(new VulkanApplicationLogger());
+        this.config = VulkanApplicationConfiguration.copy(config);
+        if (config.title == null) config.title = listener.getClass().getSimpleName();
+        Gdx.app = this;
+
+        // 2. Create GLFW Window Handle
+        long windowHandle = createGlfwWindow(config, 0);
+
+        // 3. Core Vulkan Initialization (Instance, Surface, Device, **VMA Allocator**)
+        initializeVulkanCore(windowHandle); // This MUST initialize this.vulkanDevice and this.vmaAllocator
+
+        // --- Check that core Vulkan objects were initialized ---
+        if (this.vulkanDevice == null || this.vulkanDevice.getRawDevice() == null || this.vulkanDevice.getRawDevice().address() == VK_NULL_HANDLE) {
+            throw new GdxRuntimeException("VulkanDevice was not initialized by initializeVulkanCore!");
+        }
+        if (this.vmaAllocator == VK_NULL_HANDLE) { // Assuming vmaAllocator field exists in VulkanApplication
+            throw new GdxRuntimeException("VMA Allocator was not initialized by initializeVulkanCore!");
+        }
+        // -------------------------------------------------------
+
+
+        // 4. Initialize Gdx Subsystems (Audio, Files, etc.)
+        if (!config.disableAudio) {
+            this.audio = createAudio(config);
+        } else {
+            this.audio = new MockAudio();
+        }
+        Gdx.audio = audio;
+        this.files = Gdx.files = createFiles();
+        this.net = Gdx.net = new VulkanNet(config);
+        this.clipboard = new VulkanClipboard();
+
+        // ***** MODIFIED VulkanGraphics INSTANTIATION *****
+        VulkanGraphics graphics = new VulkanGraphics(
+                windowHandle,
+                config,
+                this.vulkanDevice,  // Pass the VulkanDevice object
+                this.vmaAllocator   // Pass the VMA Allocator handle
+        );
+        // ************************************************
+        Gdx.graphics = graphics; // Set the static field
+
+        // 5. Create VulkanWindow and VulkanInput
+        VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, config, this);
+        window.create(windowHandle);
+        window.setVisible(config.initialVisible);
+
+        windows.add(window);
+        this.currentWindow = window;
+        this.primaryWindowHandle = windowHandle;
+
+        VulkanInput input = createInput(window);
+        Gdx.input = input;
+
+        // 6. Initialize Swapchain etc. using the Graphics instance
+        try {
+            Gdx.app.log("VulkanApplication", "Initializing graphics resources...");
+            graphics.initializeSwapchainAndResources(); // Call method on the graphics instance
+            Gdx.app.log("VulkanApplication", "Graphics resources initialized.");
+        } catch (Throwable e) {
+            System.err.println("FATAL: Exception occurred during graphics resource initialization");
+            e.printStackTrace();
+            cleanup();
+            System.exit(-1);
+        }
+
+        // 7. Call Listener's create()
+        try {
+            Gdx.app.log("VulkanApplication", "Calling listener.create()...");
+            listener.create();
+            Gdx.app.log("VulkanApplication", "listener.create() completed.");
+        } catch (Throwable e) {
+            throw new GdxRuntimeException("Exception occurred in ApplicationListener.create()", e);
+        }
+
+        // 8. Start Main Loop
+        Gdx.app.log("VulkanApplication", "Starting main loop...");
+        runMainLoop();
+    }
+
+    /*public VulkanApplication(ApplicationListener listener, VulkanApplicationConfiguration config) {
         // 1. Basic Setup
         initializeGlfw(); // Initializes GLFW library
         setApplicationLogger(new VulkanApplicationLogger());
@@ -274,7 +372,7 @@ public class VulkanApplication implements VulkanApplicationBase {
         // 9. Start Main Loop
         Gdx.app.log("VulkanApplication", "Starting main loop...");
         runMainLoop();
-    }
+    }*/
 
 
     public void runMainLoop() {
@@ -434,6 +532,8 @@ public class VulkanApplication implements VulkanApplicationBase {
             System.out.println("[" + logTag + "] Audio disposed.");
             audio = null;
         }
+
+        destroyVmaAllocator();
 
         // 5. Cleanup Vulkan Logical Device (AFTER graphics resources are destroyed and GPU is idle)
         // VulkanDevice.cleanup() should destroy command pool THEN logical device.
@@ -808,7 +908,7 @@ System.out.println("HERE!!!!!!!!!!");
             return Collections.emptyList(); // Return empty list, not null
         }
 
-        try (MemoryStack stack = MemoryStack.stackPush()) {
+        try (MemoryStack stack = stackPush()) {
             IntBuffer layerCount = stack.mallocInt(1);
             vkEnumerateInstanceLayerProperties(layerCount, null);
 
@@ -843,28 +943,6 @@ System.out.println("HERE!!!!!!!!!!");
             return Collections.emptyList();
         }
     }
-
-    /*private static final VkDebugUtilsMessengerCallbackEXT DEBUG_CALLBACK = new VkDebugUtilsMessengerCallbackEXT() {
-        @Override
-        public int invoke(int messageSeverity, int messageTypes, long pCallbackData, long pUserData) {
-            VkDebugUtilsMessengerCallbackDataEXT callbackData = VkDebugUtilsMessengerCallbackDataEXT.create(pCallbackData);
-            String severity;
-            if ((messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0) {
-                severity = "ERROR";
-            } else if ((messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) != 0) {
-                severity = "WARNING";
-            } else if ((messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) != 0) { // Add INFO level if desired
-                severity = "INFO";
-            } else if ((messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT) != 0) {
-                severity = "VERBOSE";
-            } else {
-                severity = "UNKNOWN";
-            }
-            System.err.println("VULKAN " + severity + ": " + callbackData.pMessageString());
-            // You could add breakpoints here based on severity for debugging
-            return VK_FALSE; // Must return VK_FALSE
-        }
-    };*/
 
     private void setupDebugMessenger(MemoryStack stack) {
         if (!enableValidationLayers) return;
@@ -1029,6 +1107,53 @@ System.out.println("HERE!!!!!!!!!!");
 
 
         return details;
+    }
+
+    public void createVmaAllocator(VulkanInstance vkInstanceWrapper, VulkanDevice vulkanDeviceWrapper) {
+        Gdx.app.log("VmaInit", "Creating VMA Allocator...");
+        try (MemoryStack stack = stackPush()) {
+            // 1. Set up Vulkan functions for VMA (LWJGL helper)
+            VmaVulkanFunctions vulkanFunctions = VmaVulkanFunctions.calloc(stack)
+                    .set(vkInstanceWrapper.getRawInstance(), vulkanDeviceWrapper.getRawDevice()); // Pass VkInstance, VkDevice
+
+            // 2. Set up Allocator Create Info
+            VmaAllocatorCreateInfo allocatorInfo = VmaAllocatorCreateInfo.calloc(stack)
+                    .flags(0) // Optional flags (e.g., VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT)
+                    .physicalDevice(vulkanDeviceWrapper.getPhysicalDevice()) // Pass VkPhysicalDevice
+                    .device(vulkanDeviceWrapper.getRawDevice())             // Pass VkDevice
+                    .pVulkanFunctions(vulkanFunctions)
+                    .instance(vkInstanceWrapper.getRawInstance())                // Pass VkInstance
+                    .vulkanApiVersion(VK_API_VERSION_1_0); // Or your target version (VK_API_VERSION_1_1 etc.)
+            // Optional: .pHeapSizeLimit(), .pTypeExternalMemoryHandleTypes()
+
+            // 3. Create the Allocator
+            PointerBuffer pAllocator = stack.mallocPointer(1); // VmaAllocator is pointer type
+            vkCheck(vmaCreateAllocator(allocatorInfo, pAllocator), "Failed to create VMA allocator"); // Use vkCheck or check result
+            this.vmaAllocator = pAllocator.get(0); // Store the handle
+
+            if (this.vmaAllocator == VK_NULL_HANDLE) {
+                throw new GdxRuntimeException("VMA Allocator creation succeeded according to result code, but handle is NULL!");
+            }
+            Gdx.app.log("VmaInit", "VMA Allocator created successfully. Handle: " + this.vmaAllocator);
+        }
+    }
+
+    // Ensure you have a corresponding destroy method called before device/instance destruction
+    public void destroyVmaAllocator() {
+        if (vmaAllocator != VK_NULL_HANDLE) {
+            Gdx.app.log("VmaInit", "Destroying VMA Allocator...");
+            vmaDestroyAllocator(vmaAllocator);
+            vmaAllocator = VK_NULL_HANDLE;
+            Gdx.app.log("VmaInit", "VMA Allocator destroyed.");
+        }
+    }
+
+    // Add a getter for the allocator handle
+    public long getVmaAllocator() {
+        if (vmaAllocator == VK_NULL_HANDLE) {
+            throw new IllegalStateException("VMA Allocator not created or already destroyed.");
+        }
+        return vmaAllocator;
     }
 
     private QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, MemoryStack stack) {
