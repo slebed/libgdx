@@ -18,17 +18,10 @@ package com.badlogic.gdx.backend.vulkan;
 
 import static com.badlogic.gdx.backend.vulkan.VkMemoryUtil.vkCheck;
 import static org.lwjgl.system.MemoryStack.stackPush;
-import static org.lwjgl.util.vma.Vma.VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-import static org.lwjgl.util.vma.Vma.VMA_ALLOCATION_CREATE_MAPPED_BIT;
-import static org.lwjgl.util.vma.Vma.VMA_MEMORY_USAGE_AUTO;
-import static org.lwjgl.util.vma.Vma.VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-import static org.lwjgl.util.vma.Vma.vmaMapMemory;
-import static org.lwjgl.util.vma.Vma.vmaUnmapMemory;
 import static org.lwjgl.vulkan.KHRSwapchain.VK_ERROR_OUT_OF_DATE_KHR;
 import static org.lwjgl.vulkan.KHRSwapchain.VK_SUBOPTIMAL_KHR;
 import static org.lwjgl.vulkan.VK10.*;
 
-import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.util.ArrayList;
@@ -39,6 +32,9 @@ import com.badlogic.gdx.AbstractGraphics;
 import com.badlogic.gdx.Application;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.VertexAttribute;
+import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.GridPoint2;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
@@ -59,19 +55,13 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.utils.Disposable;
 
 import org.lwjgl.system.MemoryStack;
-import org.lwjgl.system.MemoryUtil;
 import org.lwjgl.vulkan.VkBufferCopy;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkCommandBufferAllocateInfo;
 import org.lwjgl.vulkan.VkCommandBufferBeginInfo;
-import org.lwjgl.vulkan.VkExtent2D;
-import org.lwjgl.vulkan.VkFenceCreateInfo;
+import org.lwjgl.vulkan.VkPhysicalDevice;
 import org.lwjgl.vulkan.VkQueue;
-import org.lwjgl.vulkan.VkRect2D;
-import org.lwjgl.vulkan.VkSemaphoreCreateInfo;
-import org.lwjgl.vulkan.VkShaderModuleCreateInfo;
 import org.lwjgl.vulkan.VkSubmitInfo;
-import org.lwjgl.vulkan.VkViewport;
 
 public class VulkanGraphics extends AbstractGraphics implements Disposable {
     final String logTag = "VulkanGraphics";
@@ -83,10 +73,8 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     private boolean vsyncEnabled = true; // Store desired vsync state, default true
     private List<VkCommandBuffer> commandBuffers; // VkCommandBuffer objects
 
-    // Sync objects (basic, 1 frame in flight)
-    private long imageAvailableSemaphore = VK_NULL_HANDLE;
-    private long renderFinishedSemaphore = VK_NULL_HANDLE;
-    private long inFlightFence = VK_NULL_HANDLE;
+    private VulkanSyncManager syncManager;
+    private VulkanRenderer vulkanRenderer;
 
     // Assuming access to VulkanApplication components
     private VulkanApplication app = (VulkanApplication) Gdx.app; // Or get via constructor arg
@@ -129,6 +117,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     private long singleTextureLayoutHandle = VK_NULL_HANDLE;
     private long textureDescriptorSet = VK_NULL_HANDLE;
+    private VulkanMesh quadMesh;
 
     private final float[] quadVertices = {
             // Position      // Color          // TexCoord (UV)
@@ -142,15 +131,20 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     };
     private final short[] quadIndices = {0, 1, 2, 2, 3, 0};
 
-    private VulkanBuffer vertexBuffer; // Uses the wrapper class
-    private VulkanBuffer indexBuffer;  // Uses the wrapper class
+    private VkPhysicalDevice physicalDevice;
 
-    // Store counts for drawing
-    private final int vertexCount = 4; // Explicitly 4 vertices
-    private final int indexCount = quadIndices.length; // 6 indices
+    private static final class FrameInfo { // final makes the class itself non-extendable
+        final boolean success;           // final fields ensure immutability after construction
+        final VkCommandBuffer commandBuffer;
+        final int imageIndex;
 
-    private long vertShaderModule = VK_NULL_HANDLE;
-    private long fragShaderModule = VK_NULL_HANDLE;
+        // Constructor to initialize the final fields
+        FrameInfo(boolean success, VkCommandBuffer commandBuffer, int imageIndex) {
+            this.success = success;
+            this.commandBuffer = commandBuffer;
+            this.imageIndex = imageIndex;
+        }
+    }
 
     GLFWFramebufferSizeCallback resizeCallback = new GLFWFramebufferSizeCallback() {
         @Override
@@ -180,7 +174,6 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         // Initial size query can happen here or later
         updateFramebufferInfo();
 
-        // Other non-Vulkan initializations if any...
         this.glVersion = new GLVersion(Application.ApplicationType.Desktop, "", "", "Vulkan");
     }
 
@@ -190,106 +183,216 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     public void initializeSwapchainAndResources() {
         // --- 1. Get Core Vulkan Dependencies ---
-        // It's crucial that VulkanApplication has initialized these before this method is called.
-        // Using Gdx.app here assumes it's safe and properly typed.
         this.app = (VulkanApplication) Gdx.app;
         if (this.app == null) {
             throw new GdxRuntimeException("Gdx.app is null, cannot initialize VulkanGraphics resources.");
         }
-
-        // Get the logical device wrapper
         this.vulkanDevice = app.getVkDevice();
         if (this.vulkanDevice == null || this.vulkanDevice.getRawDevice() == null || this.vulkanDevice.getRawDevice().address() == VK_NULL_HANDLE) {
             throw new GdxRuntimeException("VulkanDevice is not initialized in VulkanApplication.");
         }
-
-        this.pipelineManager = new VulkanPipelineManager(this.vulkanDevice);
-        this.descriptorManager = new VulkanDescriptorManager(this.vulkanDevice);
-
-        // Get the surface associated with *this* graphics instance's window
-        // VulkanApplication needs a way to provide the correct surface per window handle.
         this.surface = app.getSurface(this.windowHandle);
         if (this.surface == VK_NULL_HANDLE) {
             throw new GdxRuntimeException("Vulkan Surface KHR is not created for window handle: " + windowHandle);
         }
-
-        // Get other necessary device components (raw device, physical device, queues)
-        // These are now obtained via the vulkanDevice wrapper or directly if needed
+        // Get other device components (already done if fields are initialized from constructor)
         this.rawDevice = vulkanDevice.getRawDevice();
-
+        this.physicalDevice = vulkanDevice.getPhysicalDevice();
         this.graphicsQueue = vulkanDevice.getGraphicsQueue();
-        // Assuming present queue is the same as graphics for now
-        // TODO: Query and store separate present queue if necessary
-        this.presentQueue = graphicsQueue;
+        this.presentQueue = graphicsQueue; // Assuming same queue
 
-        Gdx.app.log("VulkanGraphics", "Initializing swapchain and graphics resources...");
+        Gdx.app.log(logTag, "Initializing swapchain and graphics resources...");
 
-        try (MemoryStack stack = stackPush()) { // Use stack for temporary allocations if needed locally
+        try {
+            this.descriptorManager = new VulkanDescriptorManager(this.vulkanDevice);
+            this.pipelineManager = new VulkanPipelineManager(this.vulkanDevice);
+        } catch (Exception e) {
+            throw new GdxRuntimeException("Failed to create managers during init", e);
+        }
 
-            // --- 2. Create Swapchain using the Builder ---
-            Gdx.app.log("VulkanGraphics", "Building VulkanSwapchain...");
+        try (MemoryStack stack = stackPush()) {
+
+            // --- 2. Create Swapchain ---
+            Gdx.app.log(logTag, "Building VulkanSwapchain...");
             this.vulkanSwapchain = new VulkanSwapchain.Builder()
                     .device(this.vulkanDevice)
                     .surface(this.surface)
                     .windowHandle(this.windowHandle)
-                    .configuration(this.config) // Pass the config for initial VSync etc.
-                    .build(); // This call creates swapchain, views, renderpass, framebuffers
-            Gdx.app.log("VulkanGraphics", "VulkanSwapchain built successfully.");
+                    .configuration(this.config)
+                    .build();
+            Gdx.app.log(logTag, "VulkanSwapchain built successfully.");
 
             // --- 3. Create Other Graphics Resources ---
-            // Shaders (don't depend on swapchain)
-            createShaderModules();
-            Gdx.app.log("VulkanGraphics", "Shader modules created.");
 
-            try {
-                Gdx.app.log(logTag, "Loading default texture...");
-                FileHandle textureFile = Gdx.files.internal("data/badlogic.jpg"); // Ensure exists
-                this.texture = VulkanTexture.loadFromFile(textureFile, this.vulkanDevice, this.vmaAllocator);
-                Gdx.app.log(logTag, "Default texture loaded successfully.");
-            } catch (Exception e) {
-                // Handle texture loading failure during initialization
-                throw new GdxRuntimeException("Failed to load default texture during init", e);
+            // Load Texture (creates VulkanImage, ImageView, Sampler)
+            Gdx.app.log(logTag, "Loading default texture...");
+            FileHandle textureFile = Gdx.files.internal("data/badlogic.jpg"); // Ensure exists
+            if (!textureFile.exists()) throw new GdxRuntimeException("Default texture file not found: " + textureFile);
+            this.texture = VulkanTexture.loadFromFile(textureFile, this.vulkanDevice, this.vmaAllocator);
+            Gdx.app.log(logTag, "Default texture loaded successfully.");
+
+            // Descriptor Setup (Layout is created in manager, allocate set, update)
+            this.singleTextureLayoutHandle = descriptorManager.getDefaultLayout();
+            if (this.singleTextureLayoutHandle == VK_NULL_HANDLE) {
+                throw new GdxRuntimeException("Failed to get default layout from DescriptorManager");
             }
+            Gdx.app.log(logTag, "Retrieved descriptor set layout from manager.");
 
-            // Descriptor Setup (Layout, Pool, Set - layout might depend on texture sampler binding)
-            createDescriptorSetLayout();
-            Gdx.app.log("VulkanGraphics", "Descriptor set layout created.");
-            createDescriptorSet();
-            Gdx.app.log("VulkanGraphics", "Descriptor set allocated.");
-            updateDescriptorSet(); // Link texture resources to descriptor set
-            Gdx.app.log("VulkanGraphics", "Descriptor set updated.");
+            this.textureDescriptorSet = descriptorManager.allocateSet();
+            if (this.textureDescriptorSet == VK_NULL_HANDLE) {
+                throw new GdxRuntimeException("Failed to allocate descriptor set from DescriptorManager");
+            }
+            Gdx.app.log(logTag, "Allocated descriptor set from manager.");
 
-            // Graphics Pipeline (Depends on shaders, vertex layout, AND the render pass from the swapchain)
-            createGraphicsPipeline(); // This method now gets renderPass via vulkanSwapchain.getRenderPass()
-            Gdx.app.log("VulkanGraphics", "Graphics pipeline created.");
+            VulkanDescriptorManager.updateCombinedImageSampler(
+                    rawDevice,
+                    this.textureDescriptorSet,
+                    0, // binding
+                    this.texture // Pass VulkanTexture object
+            );
+            Gdx.app.log(logTag, "Updated descriptor set using manager helper for texture.");
 
-            // Geometry Buffers (vertex/index - don't depend on swapchain)
-            createGeometryBuffers();
-            Gdx.app.log("VulkanGraphics", "Geometry buffers created.");
+            // Graphics Pipeline (Manager loads shaders internally now)
+            Gdx.app.log(logTag, "Creating graphics pipeline via manager...");
+            FileHandle vertShaderFile = Gdx.files.internal("data/vulkan/shaders/textured.vert.spv");
+            FileHandle fragShaderFile = Gdx.files.internal("data/vulkan/shaders/textured.frag.spv");
+            long renderPassHandle = this.vulkanSwapchain.getRenderPass(); // Get RP handle from Swapchain
+            if (renderPassHandle == VK_NULL_HANDLE) throw new GdxRuntimeException("Render pass handle invalid for pipeline creation");
+            if (!vertShaderFile.exists()) throw new GdxRuntimeException("Vertex shader file not found: " + vertShaderFile);
+            if (!fragShaderFile.exists()) throw new GdxRuntimeException("Fragment shader file not found: " + fragShaderFile);
 
-            // Command Buffers (Pool already exists in VulkanDevice, allocate main command buffers here)
-            // Note: These command buffers are separate from the single-time ones used for resource loading.
-            // These are the ones used in drawFrame().
-            createMainCommandBuffers(stack); // Pass stack if needed, rename method if desired
-            Gdx.app.log("VulkanGraphics", "Main command buffers created.");
+            pipelineManager.createDefaultPipeline(
+                    vertShaderFile,
+                    fragShaderFile,
+                    this.singleTextureLayoutHandle,
+                    renderPassHandle
+            );
+            Gdx.app.log(logTag, "Graphics pipeline created via manager.");
 
-            // Synchronization Objects (semaphores, fences for frame pacing)
-            createSyncObjects(stack); // Pass stack if needed
-            Gdx.app.log("VulkanGraphics", "Sync objects created.");
+            // Geometry Buffers (Create VulkanMesh)
+            Gdx.app.log(logTag, "Creating quad mesh...");
+            VertexAttributes quadAttributes = new VertexAttributes(
+                    new VertexAttribute(VertexAttributes.Usage.Position, 2, ShaderProgram.POSITION_ATTRIBUTE),
+                    new VertexAttribute(VertexAttributes.Usage.ColorUnpacked, 3, ShaderProgram.COLOR_ATTRIBUTE),
+                    new VertexAttribute(VertexAttributes.Usage.TextureCoordinates, 2, ShaderProgram.TEXCOORD_ATTRIBUTE + "0")
+            );
+            this.quadMesh = new VulkanMesh(this.vulkanDevice, this.vmaAllocator, true, // isStatic = true
+                    quadVertices.length / 7, // numVertices = 4
+                    quadIndices.length,    // numIndices = 6
+                    quadAttributes);
+            this.quadMesh.setVertices(quadVertices); // Upload data
+            this.quadMesh.setIndices(quadIndices);   // Upload data
+            Gdx.app.log(logTag, "Quad mesh created successfully.");
 
-            Gdx.app.log("VulkanGraphics", "Initialization of swapchain and resources complete.");
+            this.vulkanRenderer = new VulkanRenderer(this.vulkanDevice);
+            Gdx.app.log(logTag, "VulkanRenderer created.");
+
+            // Main Command Buffers (per swapchain image)
+            createMainCommandBuffers(stack);
+            Gdx.app.log(logTag, "Main command buffers created.");
+
+            // Synchronization Objects
+            Gdx.app.log(logTag, "Creating sync objects via manager...");
+            this.syncManager = new VulkanSyncManager(this.vulkanDevice);
+            Gdx.app.log(logTag, "Sync objects created via manager.");
+
+            Gdx.app.log(logTag, "Initialization of swapchain and resources complete.");
 
         } catch (Exception e) {
-            // Cleanup whatever might have been created before the exception
-            // Calling the main cleanupVulkan is safest as it checks for null handles.
-            Gdx.app.error("VulkanGraphics", "Exception during initializeSwapchainAndResources", e);
+            Gdx.app.error(logTag, "Exception during initializeSwapchainAndResources", e);
             try {
                 cleanupVulkan(); // Attempt cleanup
             } catch (Exception cleanupEx) {
-                Gdx.app.error("VulkanGraphics", "Exception during cleanup after initialization failure", cleanupEx);
+                Gdx.app.error(logTag, "Exception during cleanup after initialization failure", cleanupEx);
             }
-            // Re-throw the original exception to signal failure
             throw new GdxRuntimeException("Failed to initialize Vulkan graphics resources", e);
+        }
+    }
+
+    // Simplified recreateSwapChain in VulkanGraphics
+    private void recreateSwapChain() {
+        if (this.vulkanSwapchain == null) {
+            Gdx.app.error(logTag, "Attempted to recreate null swapchain object!");
+            return;
+        }
+
+        // Check for minimized window
+        try (MemoryStack stack = stackPush()) {
+            IntBuffer pWidth = stack.mallocInt(1);
+            IntBuffer pHeight = stack.mallocInt(1);
+            GLFW.glfwGetFramebufferSize(this.windowHandle, pWidth, pHeight);
+            if (pWidth.get(0) == 0 || pHeight.get(0) == 0) {
+                //Gdx.app.log(logTag, "Window minimized, deferring swapchain recreation.");
+                this.vulkanSwapchain.needsRecreation = true;
+                this.framebufferResized = true;
+                return;
+            }
+        }
+
+        Gdx.app.log(logTag, "Waiting for device idle before swapchain recreation...");
+        vkDeviceWaitIdle(rawDevice);
+        Gdx.app.log(logTag, "Device idle. Calling swapchain recreate...");
+
+        try {
+            // Delegate swapchain resource recreation
+            vulkanSwapchain.recreate();
+            Gdx.app.log(logTag, "Swapchain recreation delegated.");
+
+            // Update internal size tracking
+            updateFramebufferInfo();
+
+            // Recreate Graphics Pipeline (uses new render pass from swapchain)
+            Gdx.app.log(logTag, "Recreating graphics pipeline after swapchain change...");
+            FileHandle vertShaderFile = Gdx.files.internal("data/vulkan/shaders/textured.vert.spv");
+            FileHandle fragShaderFile = Gdx.files.internal("data/vulkan/shaders/textured.frag.spv");
+            long renderPassHandle = this.vulkanSwapchain.getRenderPass();
+            // Assume layout handle (singleTextureLayoutHandle) is still valid
+            if (pipelineManager == null || renderPassHandle == VK_NULL_HANDLE || singleTextureLayoutHandle == VK_NULL_HANDLE
+                    || !vertShaderFile.exists() || !fragShaderFile.exists()) {
+                throw new GdxRuntimeException("Missing dependencies for pipeline recreation during swapchain recreate.");
+            }
+            pipelineManager.createDefaultPipeline(
+                    vertShaderFile,
+                    fragShaderFile,
+                    this.singleTextureLayoutHandle,
+                    renderPassHandle
+            );
+            Gdx.app.log(logTag, "Graphics pipeline recreated via manager.");
+
+            // Re-allocate Command Buffers (number might have changed)
+            cleanupCommandBuffers(); // Clean up old command buffer objects/handles first
+            try (MemoryStack stack = stackPush()) {
+                createMainCommandBuffers(stack);
+                Gdx.app.log(logTag, "Main command buffers re-allocated.");
+            }
+
+            // Notify listener
+            if (Gdx.app != null && Gdx.app.getApplicationListener() != null) {
+                Gdx.app.getApplicationListener().resize(getWidth(), getHeight());
+            }
+            Gdx.app.log(logTag, "Swapchain recreation fully complete.");
+
+        } catch (Exception e) {
+            Gdx.app.error(logTag, "Failed during VulkanSwapchain recreation or dependent resource update", e);
+            // We might be in a bad state here, re-throwing is safest
+            throw new GdxRuntimeException("Failed to fully recreate swapchain and dependent resources", e);
+        }
+    }
+
+    /**
+     * Cleans up the main command buffer List and potentially frees buffers
+     * if the pool wasn't created with RESET_COMMAND_BUFFER_BIT (though ours is).
+     * Primarily clears the Java list reference.
+     */
+    private void cleanupCommandBuffers() {
+        // For pools created with VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        // explicitly freeing individual buffers isn't strictly required before resetting/reallocating,
+        // but it doesn't hurt to clear the Java list.
+        // If not using that flag, vkFreeCommandBuffers would be needed here.
+        if (commandBuffers != null) {
+            Gdx.app.log(logTag, "Clearing main command buffer list.");
+            commandBuffers.clear(); // Clear the list of wrappers
+            commandBuffers = null; // Allow GC
         }
     }
 
@@ -336,28 +439,6 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         }
     }
 
-    private void createSyncObjects(MemoryStack stack) {
-        VkSemaphoreCreateInfo semaphoreInfo = VkSemaphoreCreateInfo.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO);
-
-        VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO)
-                .flags(VK_FENCE_CREATE_SIGNALED_BIT); // Create fence initially signaled
-
-        LongBuffer pSemaphore = stack.mallocLong(1);
-        LongBuffer pFence = stack.mallocLong(1);
-
-        vkCheck(vkCreateSemaphore(rawDevice, semaphoreInfo, null, pSemaphore), "Failed to create image available semaphore");
-        imageAvailableSemaphore = pSemaphore.get(0);
-
-        vkCheck(vkCreateSemaphore(rawDevice, semaphoreInfo, null, pSemaphore), "Failed to create render finished semaphore");
-        renderFinishedSemaphore = pSemaphore.get(0);
-
-        vkCheck(vkCreateFence(rawDevice, fenceInfo, null, pFence),
-                "Failed to create in-flight fence");
-        inFlightFence = pFence.get(0);
-    }
-
     // --- Need cleanupVulkan() method for dispose() and error handling ---
     private void cleanupVulkan() {
         // Use Gdx.app logger if available, otherwise System.out/err
@@ -374,38 +455,44 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         vkDeviceWaitIdle(rawDevice); // MUST BE FIRST!
         logInfo(logTag, "Device idle. Proceeding with graphics cleanup...", useGdxLog);
 
-        // 2. Destroy Pipeline and related objects
+        // Dispose managers and resources in reverse order of dependency/creation
         if (pipelineManager != null) {
             pipelineManager.dispose();
             pipelineManager = null;
         }
-
-        cleanupShaderModules();       // Destroys Shader Modules
-
-        if (descriptorManager != null) { descriptorManager.dispose(); descriptorManager = null; } // Dispose manager
-
-        // 4. Destroy Texture Resources
+        if (descriptorManager != null) {
+            descriptorManager.dispose();
+            descriptorManager = null;
+        }
         if (texture != null) {
-            Gdx.app.log(logTag, "Disposing VulkanTexture wrapper...");
-            texture.dispose(); // Calls internal cleanup for view, sampler, image
+            texture.dispose();
             texture = null;
         }
+        if (quadMesh != null) {
+            quadMesh.dispose();
+            quadMesh = null;
+        }
+        if (vulkanSwapchain != null) {
+            vulkanSwapchain.dispose();
+            vulkanSwapchain = null;
+        }
 
-        // 5. Destroy Geometry Buffers
-        cleanupGeometryBuffers();     // Destroys Buffers and Frees Memory
+        if (syncManager != null) {
+            Gdx.app.log(logTag, "Disposing sync manager...");
+            syncManager.dispose();
+            syncManager = null;
+        }
 
-        // 7. Destroy Synchronization Objects
-        cleanupSyncObjects();         // Destroys Semaphores, Fences
+        singleTextureLayoutHandle = VK_NULL_HANDLE;
+        textureDescriptorSet = VK_NULL_HANDLE;
 
-        vulkanSwapchain.dispose();
+        // Clear command buffer list reference (actual buffers tied to pool)
+        if (commandBuffers != null) {
+            commandBuffers.clear();
+            commandBuffers = null;
+        }
 
-        vertShaderModule = VK_NULL_HANDLE;
-        fragShaderModule = VK_NULL_HANDLE;
-
-        imageAvailableSemaphore = VK_NULL_HANDLE;
-        renderFinishedSemaphore = VK_NULL_HANDLE;
-        inFlightFence = VK_NULL_HANDLE;
-
+        vulkanRenderer = null;
         rawDevice = null; // Mark this instance as cleaned
         logInfo(logTag, "VulkanGraphics cleanup finished.", useGdxLog);
     }
@@ -413,55 +500,6 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     private void logInfo(String tag, String message, boolean useGdx) {
         if (useGdx) Gdx.app.log(tag, message);
         else System.out.println("[" + tag + "] " + message);
-    }
-
-    private void cleanupSyncObjects() {
-        final boolean useGdxLog = (Gdx.app != null && Gdx.app.getApplicationLogger() != null);
-        logInfo(logTag, "Cleaning up sync objects...", useGdxLog);
-
-        // Check if device exists before proceeding
-        if (rawDevice == null) {
-            logInfo(logTag, "Device already null in cleanupSyncObjects.", useGdxLog);
-            // Ensure handles are null anyway
-            imageAvailableSemaphore = VK_NULL_HANDLE;
-            renderFinishedSemaphore = VK_NULL_HANDLE;
-            inFlightFence = VK_NULL_HANDLE;
-            return;
-        }
-
-        // Using safeDestroy avoids explicit null checks for handles
-        VkMemoryUtil.safeDestroySemaphore(imageAvailableSemaphore, rawDevice);
-        imageAvailableSemaphore = VK_NULL_HANDLE;
-
-        VkMemoryUtil.safeDestroySemaphore(renderFinishedSemaphore, rawDevice);
-        renderFinishedSemaphore = VK_NULL_HANDLE;
-
-        VkMemoryUtil.safeDestroyFence(inFlightFence, rawDevice);
-        inFlightFence = VK_NULL_HANDLE;
-
-        logInfo(logTag, "Sync objects destroyed.", useGdxLog);
-    }
-
-    /**
-     * Destroys the Vulkan shader modules.
-     */
-    private void cleanupShaderModules() {
-        final boolean useGdxLog = (Gdx.app != null && Gdx.app.getApplicationLogger() != null);
-        logInfo(logTag, "Cleaning up shader modules...", useGdxLog);
-
-        if (rawDevice == null) { /* ... log error/return ... */
-            return;
-        }
-
-        if (vertShaderModule != VK_NULL_HANDLE) {
-            vkDestroyShaderModule(rawDevice, vertShaderModule, null);
-            vertShaderModule = VK_NULL_HANDLE;
-        }
-        if (fragShaderModule != VK_NULL_HANDLE) {
-            vkDestroyShaderModule(rawDevice, fragShaderModule, null);
-            fragShaderModule = VK_NULL_HANDLE;
-        }
-        logInfo(logTag, "Shader modules destroyed.", useGdxLog);
     }
 
     void updateFramebufferInfo() {
@@ -511,242 +549,63 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         frameId++;
     }
 
-    /**
-     * Draws a single frame. Called repeatedly by the application loop.
-     * Handles swapchain recreation, synchronization, command buffer recording & submission, and presentation.
-     * Uses the managed VulkanSwapchain object for swapchain operations.
-     *
-     * @return true if rendering occurred, false if skipped (e.g., due to resize/recreation).
-     */
     public boolean drawFrame() {
-        // --- Initial Validity Check ---
-        // Check if swapchain object exists and its handle seems valid before proceeding
-        if (vulkanSwapchain == null || vulkanSwapchain.getHandle() == VK_NULL_HANDLE) {
-            Gdx.app.error("VulkanGraphics", "[DrawFrame] Swapchain object or handle is invalid! Attempting recreation trigger.");
-            // If the swapchain isn't valid, we definitely need recreation.
-            // Ensure flags are set so the next attempt triggers recreateSwapChain().
-            this.framebufferResized = true; // Use resize flag to trigger the check path
-            if (vulkanSwapchain != null) {
-                // If object exists but handle is null, ensure its internal flag is set too.
-                vulkanSwapchain.needsRecreation = true;
+        // Step 1: Check if recreation is needed BEFORE trying to begin frame
+        if (framebufferResized || (vulkanSwapchain != null && vulkanSwapchain.needsRecreation())) {
+            //Gdx.app.log(logTag, "[DrawFrame] Recreation needed (resized=" + framebufferResized + ", needsRecreation=" + (vulkanSwapchain != null && vulkanSwapchain.needsRecreation()) + ").");
+            framebufferResized = false; // Reset GLFW flag
+            if (vulkanSwapchain == null || vulkanSwapchain.getHandle() == VK_NULL_HANDLE) {
+                Gdx.app.error(logTag, "[DrawFrame] Cannot recreate, swapchain invalid.");
+                return false; // Cannot proceed if swapchain fundamentally broken
             }
-            // Cannot render this frame.
+
+            recreateSwapChain(); // Call the method to handle recreation
+
+            // Skip rendering this frame as resources changed or might still need recreation (minimized)
             return false;
         }
 
-        try (MemoryStack stack = stackPush()) {
-
-            // --- 1. Wait for the Previous Frame to Finish ---
-            // Wait indefinitely for the fence protecting the resources of the frame we are about to render.
-            vkCheck(vkWaitForFences(rawDevice, inFlightFence, true, Long.MAX_VALUE), "vkWaitForFences failed!");
-
-            // --- 2. Handle Swapchain Recreation ---
-            // Check if recreation is needed due to resize event or previous suboptimal/OOD state.
-            // Check AFTER waiting for fence to ensure resources aren't in use.
-            if (framebufferResized || vulkanSwapchain.needsRecreation()) {
-                Gdx.app.log("VulkanGraphics", "[DrawFrame] Recreation needed (resized=" + framebufferResized + ", needsRecreation=" + vulkanSwapchain.needsRecreation() + ").");
-                framebufferResized = false; // Reset GLFW resize callback flag
-                // The needsRecreation flag within vulkanSwapchain will be reset internally if recreate() succeeds.
-                recreateSwapChain(); // This calls vkDeviceWaitIdle then vulkanSwapchain.recreate() etc.
-
-                // If recreateSwapChain threw an exception, we won't get here.
-                // If it returned normally, skip rendering this frame as resources changed.
-                // It's possible recreation failed internally (e.g., minimized window),
-                // in which case needsRecreation might still be true, handled next frame.
-                return false;
-            }
-
-            // --- 3. Acquire Next Swapchain Image ---
-            //Gdx.app.log("VulkanGraphics", "[DrawFrame] Frame " + frameId + ". Acquiring image...");
-            IntBuffer pImageIndex = stack.mallocInt(1);
-
-            // Use the wrapper method from the VulkanSwapchain object
-            int acquireResult = vulkanSwapchain.acquireNextImage(
-                    imageAvailableSemaphore, // Semaphore to signal when image is available
-                    VK_NULL_HANDLE,          // Fence (optional, using semaphore)
-                    pImageIndex);
-
-            int imageIndex = pImageIndex.get(0); // Index of the acquired image
-
-            // Handle Acquire Results (needsRecreation flag is set internally by acquireNextImage)
-            if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
-                // Swapchain is outdated, cannot render. Recreation flagged internally.
-                Gdx.app.log("VulkanGraphics", "[DrawFrame] Swapchain out of date after acquire. Recreation pending next frame.");
-                // No need to reset fence yet. Skip rest of frame.
-                return false;
-            } else if (acquireResult == VK_SUBOPTIMAL_KHR) {
-                // Can still render, but flag is set for recreation next frame.
-                Gdx.app.log("VulkanGraphics", "[DrawFrame] Swapchain suboptimal after acquire. Recreation pending next frame.");
-                // Proceed with rendering this frame.
-            } else if (acquireResult != VK_SUCCESS) {
-                // Handle other critical errors (e.g., device lost)
-                throw new GdxRuntimeException("Failed to acquire swap chain image! Result: " + VkResultDecoder.decode(acquireResult));
-            }
-
-            // --- Reset Fence ---
-            // Now that we have successfully acquired an image and don't need immediate recreation,
-            // reset the fence associated with *this* frame, allowing vkQueueSubmit to signal it later.
-            vkCheck(vkResetFences(rawDevice, inFlightFence), "vkResetFences failed!");
-
-            // --- 4. Record Command Buffer ---
-            if (imageIndex < 0 || imageIndex >= commandBuffers.size()) {
-                throw new GdxRuntimeException("Invalid imageIndex (" + imageIndex + ") obtained from acquireNextImage. CB Size=" + commandBuffers.size());
-            }
-            VkCommandBuffer commandBuffer = commandBuffers.get(imageIndex);
-
-            // Reset command buffer (reuse)
-            vkCheck(vkResetCommandBuffer(commandBuffer, 0), "vkResetCommandBuffer failed!");
-
-            // Begin recording
-            VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack).sType$Default();
-            // Optionally add .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT) if not reusing CBs frequently,
-            // but typically primary CBs are reused.
-            vkCheck(vkBeginCommandBuffer(commandBuffer, beginInfo), "vkBeginCommandBuffer failed!");
-
-            // --- Begin Render Pass ---
-            renderPassManager.beginSwapchainRenderPass(commandBuffer, vulkanSwapchain, imageIndex, null);
-
-            VkExtent2D currentExtent = vulkanSwapchain.getExtent();
-
-            // --- Set Dynamic States and Bind Resources ---
-            //vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager.getGraphicsPipeline());
-
-            // Set dynamic viewport (example: Y-down)
-            VkViewport.Buffer viewport = VkViewport.calloc(1, stack);
-            viewport.x(0.0f);
-            viewport.y((float) currentExtent.height());
-            viewport.width((float) currentExtent.width());
-            viewport.height(-(float) currentExtent.height()); // Negative height for Y-down
-            viewport.minDepth(0.0f);
-            viewport.maxDepth(1.0f);
-            vkCmdSetViewport(commandBuffer, 0, viewport);
-
-            // Set dynamic scissor
-            VkRect2D.Buffer scissor = VkRect2D.calloc(1, stack);
-            scissor.offset().set(0, 0);
-            scissor.extent().set(currentExtent); // Use full extent
-            vkCmdSetScissor(commandBuffer, 0, scissor);
-
-            // Bind vertex buffer
-            LongBuffer pVertexBuffers = stack.longs(vertexBuffer.bufferHandle);
-            LongBuffer pOffsets = stack.longs(0);
-            vkCmdBindVertexBuffers(commandBuffer, 0, pVertexBuffers, pOffsets);
-
-            // Bind index buffer
-            vkCmdBindIndexBuffer(commandBuffer, indexBuffer.bufferHandle, 0, VK_INDEX_TYPE_UINT16); // Assuming 16-bit indices
-
-            // Bind descriptor sets
-            LongBuffer pDescriptorSets = stack.longs(this.textureDescriptorSet); // Use the stored set handle
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineManager.getPipelineLayout(), 0, pDescriptorSets, null);
-
-            // --- Issue Draw Call ---
-            vkCmdDrawIndexed(commandBuffer, indexCount, 1, 0, 0, 0);
-
-            // --- End Render Pass / Command Buffer ---
-            renderPassManager.endRenderPass(commandBuffer);
-
-            vkCheck(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer failed!");
-
-            // --- 5. Submit Command Buffer ---
-            VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack).sType$Default();
-
-            // Wait for imageAvailableSemaphore before executing color attachment output stage
-            LongBuffer waitSemaphores = stack.longs(imageAvailableSemaphore);
-            IntBuffer waitStages = stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-            submitInfo.waitSemaphoreCount(1).pWaitSemaphores(waitSemaphores).pWaitDstStageMask(waitStages);
-
-            // Command buffer to execute
-            submitInfo.pCommandBuffers(stack.pointers(commandBuffer.address()));
-
-            // Signal renderFinishedSemaphore when commands complete
-            LongBuffer signalSemaphores = stack.longs(renderFinishedSemaphore);
-            submitInfo.pSignalSemaphores(signalSemaphores);
-
-            // Submit to the graphics queue, signaling inFlightFence when done
-            vkCheck(vkQueueSubmit(graphicsQueue, submitInfo, inFlightFence), "vkQueueSubmit failed!");
-
-            // --- 6. Presentation ---
-            // Use the wrapper method from the VulkanSwapchain object
-            int presentResult = vulkanSwapchain.present(
-                    presentQueue,            // Queue for presentation
-                    imageIndex,              // Index of image to present
-                    renderFinishedSemaphore);// Wait for rendering to finish
-
-            // Handle Present Results (needsRecreation flag is set internally by present)
-            if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
-                // Flag is already set, check at start of next frame will handle it.
-                Gdx.app.log("VulkanGraphics", "[DrawFrame] Swapchain suboptimal/OOD after present. Recreation pending next frame.");
-                // No exception needed here, allows frame to finish.
-            } else if (presentResult != VK_SUCCESS) {
-                // Handle other critical errors
-                throw new GdxRuntimeException("Failed to present swap chain image! Result: " + VkResultDecoder.decode(presentResult));
-            }
-
-            // --- Update Timing ---
-            update(); // Update delta time, frame ID, FPS counter etc.
-
-            return true; // Indicate rendering happened for this frame
-
-        } catch (Exception e) {
-            // Catch potential exceptions from Vulkan calls or other logic
-            Gdx.app.error("VulkanGraphics", "Exception during drawFrame", e);
-            // Re-throw as a runtime exception to halt the application loop cleanly
-            throw new GdxRuntimeException("Exception during drawFrame", e);
-        }
-    }
-
-    // Simplified recreateSwapChain in VulkanGraphics
-    private void recreateSwapChain() {
-        // Check if swapchain object exists - Needed if called before init finishes?
-        if (this.vulkanSwapchain == null) {
-            Gdx.app.error(logTag, "Attempted to recreate null swapchain object!");
-            return;
+        // Step 2: Begin the frame
+        FrameInfo frameInfo = beginFrame();
+        if (!frameInfo.success) {
+            return false;
         }
 
-        // Check for minimized window
-        try (MemoryStack stack = stackPush()) {
-            IntBuffer pWidth = stack.mallocInt(1);
-            IntBuffer pHeight = stack.mallocInt(1);
-            GLFW.glfwGetFramebufferSize(this.windowHandle, pWidth, pHeight);
-            if (pWidth.get(0) == 0 || pHeight.get(0) == 0) {
-                Gdx.app.log(logTag, "Window minimized, deferring swapchain recreation.");
-                // Ensure flag remains set in VulkanSwapchain so we try again later
-                this.vulkanSwapchain.needsRecreation = true; // Make sure it tries again
-                this.framebufferResized = true; // Also keep local flag set
-                return;
-            }
-        }
-
-        Gdx.app.log(logTag, "Waiting for device idle before swapchain recreation...");
-        vkDeviceWaitIdle(rawDevice); // Wait here BEFORE calling recreate
-        Gdx.app.log(logTag, "Device idle. Calling swapchain recreate...");
+        VkCommandBuffer commandBuffer = frameInfo.commandBuffer;
+        int imageIndex = frameInfo.imageIndex; // Keep index for endFrame
 
         try {
-            // Delegate recreation to the swapchain object
-            vulkanSwapchain.recreate();
-            Gdx.app.log(logTag, "Swapchain recreation delegated.");
+            // --- CORE DRAWING LOGIC (Using Renderer) ---
+            vulkanRenderer.begin(commandBuffer); // Tell renderer which CB to use
 
-            // Update internal size tracking AFTER recreation
-            updateFramebufferInfo();
+            vulkanRenderer.setDynamicStates(vulkanSwapchain.getExtent()); // Set viewport/scissor
+            vulkanRenderer.bindPipeline(pipelineManager.getGraphicsPipeline()); // Bind the default pipeline
+            vulkanRenderer.bindDescriptorSet(pipelineManager.getPipelineLayout(), this.textureDescriptorSet, 0); // Bind the texture's set
+            vulkanRenderer.drawMesh(quadMesh); // Bind and draw the mesh
 
-            // Recreate Graphics Pipeline - RenderPass might have changed
-            Gdx.app.log(logTag, "Recreating graphics pipeline after swapchain change...");
-            // cleanupPipelineLayout(); // Called internally by createGraphicsPipeline now
-            createGraphicsPipeline();
-            Gdx.app.log(logTag, "Graphics pipeline recreated.");
-
-            // Notify listener AFTER new resources are ready and internal state updated
-            if (Gdx.app != null && Gdx.app.getApplicationListener() != null) {
-                Gdx.app.getApplicationListener().resize(getWidth(), getHeight());
-            }
-            Gdx.app.log(logTag, "Swapchain recreation fully complete.");
+            vulkanRenderer.end(); // Finish renderer sequence for this CB
+            // --- END CORE DRAWING ---
 
         } catch (Exception e) {
-            // Log error and re-throw
-            Gdx.app.error(logTag, "Failed during VulkanSwapchain recreation or pipeline update", e);
-            throw new GdxRuntimeException("Failed to recreate swapchain/pipeline", e);
+            Gdx.app.error(logTag, "Exception during drawing command recording via Renderer", e);
+            // Attempt to end frame, then re-throw
+            try {
+                endFrame(commandBuffer, imageIndex);
+            } catch (Exception endEx) { /* Log endEx */ }
+            throw new GdxRuntimeException("Exception during drawing command recording", e);
+        } finally {
+            // Ensure renderer state is cleared even if error occurred during drawing
+            // (begin() already checks if already active)
+            if (vulkanRenderer != null) {
+                vulkanRenderer.end(); // Ensure end() is called if begin() succeeded but drawing failed
+            }
         }
+
+        // Step 3: End the frame
+        endFrame(commandBuffer, imageIndex);
+
+        update(); // Update timing
+        return true; // Rendered successfully
     }
 
     @Override
@@ -1202,205 +1061,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         }); // executeSingleTimeCommands handles begin, end, submit, wait, free
     }
 
-    private void createGeometryBuffers() {
-        // Clean up old buffers if they exist (e.g., during recreation)
-        cleanupGeometryBuffers(); // Ensure previous are disposed
-
-        Gdx.app.log("VulkanGraphics", "Creating geometry buffers using VMA...");
-
-        VulkanBuffer stagingVertexBuffer = null;
-        VulkanBuffer stagingIndexBuffer = null;
-
-        try {
-            // --- Vertex Buffer ---
-            long vertexDataSize = (long) quadVertices.length * Float.BYTES;
-
-            // 1. Create Staging Buffer (Host Visible, Mapped)
-            stagingVertexBuffer = VulkanResourceUtil.createManagedBuffer(
-                    vmaAllocator,
-                    vertexDataSize,
-                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,             // Usage: Source for transfer
-                    VMA_MEMORY_USAGE_AUTO,                        // Let VMA pick CPU or GPU based on flags
-                    VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT // Mappable
-            );
-
-            // 2. Map, Copy Vertex Data, Unmap (Flush might be needed if not HOST_COHERENT)
-            PointerBuffer pData = MemoryUtil.memAllocPointer(1); // Use heap allocation for pointer across VMA calls
-            try {
-                vkCheck(vmaMapMemory(vmaAllocator, stagingVertexBuffer.allocationHandle, pData), "VMA Failed to map vertex staging buffer");
-                ByteBuffer byteBuffer = MemoryUtil.memByteBuffer(pData.get(0), (int) vertexDataSize);
-                byteBuffer.asFloatBuffer().put(quadVertices).flip();
-                // If VMA_MEMORY_USAGE_AUTO didn't pick a HOST_COHERENT type, flush is needed:
-                // vmaFlushAllocation(vmaAllocator, stagingVertexBuffer.allocationHandle, 0, vertexDataSize);
-                vmaUnmapMemory(vmaAllocator, stagingVertexBuffer.allocationHandle);
-            } finally {
-                MemoryUtil.memFree(pData); // Free the pointer buffer
-            }
-
-
-            // 3. Create Final Vertex Buffer (Device Local Optimal)
-            this.vertexBuffer = VulkanResourceUtil.createManagedBuffer(
-                    vmaAllocator,
-                    vertexDataSize,
-                    VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, // Usage: Dest + Vertex
-                    VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,          // Prefer GPU memory
-                    0                                             // No specific alloc flags needed
-            );
-
-            // 4. Copy using single-time command
-            copyBuffer(stagingVertexBuffer.bufferHandle, this.vertexBuffer.bufferHandle, vertexDataSize); // Uses executeSingleTimeCommands
-
-
-            Gdx.app.log("VulkanGraphics", "Vertex buffer created successfully.");
-
-
-            // --- Index Buffer ---
-            long indexDataSize = (long) quadIndices.length * Short.BYTES;
-
-            // 1. Create Staging Buffer
-            stagingIndexBuffer = VulkanResourceUtil.createManagedBuffer(
-                    vmaAllocator,
-                    indexDataSize,
-                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                    VMA_MEMORY_USAGE_AUTO,
-                    VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
-            );
-
-            // 2. Map, Copy Index Data, Unmap
-            pData = MemoryUtil.memAllocPointer(1);
-            try {
-                vkCheck(vmaMapMemory(vmaAllocator, stagingIndexBuffer.allocationHandle, pData), "VMA Failed to map index staging buffer");
-                ByteBuffer byteBuffer = MemoryUtil.memByteBuffer(pData.get(0), (int) indexDataSize);
-                byteBuffer.asShortBuffer().put(quadIndices).flip();
-                // vmaFlushAllocation(vmaAllocator, stagingIndexBuffer.allocationHandle, 0, indexDataSize); // If needed
-                vmaUnmapMemory(vmaAllocator, stagingIndexBuffer.allocationHandle);
-            } finally {
-                MemoryUtil.memFree(pData);
-
-            }
-
-
-            // 3. Create Final Index Buffer
-            this.indexBuffer = VulkanResourceUtil.createManagedBuffer(
-                    vmaAllocator,
-                    indexDataSize,
-                    VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, // Usage: Dest + Index
-                    VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
-                    0
-            );
-
-            // 4. Copy using single-time command
-            copyBuffer(stagingIndexBuffer.bufferHandle, this.indexBuffer.bufferHandle, indexDataSize);
-
-            Gdx.app.log("VulkanGraphics", "Index buffer created successfully.");
-
-        } catch (Exception e) {
-            // Ensure partial resources are cleaned up on failure
-            cleanupGeometryBuffers(); // Call helper that disposes wrappers
-            throw new GdxRuntimeException("Failed to create geometry buffers", e);
-        } finally {
-            // 5. Clean up Staging Buffers (always happens)
-            if (stagingVertexBuffer != null) {
-                Gdx.app.log(logTag, "Disposing staging buffer (handle " + stagingVertexBuffer.bufferHandle + ")"); // Add log
-                stagingVertexBuffer.dispose();
-            }
-            if (stagingIndexBuffer != null) {
-                Gdx.app.log(logTag, "Disposing staging buffer (handle " + stagingIndexBuffer.bufferHandle + ")"); // Add log
-                stagingIndexBuffer.dispose();
-            }
-
-        }
-    }
-
-    private void cleanupGeometryBuffers() {
-        Gdx.app.log("VulkanGraphics", "Cleaning up geometry buffer wrappers...");
-        if (vertexBuffer != null) {
-            vertexBuffer.dispose(); // Calls vmaDestroyBuffer internally
-            vertexBuffer = null;
-        }
-        if (indexBuffer != null) {
-            indexBuffer.dispose(); // Calls vmaDestroyBuffer internally
-            indexBuffer = null;
-        }
-    }
-
-    private long createShaderModule(ByteBuffer code) {
-        try (MemoryStack stack = stackPush()) {
-            VkShaderModuleCreateInfo createInfo = VkShaderModuleCreateInfo.calloc(stack)
-                    .sType$Default()
-                    .pCode(code); // Pass the ByteBuffer directly
-
-            LongBuffer pShaderModule = stack.mallocLong(1);
-            VkMemoryUtil.vkCheck(vkCreateShaderModule(rawDevice, createInfo, null, pShaderModule),
-                    "Failed to create shader module");
-
-            return pShaderModule.get(0);
-        }
-    }
-
-    // Helper to read file into ByteBuffer
-    private ByteBuffer readFileToByteBuffer(com.badlogic.gdx.files.FileHandle fileHandle) {
-        if (!fileHandle.exists()) { // Add explicit check here too
-            throw new GdxRuntimeException("File not found in readFileToByteBuffer: " + fileHandle.path() + " (" + fileHandle.type() + ")");
-        }
-        byte[] bytes = fileHandle.readBytes();
-        ByteBuffer buffer = org.lwjgl.BufferUtils.createByteBuffer(bytes.length);
-        buffer.put(bytes);
-        buffer.flip();
-        return buffer;
-    }
-
-    private void createShaderModules() {
-        System.out.println("Creating shader modules...");
-        String vertPath = "data/vulkan/shaders/textured.vert.spv"; // Use forward slashes
-        String fragPath = "data/vulkan/shaders/textured.frag.spv";
-
-        com.badlogic.gdx.files.FileHandle vertFileHandle = Gdx.files.internal(vertPath);
-        com.badlogic.gdx.files.FileHandle fragFileHandle = Gdx.files.internal(fragPath);
-
-        // --- Add Logging & Checks ---
-        System.out.println("Attempting to load Vert Shader from: " + vertFileHandle.path() + " (Type: " + vertFileHandle.type() + ")");
-        System.out.println("Vert shader exists: " + vertFileHandle.exists());
-        System.out.println("Attempting to load Frag Shader from: " + fragFileHandle.path() + " (Type: " + fragFileHandle.type() + ")");
-        System.out.println("Frag shader exists: " + fragFileHandle.exists());
-
-        if (!vertFileHandle.exists()) {
-            throw new GdxRuntimeException("Vertex shader not found at internal path: " + vertPath);
-        }
-        if (!fragFileHandle.exists()) {
-            throw new GdxRuntimeException("Fragment shader not found at internal path: " + fragPath);
-        }
-        // --- End Logging & Checks ---
-
-        ByteBuffer vertShaderCode = readFileToByteBuffer(vertFileHandle);
-        ByteBuffer fragShaderCode = readFileToByteBuffer(fragFileHandle);
-
-        vertShaderModule = createShaderModule(vertShaderCode);
-        fragShaderModule = createShaderModule(fragShaderCode);
-        System.out.println("Shader modules created.");
-    }
-
-    private void createGraphicsPipeline() {
-        // Ensure dependencies are ready
-        if (this.vulkanSwapchain == null || this.vulkanSwapchain.getRenderPass() == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Cannot create pipeline before swapchain and render pass exist.");
-        }
-        if (this.vertShaderModule == VK_NULL_HANDLE || this.fragShaderModule == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Shader modules must be created before pipeline.");
-        }
-
-        if (this.singleTextureLayoutHandle == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("DescriptorSetLayout handle not set before pipeline creation.");
-        }
-        pipelineManager.createDefaultPipeline(
-                this.vertShaderModule,
-                this.fragShaderModule,
-                this.singleTextureLayoutHandle, // Pass the stored layout handle
-                this.vulkanSwapchain.getRenderPass()
-        );
-    }
-
-    private void createDescriptorSetLayout() {
+    /*private void createDescriptorSetLayout() {
         Gdx.app.log(logTag, "Attempting to retrieve layout from DescriptorManager...");
         if (descriptorManager == null) {
             throw new GdxRuntimeException("DescriptorManager is null in createDescriptorSetLayout!");
@@ -1441,6 +1102,159 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         );
         Gdx.app.log(logTag, "Updated descriptor set using manager helper for texture.");
 
+    }
+*/
+
+    /**
+     * Handles start-of-frame Vulkan operations: waits for GPU, acquires swapchain image,
+     * resets fence, begins command buffer, and begins the render pass.
+     *
+     * @return A FrameInfo object containing success status, the active command buffer, and the swapchain image index.
+     * Returns success=false if swapchain is out of date or acquire failed non-critically, requiring recreation check.
+     */
+    private FrameInfo beginFrame() {
+        // --- Pre-checks ---
+        if (vulkanSwapchain == null || vulkanSwapchain.getHandle() == VK_NULL_HANDLE) {
+            Gdx.app.error(logTag, "[beginFrame] Swapchain object or handle is invalid!");
+            return new FrameInfo(false, null, -1);
+        }
+        if (syncManager == null) {
+            Gdx.app.error(logTag, "[beginFrame] SyncManager is null!");
+            // Or throw new GdxRuntimeException("SyncManager not initialized");
+            return new FrameInfo(false, null, -1);
+        }
+
+        try (MemoryStack stack = stackPush()) {
+            // --- 1. Wait for the Previous Frame to Finish ---
+            long fence = syncManager.getInFlightFence(); // Get fence from manager
+            if (fence == VK_NULL_HANDLE) throw new GdxRuntimeException("In-flight fence handle is NULL!");
+            vkCheck(vkWaitForFences(rawDevice, fence, true, Long.MAX_VALUE),
+                    "vkWaitForFences failed!");
+
+            // --- 2. Acquire Next Swapchain Image ---
+            IntBuffer pImageIndex = stack.mallocInt(1);
+            long imageAcquireSemaphore = syncManager.getImageAvailableSemaphore(); // Get semaphore from manager
+            if (imageAcquireSemaphore == VK_NULL_HANDLE) throw new GdxRuntimeException("Image available semaphore handle is NULL!");
+
+            int acquireResult = vulkanSwapchain.acquireNextImage(
+                    imageAcquireSemaphore,
+                    VK_NULL_HANDLE, // No fence needed for acquire
+                    pImageIndex);
+
+            int imageIndex = pImageIndex.get(0);
+
+            // Handle Acquire Results
+            if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
+                Gdx.app.log(logTag, "[beginFrame] Swapchain out of date after acquire. Needs recreation.");
+                // Flag is set internally by acquireNextImage, recreation check happens before beginFrame
+                return new FrameInfo(false, null, -1); // Signal failure
+            } else if (acquireResult == VK_SUBOPTIMAL_KHR) {
+                Gdx.app.log(logTag, "[beginFrame] Swapchain suboptimal after acquire. Recreation pending next frame.");
+                // Proceed, but flag is set for next frame's check
+            } else if (acquireResult != VK_SUCCESS) {
+                throw new GdxRuntimeException("[beginFrame] Failed to acquire swap chain image! Result: " + VkResultDecoder.decode(acquireResult));
+            }
+
+            // --- 3. Reset Fence ---
+            // Fence waited successfully, image acquired successfully (or suboptimal), reset the fence
+            vkCheck(vkResetFences(rawDevice, fence), "vkResetFences failed!"); // Use fence handle obtained earlier
+
+            // --- 4. Prepare Command Buffer ---
+            if (commandBuffers == null || imageIndex < 0 || imageIndex >= commandBuffers.size()) {
+                throw new GdxRuntimeException("[beginFrame] CommandBuffers list invalid or imageIndex (" + imageIndex + ") out of bounds. CB Size=" + (commandBuffers != null ? commandBuffers.size() : "null"));
+            }
+            VkCommandBuffer commandBuffer = commandBuffers.get(imageIndex);
+
+            vkCheck(vkResetCommandBuffer(commandBuffer, 0), "vkResetCommandBuffer failed!");
+
+            VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack).sType$Default();
+            vkCheck(vkBeginCommandBuffer(commandBuffer, beginInfo), "vkBeginCommandBuffer failed!");
+
+            // --- 5. Begin Render Pass ---
+            if (renderPassManager == null) throw new GdxRuntimeException("RenderPassManager is null!");
+            renderPassManager.beginSwapchainRenderPass(commandBuffer, vulkanSwapchain, imageIndex, null); // Use default clear color
+
+            // --- Success ---
+            return new FrameInfo(true, commandBuffer, imageIndex);
+
+        } catch (Exception e) {
+            Gdx.app.error(logTag, "Exception during beginFrame", e);
+            return new FrameInfo(false, null, -1); // Indicate failure on any exception
+        }
+    }
+
+    /**
+     * Handles end-of-frame Vulkan operations: ends render pass, ends command buffer,
+     * submits command buffer to queue, and presents the swapchain image.
+     *
+     * @param commandBuffer The command buffer that was recorded into.
+     * @param imageIndex    The index of the swapchain image that was acquired and rendered to.
+     */
+    private void endFrame(VkCommandBuffer commandBuffer, int imageIndex) {
+        // --- Pre-checks ---
+        if (commandBuffer == null) {
+            Gdx.app.error(logTag, "[endFrame] Received null command buffer!");
+            // Maybe throw? Continuing might leave sync objects in weird state.
+            throw new GdxRuntimeException("Cannot end frame with null command buffer");
+        }
+        if (vulkanSwapchain == null || vulkanSwapchain.getHandle() == VK_NULL_HANDLE) {
+            Gdx.app.error(logTag, "[endFrame] Swapchain object or handle is invalid!");
+            throw new GdxRuntimeException("Cannot end frame with invalid swapchain");
+        }
+        if (syncManager == null) {
+            Gdx.app.error(logTag, "[endFrame] SyncManager is null!");
+            throw new GdxRuntimeException("SyncManager not initialized for endFrame");
+        }
+
+
+        try (MemoryStack stack = stackPush()) {
+
+            // --- 1. End Render Pass & Command Buffer ---
+            if (renderPassManager == null) throw new GdxRuntimeException("RenderPassManager is null!");
+            renderPassManager.endRenderPass(commandBuffer);
+            vkCheck(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer failed!");
+
+            // --- 2. Submit Command Buffer ---
+            VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack).sType$Default();
+
+            // Get sync object handles from manager
+            long imgAvailSem = syncManager.getImageAvailableSemaphore();
+            long renderFinSem = syncManager.getRenderFinishedSemaphore();
+            long fence = syncManager.getInFlightFence();
+            if (imgAvailSem == VK_NULL_HANDLE || renderFinSem == VK_NULL_HANDLE || fence == VK_NULL_HANDLE) {
+                throw new GdxRuntimeException("One or more sync object handles are NULL in endFrame!");
+            }
+
+
+            LongBuffer waitSemaphores = stack.longs(imgAvailSem); // Wait for image available
+            IntBuffer waitStages = stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+            LongBuffer signalSemaphores = stack.longs(renderFinSem); // Signal render finished
+
+            submitInfo.waitSemaphoreCount(1).pWaitSemaphores(waitSemaphores).pWaitDstStageMask(waitStages);
+            submitInfo.pCommandBuffers(stack.pointers(commandBuffer.address()));
+            submitInfo.pSignalSemaphores(signalSemaphores);
+
+            // Submit to the graphics queue, signaling the inFlightFence
+            vkCheck(vkQueueSubmit(graphicsQueue, submitInfo, fence), // Use fence from manager
+                    "vkQueueSubmit failed!");
+
+            // --- 3. Presentation ---
+            int presentResult = vulkanSwapchain.present(
+                    presentQueue,            // Use present queue
+                    imageIndex,
+                    renderFinSem);           // Wait for render finished semaphore from manager
+
+            // Handle Present Results (needsRecreation flag is set internally if needed)
+            if (presentResult != VK_SUCCESS && presentResult != VK_SUBOPTIMAL_KHR && presentResult != VK_ERROR_OUT_OF_DATE_KHR) {
+                // Throw only for critical errors, OOD/Suboptimal are handled by recreation check next frame
+                throw new GdxRuntimeException("[endFrame] Failed to present swap chain image! Result: " + VkResultDecoder.decode(presentResult));
+            }
+            // Logging for suboptimal/ood happens within vulkanSwapchain.present if desired
+
+        } catch (Exception e) {
+            Gdx.app.error(logTag, "Exception during endFrame", e);
+            throw new GdxRuntimeException("Exception during endFrame", e);
+        }
     }
 
 }
