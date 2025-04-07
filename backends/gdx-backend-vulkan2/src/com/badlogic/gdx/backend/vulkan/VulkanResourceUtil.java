@@ -3,10 +3,9 @@ package com.badlogic.gdx.backend.vulkan;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.vma.VmaAllocationCreateInfo;
-import org.lwjgl.util.vma.VmaAllocationInfo;
 import org.lwjgl.vulkan.VkBufferCreateInfo;
 import org.lwjgl.vulkan.VkImageCreateInfo;
-// ... other imports ...
+
 import static org.lwjgl.system.MemoryStack.stackPush;
 import static org.lwjgl.util.vma.Vma.*;
 import static com.badlogic.gdx.backend.vulkan.VkMemoryUtil.vkCheck; // Or check result directly

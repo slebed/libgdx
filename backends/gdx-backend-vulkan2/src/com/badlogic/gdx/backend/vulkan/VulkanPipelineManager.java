@@ -4,6 +4,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
+
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.*;
 
@@ -28,10 +29,13 @@ public class VulkanPipelineManager implements Disposable {
     private final VkDevice rawDevice;
 
     // Handles managed by this class
-    private long pipelineLayout = VK_NULL_HANDLE;
+    //private long pipelineLayout = VK_NULL_HANDLE;
     private long graphicsPipeline = VK_NULL_HANDLE;
     private final Map<String, Long> shaderModuleCache; // Cache: File path -> Module Handle
     private long vkPipelineCacheHandle = VK_NULL_HANDLE; // Optional Vulkan pipeline cache object
+    private final Map<Long, Long> pipelineLayoutCache = new HashMap<>();
+
+    private long spriteBatchPipeline = VK_NULL_HANDLE;
 
     /**
      * Constructs a VulkanPipelineManager.
@@ -47,19 +51,17 @@ public class VulkanPipelineManager implements Disposable {
         Gdx.app.log(logTag, "Initialized.");
     }
 
-    // --- Public Methods ---
-
-
     /**
-     * Creates the default graphics pipeline and its layout based on shader files.
-     * Cleans up any existing default pipeline/layout first.
+     * Creates the default graphics pipeline based on shader files and layouts.
+     * Cleans up any existing default graphics pipeline first. The pipeline layout
+     * lifecycle is managed by the cache via getOrCreatePipelineLayout.
      * Loads shader modules from the provided FileHandles, utilizing an internal cache.
      * Expects descriptor set layout to be created beforehand.
      *
-     * @param vertShaderFile FileHandle for the vertex shader SPIR-V code.
-     * @param fragShaderFile FileHandle for the fragment shader SPIR-V code.
-     * @param descriptorSetLayoutHandle Handle to the descriptor set layout to use.
-     * @param renderPassHandle Handle to a compatible render pass.
+     * @param vertShaderFile            FileHandle for the vertex shader SPIR-V code.
+     * @param fragShaderFile            FileHandle for the fragment shader SPIR-V code.
+     * @param descriptorSetLayoutHandle Handle to the descriptor set layout to use for creating/retrieving the pipeline layout.
+     * @param renderPassHandle          Handle to a compatible render pass.
      */
     public void createDefaultPipeline(FileHandle vertShaderFile, FileHandle fragShaderFile, long descriptorSetLayoutHandle, long renderPassHandle) {
         // Load shader modules using the internal loader/cache
@@ -76,25 +78,28 @@ public class VulkanPipelineManager implements Disposable {
 
         Gdx.app.log(logTag, "Creating default graphics pipeline...");
 
-        // Cleanup existing layout and pipeline first to prevent leaks on recreation
-        cleanupLayoutAndPipeline();
+        // Cleanup existing default graphics pipeline first.
+        // The corresponding Pipeline Layout is managed by the cache and cleaned in dispose().
+        if (graphicsPipeline != VK_NULL_HANDLE) {
+            Gdx.app.log(logTag, "Destroying previous default graphics pipeline: " + graphicsPipeline);
+            vkDestroyPipeline(rawDevice, graphicsPipeline, null);
+            graphicsPipeline = VK_NULL_HANDLE; // Reset the handle
+        }
 
         try (MemoryStack stack = stackPush()) {
 
-            // --- Create Pipeline Layout ---
-            VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
-                    .sType$Default()
-                    .pSetLayouts(stack.longs(descriptorSetLayoutHandle)); // Use provided layout
+            // --- Get or Create Pipeline Layout via Cache ---
+            // Obtain the pipeline layout handle using the caching method.
+            // This ensures layout reuse and centralizes management.
+            long layoutHandle = getOrCreatePipelineLayout(descriptorSetLayoutHandle); // <<< Uses the caching method
+            Gdx.app.log(logTag, "Using pipeline layout: " + layoutHandle); // Log the handle being used
 
-            LongBuffer pPipelineLayout = stack.mallocLong(1);
-            vkCheck(vkCreatePipelineLayout(rawDevice, pipelineLayoutInfo, null, pPipelineLayout),
-                    "Failed to create pipeline layout");
-            this.pipelineLayout = pPipelineLayout.get(0); // Store handle
-            Gdx.app.log(logTag,"Created pipeline layout: " + this.pipelineLayout);
 
             // --- Define Pipeline States (Using internal helpers) ---
+            // These helper methods define vertex input, blending, rasterization etc.
+            // Ensure they match the requirements of your default shaders and rendering.
             VkPipelineShaderStageCreateInfo.Buffer shaderStages = createShaderStages(stack, vertModuleHandle, fragModuleHandle);
-            VkPipelineVertexInputStateCreateInfo vertexInputInfo = createVertexInputInfo(stack);
+            VkPipelineVertexInputStateCreateInfo vertexInputInfo = createVertexInputInfo(stack); // Ensure this matches SpriteBatch vertex format if used here
             VkPipelineInputAssemblyStateCreateInfo inputAssembly = createInputAssemblyInfo(stack);
             VkPipelineViewportStateCreateInfo viewportState = createViewportInfo(stack);
             VkPipelineRasterizationStateCreateInfo rasterizer = createRasterizationInfo(stack);
@@ -107,43 +112,44 @@ public class VulkanPipelineManager implements Disposable {
             VkGraphicsPipelineCreateInfo.Buffer pipelineInfo = VkGraphicsPipelineCreateInfo.calloc(1, stack)
                     .sType$Default()
                     .pStages(shaderStages)
-                    .pVertexInputState(vertexInputInfo).pInputAssemblyState(inputAssembly)
-                    .pViewportState(viewportState).pRasterizationState(rasterizer)
-                    .pMultisampleState(multisampling).pDepthStencilState(depthStencil)
-                    .pColorBlendState(colorBlending).pDynamicState(dynamicState)
-                    .layout(this.pipelineLayout)   // Use the layout created above
-                    .renderPass(renderPassHandle) // Use provided render pass
-                    .subpass(0)
-                    .basePipelineHandle(VK_NULL_HANDLE)
-                    .basePipelineIndex(-1);
+                    .pVertexInputState(vertexInputInfo)
+                    .pInputAssemblyState(inputAssembly)
+                    .pViewportState(viewportState)
+                    .pRasterizationState(rasterizer)
+                    .pMultisampleState(multisampling)
+                    .pDepthStencilState(depthStencil) // null if not needed, but using helper is fine
+                    .pColorBlendState(colorBlending)
+                    .pDynamicState(dynamicState) // null if no dynamic states
+                    .layout(layoutHandle)        // <<< Use the handle obtained from getOrCreatePipelineLayout
+                    .renderPass(renderPassHandle) // Must be compatible with this pipeline
+                    .subpass(0)                   // Index of the subpass where this pipeline will be used
+                    .basePipelineHandle(VK_NULL_HANDLE) // Optional: for pipeline derivatives
+                    .basePipelineIndex(-1);             // Optional: for pipeline derivatives
 
             LongBuffer pGraphicsPipeline = stack.mallocLong(1);
-            // Use the Vulkan pipeline cache handle if available
+            // Use the Vulkan pipeline cache object (vkPipelineCacheHandle) if available for potentially faster creation
             vkCheck(vkCreateGraphicsPipelines(rawDevice, this.vkPipelineCacheHandle, pipelineInfo, null, pGraphicsPipeline),
                     "Failed to create graphics pipeline");
-            this.graphicsPipeline = pGraphicsPipeline.get(0); // Store handle
+            this.graphicsPipeline = pGraphicsPipeline.get(0); // Store handle for the newly created default pipeline
 
             Gdx.app.log(logTag, "Default graphics pipeline created successfully: " + this.graphicsPipeline);
 
         } catch (Exception e) {
-            // Ensure partial cleanup on failure
-            cleanupLayoutAndPipeline(); // Clean up potentially created layout/pipeline
+            // If pipeline creation fails partway, ensure the graphicsPipeline handle is reset.
+            // The layout is managed by the cache, no need to clean it here.
+            if (graphicsPipeline != VK_NULL_HANDLE) {
+                // This might not be strictly necessary if vkCreateGraphicsPipelines fails cleanly,
+                // but it's safer to ensure the handle is null on failure.
+                vkDestroyPipeline(rawDevice, graphicsPipeline, null);
+                graphicsPipeline = VK_NULL_HANDLE;
+            }
             throw new GdxRuntimeException("Failed to create default graphics pipeline", e);
         }
     }
 
     /**
-     * Gets the handle of the currently managed default pipeline layout.
-     * @return VkPipelineLayout handle, or VK_NULL_HANDLE if not created.
-     */
-    public long getPipelineLayout() {
-        // Optional: Add check/warning if called when handle is null
-        // if (pipelineLayout == VK_NULL_HANDLE) { Gdx.app.error(logTag, "getPipelineLayout() called when handle is NULL!"); }
-        return pipelineLayout;
-    }
-
-    /**
      * Gets the handle of the currently managed default graphics pipeline.
+     *
      * @return VkPipeline handle, or VK_NULL_HANDLE if not created.
      */
     public long getGraphicsPipeline() {
@@ -157,17 +163,10 @@ public class VulkanPipelineManager implements Disposable {
      * Safe to call even if handles are VK_NULL_HANDLE.
      */
     public void cleanupLayoutAndPipeline() {
-        // Destroy Pipeline first as it depends on Layout
         if (graphicsPipeline != VK_NULL_HANDLE) {
             Gdx.app.log(logTag,"Destroying graphics pipeline: " + graphicsPipeline);
             vkDestroyPipeline(rawDevice, graphicsPipeline, null);
-            graphicsPipeline = VK_NULL_HANDLE;
-        }
-        // Then destroy Layout
-        if (pipelineLayout != VK_NULL_HANDLE) {
-            Gdx.app.log(logTag,"Destroying pipeline layout: " + pipelineLayout);
-            vkDestroyPipelineLayout(rawDevice, pipelineLayout, null);
-            pipelineLayout = VK_NULL_HANDLE;
+            graphicsPipeline = VK_NULL_HANDLE; // Reset the handle
         }
     }
 
@@ -177,11 +176,11 @@ public class VulkanPipelineManager implements Disposable {
      */
     @Override
     public void dispose() {
-        Gdx.app.log(logTag,"Disposing pipeline manager...");
-        cleanupLayoutAndPipeline(); // Clean current pipeline and layout first
+        Gdx.app.log(logTag, "Disposing pipeline manager...");
+        cleanupLayoutAndPipeline(); // Clean the default graphicsPipeline
 
         // Clean up cached shader modules
-        Gdx.app.log(logTag,"Cleaning up cached shader modules (" + shaderModuleCache.size() + ")...");
+        Gdx.app.log(logTag, "Cleaning up cached shader modules (" + shaderModuleCache.size() + ")...");
         for (Map.Entry<String, Long> entry : shaderModuleCache.entrySet()) {
             long moduleHandle = entry.getValue();
             if (moduleHandle != VK_NULL_HANDLE) {
@@ -189,13 +188,35 @@ public class VulkanPipelineManager implements Disposable {
                 vkDestroyShaderModule(rawDevice, moduleHandle, null);
             }
         }
-        shaderModuleCache.clear();
-        Gdx.app.log(logTag,"Shader module cache cleared.");
+        shaderModuleCache.clear(); // Clear map AFTER destroying contents
+        Gdx.app.log(logTag, "Shader module cache cleared.");
+
+
+        // *** BEGIN MISSING SECTION ***
+        // Clean up cached pipeline layouts
+        Gdx.app.log(logTag,"Cleaning up cached pipeline layouts (" + pipelineLayoutCache.size() + ")...");
+        for (long layoutHandle : pipelineLayoutCache.values()) { // Iterate through the handles
+            if (layoutHandle != VK_NULL_HANDLE) {
+                Gdx.app.log(logTag, "Destroying cached pipeline layout: " + layoutHandle);
+                vkDestroyPipelineLayout(rawDevice, layoutHandle, null); // Destroy the layout
+            }
+        }
+        pipelineLayoutCache.clear(); // Clear map AFTER destroying contents
+        Gdx.app.log(logTag, "Pipeline layout cache cleared.");
+        // *** END MISSING SECTION ***
+
+
+        // Destroy SpriteBatch pipeline if created
+        if (spriteBatchPipeline != VK_NULL_HANDLE) {
+            Gdx.app.log(logTag,"Destroying SpriteBatch graphics pipeline: " + spriteBatchPipeline);
+            vkDestroyPipeline(rawDevice, spriteBatchPipeline, null);
+            spriteBatchPipeline = VK_NULL_HANDLE;
+        }
 
         // Optional: Destroy VkPipelineCache
         destroyPipelineCache();
 
-        Gdx.app.log(logTag,"Pipeline manager disposed.");
+        Gdx.app.log(logTag, "Pipeline manager disposed.");
     }
 
 
@@ -203,6 +224,7 @@ public class VulkanPipelineManager implements Disposable {
 
     /**
      * Loads or retrieves a cached shader module.
+     *
      * @param shaderFile FileHandle for the shader.
      * @return VkShaderModule handle.
      */
@@ -379,4 +401,178 @@ public class VulkanPipelineManager implements Disposable {
         }
     }
 
-} // End VulkanPipelineManager class
+    /**
+     * Gets an existing VkPipelineLayout for the given descriptor set layout,
+     * or creates and caches a new one if it doesn't exist.
+     *
+     * @param descriptorSetLayoutHandle The handle of the VkDescriptorSetLayout.
+     * @return The handle of the corresponding VkPipelineLayout.
+     */
+    public synchronized long getOrCreatePipelineLayout(long descriptorSetLayoutHandle) {
+        if (descriptorSetLayoutHandle == VK_NULL_HANDLE) {
+            throw new IllegalArgumentException("DescriptorSetLayout handle cannot be VK_NULL_HANDLE");
+        }
+
+        // Check cache first
+        Long cachedLayout = pipelineLayoutCache.get(descriptorSetLayoutHandle);
+        if (cachedLayout != null) {
+            Gdx.app.debug(logTag, "PipelineLayout cache hit for DescriptorSetLayout: " + descriptorSetLayoutHandle);
+            return cachedLayout;
+        }
+
+        // Not in cache, create it
+        Gdx.app.log(logTag, "Creating new PipelineLayout for DescriptorSetLayout: " + descriptorSetLayoutHandle);
+        try (MemoryStack stack = stackPush()) {
+            VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .pSetLayouts(stack.longs(descriptorSetLayoutHandle)); // Use provided layout
+
+            LongBuffer pPipelineLayout = stack.mallocLong(1);
+            vkCheck(vkCreatePipelineLayout(rawDevice, pipelineLayoutInfo, null, pPipelineLayout),
+                    "Failed to create pipeline layout for DSL: " + descriptorSetLayoutHandle);
+            long newPipelineLayoutHandle = pPipelineLayout.get(0);
+
+            // Store in cache
+            pipelineLayoutCache.put(descriptorSetLayoutHandle, newPipelineLayoutHandle);
+            Gdx.app.log(logTag, "Created and cached PipelineLayout: " + newPipelineLayoutHandle);
+            return newPipelineLayoutHandle;
+
+        } catch (Exception e) {
+            throw new GdxRuntimeException("Failed to create pipeline layout for DSL: " + descriptorSetLayoutHandle, e);
+        }
+    }
+
+    /**
+     * Gets or creates a graphics pipeline specifically configured for VulkanSpriteBatch.
+     * Assumes standard alpha blending and vertex layout defined in VulkanSpriteBatch.
+     * NOTE: Simple implementation assumes pipeline compatibility with the provided renderPassHandle.
+     * More complex caching might be needed if used with multiple different render passes.
+     *
+     * @param batchDescriptorSetLayoutHandle The descriptor set layout handle used by VulkanSpriteBatch.
+     * @param renderPassHandle Handle to a compatible render pass.
+     * @return The VkPipeline handle for the SpriteBatch pipeline.
+     */
+    public synchronized long getOrCreateSpriteBatchPipeline(long batchDescriptorSetLayoutHandle, long renderPassHandle) {
+        // Basic Caching: If already created, return it.
+        // Assumes renderPassHandle is compatible. If not, caching needs to be more complex (e.g., Map<Long, Long> renderPassToPipelineCache)
+        if (this.spriteBatchPipeline != VK_NULL_HANDLE) {
+            // Optional: Add check if batchDescriptorSetLayoutHandle matches the one used previously?
+            // if (batchDescriptorSetLayoutHandle != this.spriteBatchLayoutHandle) { ... error or recreate ... }
+            return this.spriteBatchPipeline;
+        }
+
+        Gdx.app.log(logTag, "Creating SpriteBatch graphics pipeline...");
+
+        // --- Load SpriteBatch Shaders ---
+        FileHandle vertShaderFile = Gdx.files.internal("data/vulkan/shaders/sprite.vert.spv"); // Adjust path if needed
+        FileHandle fragShaderFile = Gdx.files.internal("data/vulkan/shaders/sprite.vert.spv"); // Adjust path if needed
+        if (!vertShaderFile.exists() || !fragShaderFile.exists()) {
+            throw new GdxRuntimeException("SpriteBatch SPIR-V shaders not found!");
+        }
+        long vertModuleHandle = loadShaderModule(vertShaderFile); // Use existing shader loading
+        long fragModuleHandle = loadShaderModule(fragShaderFile);
+
+        // Validate input handles
+        if (batchDescriptorSetLayoutHandle == VK_NULL_HANDLE || renderPassHandle == VK_NULL_HANDLE) {
+            throw new GdxRuntimeException("Cannot create SpriteBatch pipeline with NULL layout or render pass handle.");
+        }
+
+        try (MemoryStack stack = stackPush()) {
+            // --- Get Pipeline Layout ---
+            long pipelineLayoutHandle = getOrCreatePipelineLayout(batchDescriptorSetLayoutHandle); // Use the layout cache
+
+            // --- Define SpriteBatch Pipeline States ---
+
+            // Shader Stages
+            VkPipelineShaderStageCreateInfo.Buffer shaderStages = createShaderStages(stack, vertModuleHandle, fragModuleHandle); // Standard helper likely OK
+
+            // Vertex Input (CRUCIAL - Must match VulkanSpriteBatch.BATCH_ATTRIBUTES)
+            VkVertexInputBindingDescription.Buffer bindingDescription = VkVertexInputBindingDescription.calloc(1, stack)
+                    .binding(0)
+                    .stride(VulkanSpriteBatch.COMPONENTS_PER_VERTEX * Float.BYTES) // 5 * 4 = 20 bytes
+                    .inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
+
+            VkVertexInputAttributeDescription.Buffer attributeDescriptions = VkVertexInputAttributeDescription.calloc(3, stack);
+            attributeDescriptions.get(0) // Position (vec2)
+                    .binding(0).location(0).format(VK_FORMAT_R32G32_SFLOAT).offset(0);
+            attributeDescriptions.get(1) // Color (packed float -> interpreted as vec4 in shader)
+                    .binding(0).location(1).format(VK_FORMAT_R32_SFLOAT).offset(VulkanSpriteBatch.POSITION_COMPONENTS * Float.BYTES); // Offset 8
+            attributeDescriptions.get(2) // TexCoord (vec2)
+                    .binding(0).location(2).format(VK_FORMAT_R32G32_SFLOAT).offset((VulkanSpriteBatch.POSITION_COMPONENTS + VulkanSpriteBatch.COLOR_COMPONENTS) * Float.BYTES); // Offset 12 (2*4 + 1*4)
+
+            VkPipelineVertexInputStateCreateInfo vertexInputInfo = VkPipelineVertexInputStateCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .pVertexBindingDescriptions(bindingDescription)
+                    .pVertexAttributeDescriptions(attributeDescriptions);
+
+            // Input Assembly (Standard triangles)
+            VkPipelineInputAssemblyStateCreateInfo inputAssembly = createInputAssemblyInfo(stack); // Standard helper likely OK
+
+            // Viewport/Scissor (Dynamic)
+            VkPipelineViewportStateCreateInfo viewportState = createViewportInfo(stack); // Standard helper likely OK
+
+            // Rasterizer (No culling usually for 2D)
+            VkPipelineRasterizationStateCreateInfo rasterizer = createRasterizationInfo(stack) // Use helper but override cull mode
+                    .cullMode(VK_CULL_MODE_NONE); // Ensure no backface culling
+
+            // Multisampling (Usually off)
+            VkPipelineMultisampleStateCreateInfo multisampling = createMultisampleInfo(stack); // Standard helper likely OK
+
+            // Depth/Stencil (Usually off for SpriteBatch)
+            VkPipelineDepthStencilStateCreateInfo depthStencil = createDepthStencilInfo(stack) // Use helper but ensure disabled
+                    .depthTestEnable(false)
+                    .depthWriteEnable(false);
+
+            // Color Blending (CRUCIAL - Enable Alpha Blending)
+            VkPipelineColorBlendAttachmentState.Buffer colorBlendAttachment = VkPipelineColorBlendAttachmentState.calloc(1, stack);
+            colorBlendAttachment.get(0)
+                    .colorWriteMask(VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT)
+                    .blendEnable(true) // Enable blending
+                    .srcColorBlendFactor(VK_BLEND_FACTOR_SRC_ALPHA)
+                    .dstColorBlendFactor(VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA)
+                    .colorBlendOp(VK_BLEND_OP_ADD)
+                    .srcAlphaBlendFactor(VK_BLEND_FACTOR_ONE) // Optional: Often One/Zero or One/OneMinusSrcAlpha for alpha
+                    .dstAlphaBlendFactor(VK_BLEND_FACTOR_ZERO)
+                    .alphaBlendOp(VK_BLEND_OP_ADD);
+
+            VkPipelineColorBlendStateCreateInfo colorBlending = VkPipelineColorBlendStateCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .logicOpEnable(false) // Logic op typically disabled
+                    .pAttachments(colorBlendAttachment);
+            // Optional: Set blend constants if needed
+
+            // Dynamic States (Viewport, Scissor)
+            VkPipelineDynamicStateCreateInfo dynamicState = createDynamicStateInfo(stack); // Standard helper likely OK
+
+            // --- Create Graphics Pipeline ---
+            VkGraphicsPipelineCreateInfo.Buffer pipelineInfo = VkGraphicsPipelineCreateInfo.calloc(1, stack)
+                    .sType$Default()
+                    .pStages(shaderStages)
+                    .pVertexInputState(vertexInputInfo).pInputAssemblyState(inputAssembly)
+                    .pViewportState(viewportState).pRasterizationState(rasterizer)
+                    .pMultisampleState(multisampling).pDepthStencilState(depthStencil)
+                    .pColorBlendState(colorBlending).pDynamicState(dynamicState)
+                    .layout(pipelineLayoutHandle) // Use the layout obtained/created for the batch's DSL
+                    .renderPass(renderPassHandle)
+                    .subpass(0)
+                    .basePipelineHandle(VK_NULL_HANDLE).basePipelineIndex(-1);
+
+            LongBuffer pGraphicsPipeline = stack.mallocLong(1);
+            vkCheck(vkCreateGraphicsPipelines(rawDevice, this.vkPipelineCacheHandle, pipelineInfo, null, pGraphicsPipeline),
+                    "Failed to create SpriteBatch graphics pipeline");
+
+            this.spriteBatchPipeline = pGraphicsPipeline.get(0); // Store handle
+            // Optional: Store layout handle used for validation
+            // this.spriteBatchLayoutHandle = batchDescriptorSetLayoutHandle;
+            Gdx.app.log(logTag, "SpriteBatch graphics pipeline created successfully: " + this.spriteBatchPipeline);
+
+            return this.spriteBatchPipeline;
+
+        } catch (Exception e) {
+            // Reset handle on failure
+            this.spriteBatchPipeline = VK_NULL_HANDLE;
+            throw new GdxRuntimeException("Failed to create SpriteBatch graphics pipeline", e);
+        }
+    }
+
+}

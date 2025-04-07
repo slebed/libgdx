@@ -951,7 +951,7 @@ System.out.println("HERE!!!!!!!!!!");
                 VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.malloc(stack);
                 vkGetPhysicalDeviceProperties(device, properties);
                 System.out.println("Selected Physical Device: " + properties.deviceNameString());
-                properties.free(); // Free the allocated properties struct
+                //properties.free(); // Free the allocated properties struct
                 if (properties.deviceType() == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
                     break; // Found a discrete GPU, stop searching
                 }

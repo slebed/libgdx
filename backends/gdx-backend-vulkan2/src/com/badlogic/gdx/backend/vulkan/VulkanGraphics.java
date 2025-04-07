@@ -119,6 +119,10 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     private long textureDescriptorSet = VK_NULL_HANDLE;
     private VulkanMesh quadMesh;
 
+    private VkCommandBuffer currentFrameCommandBuffer = null;
+    private int currentFrameImageIndex = -1;
+    private long currentFrameRenderPassHandle = VK_NULL_HANDLE;
+
     private final float[] quadVertices = {
             // Position      // Color          // TexCoord (UV)
             -0.5f, -0.5f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f,
@@ -238,7 +242,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             }
             Gdx.app.log(logTag, "Retrieved descriptor set layout from manager.");
 
-            this.textureDescriptorSet = descriptorManager.allocateSet();
+            this.textureDescriptorSet = descriptorManager.allocateSet(this.singleTextureLayoutHandle);
             if (this.textureDescriptorSet == VK_NULL_HANDLE) {
                 throw new GdxRuntimeException("Failed to allocate descriptor set from DescriptorManager");
             }
@@ -580,7 +584,15 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
             vulkanRenderer.setDynamicStates(vulkanSwapchain.getExtent()); // Set viewport/scissor
             vulkanRenderer.bindPipeline(pipelineManager.getGraphicsPipeline()); // Bind the default pipeline
-            vulkanRenderer.bindDescriptorSet(pipelineManager.getPipelineLayout(), this.textureDescriptorSet, 0); // Bind the texture's set
+
+            // Get the pipeline layout matching the descriptor set layout used for textureDescriptorSet
+            long layoutHandle = pipelineManager.getOrCreatePipelineLayout(this.singleTextureLayoutHandle); // <<< CORRECTED WAY
+            if (layoutHandle == VK_NULL_HANDLE) {
+                // Handle error - this shouldn't happen if initialization was successful
+                throw new GdxRuntimeException("Failed to get/create pipeline layout for default texture descriptor set layout.");
+            }
+            vulkanRenderer.bindDescriptorSet(layoutHandle, this.textureDescriptorSet, 0); // Bind the texture's set using the obtained layout
+
             vulkanRenderer.drawMesh(quadMesh); // Bind and draw the mesh
 
             vulkanRenderer.end(); // Finish renderer sequence for this CB
@@ -692,6 +704,68 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     @Override
     public int getBackBufferHeight() {
         return backBufferHeight;
+    }
+
+
+
+    public VulkanDevice getVulkanDevice() {
+        return this.vulkanDevice;
+    }
+
+    public long getVmaAllocator() {
+        // Consider adding null check if there's any scenario it might be null when accessed
+        return this.vmaAllocator;
+    }
+
+    public VulkanPipelineManager getPipelineManager() {
+        // Consider adding null check
+        return this.pipelineManager;
+    }
+
+    public VulkanDescriptorManager getDescriptorManager() {
+        // Consider adding null check
+        return this.descriptorManager;
+    }
+
+    /**
+     * Gets the command buffer currently being recorded for this frame's rendering.
+     * This is only valid between successful calls to internal beginFrame() and endFrame()
+     * methods within the main render loop. Returns null otherwise.
+     * <p>
+     * Primarily intended for use by the ApplicationListener/Screen's render method
+     * to pass the command buffer to Vulkan-aware rendering components like VulkanSpriteBatch.
+     *
+     * @return The active VkCommandBuffer for the current frame, or null if none is active.
+     */
+    public VkCommandBuffer getCurrentCommandBuffer() {
+        return currentFrameCommandBuffer;
+    }
+
+    /**
+     * Gets the index of the swapchain image currently being rendered to.
+     * This is only valid between successful calls to internal beginFrame() and endFrame().
+     * Returns -1 otherwise.
+     *
+     * @return The active swapchain image index for the current frame, or -1 if none is active.
+     */
+    public int getCurrentFrameImageIndex() {
+        return currentFrameImageIndex;
+    }
+
+    /**
+     * Gets the handle of the render pass currently active on the command buffer for this frame.
+     * This is typically the swapchain's main render pass, captured during beginFrame().
+     * This is only valid between successful calls to internal beginFrame() and endFrame().
+     * Returns VK_NULL_HANDLE otherwise.
+     *
+     * @return The active VkRenderPass handle for the current frame, or VK_NULL_HANDLE if none is active.
+     */
+    public long getCurrentRenderPassHandle() {
+        return this.currentFrameRenderPassHandle;
+    }
+
+    public VulkanSwapchain getSwapchain() {
+        return this.vulkanSwapchain;
     }
 
     public int getLogicalWidth() {
@@ -1061,50 +1135,6 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         }); // executeSingleTimeCommands handles begin, end, submit, wait, free
     }
 
-    /*private void createDescriptorSetLayout() {
-        Gdx.app.log(logTag, "Attempting to retrieve layout from DescriptorManager...");
-        if (descriptorManager == null) {
-            throw new GdxRuntimeException("DescriptorManager is null in createDescriptorSetLayout!");
-        }
-        long layoutHandleFromManager = descriptorManager.getDefaultLayout();
-        Gdx.app.log(logTag, "Value returned by descriptorManager.getDefaultLayout(): " + layoutHandleFromManager); // <-- ADD LOG
-
-        this.singleTextureLayoutHandle = layoutHandleFromManager; // Assignment
-        Gdx.app.log(logTag, "Value assigned to this.singleTextureLayoutHandle: " + this.singleTextureLayoutHandle); // <-- ADD LOG
-
-        // Keep the check
-        if (this.singleTextureLayoutHandle == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Failed to get default layout from DescriptorManager (returned NULL).");
-        }
-        Gdx.app.log(logTag, "Retrieved descriptor set layout from manager successfully.");
-    }
-
-    private void createDescriptorSet() {
-        // Allocate the set using the manager
-        this.textureDescriptorSet = descriptorManager.allocateSet();
-        if (this.textureDescriptorSet == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Failed to allocate descriptor set from DescriptorManager");
-        }
-        Gdx.app.log(logTag, "Allocated descriptor set from manager.");
-    }
-
-    private void updateDescriptorSet() {
-        // Use the static helper method
-
-        if (this.texture == null || this.textureDescriptorSet == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Cannot update descriptor set, texture or set handle is null.");
-        }
-        VulkanDescriptorManager.updateCombinedImageSampler(
-                rawDevice, // Pass VkDevice
-                this.textureDescriptorSet,
-                0, // binding
-                this.texture // Pass the VulkanTexture object itself
-        );
-        Gdx.app.log(logTag, "Updated descriptor set using manager helper for texture.");
-
-    }
-*/
-
     /**
      * Handles start-of-frame Vulkan operations: waits for GPU, acquires swapchain image,
      * resets fence, begins command buffer, and begins the render pass.
@@ -1113,6 +1143,9 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
      * Returns success=false if swapchain is out of date or acquire failed non-critically, requiring recreation check.
      */
     private FrameInfo beginFrame() {
+        this.currentFrameCommandBuffer = null;
+        this.currentFrameImageIndex = -1;
+        this.currentFrameRenderPassHandle = VK_NULL_HANDLE;
         // --- Pre-checks ---
         if (vulkanSwapchain == null || vulkanSwapchain.getHandle() == VK_NULL_HANDLE) {
             Gdx.app.error(logTag, "[beginFrame] Swapchain object or handle is invalid!");
@@ -1172,9 +1205,18 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
             // --- 5. Begin Render Pass ---
             if (renderPassManager == null) throw new GdxRuntimeException("RenderPassManager is null!");
+            long rpHandle = (vulkanSwapchain != null) ? vulkanSwapchain.getRenderPass() : VK_NULL_HANDLE;
+            if (rpHandle == VK_NULL_HANDLE) {
+                // Cannot proceed without a valid render pass
+                try { vkEndCommandBuffer(commandBuffer); } catch (Exception ignored) {} // Try to end CB
+                throw new GdxRuntimeException("Cannot begin frame: Invalid RenderPass handle from swapchain.");
+            }
             renderPassManager.beginSwapchainRenderPass(commandBuffer, vulkanSwapchain, imageIndex, null); // Use default clear color
 
-            // --- Success ---
+            this.currentFrameCommandBuffer = commandBuffer;
+            this.currentFrameImageIndex = imageIndex;
+            this.currentFrameRenderPassHandle = rpHandle;
+
             return new FrameInfo(true, commandBuffer, imageIndex);
 
         } catch (Exception e) {
@@ -1254,6 +1296,10 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         } catch (Exception e) {
             Gdx.app.error(logTag, "Exception during endFrame", e);
             throw new GdxRuntimeException("Exception during endFrame", e);
+        } finally {
+            this.currentFrameCommandBuffer = null;
+            this.currentFrameImageIndex = -1;
+            this.currentFrameRenderPassHandle = VK_NULL_HANDLE;
         }
     }
 
