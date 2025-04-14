@@ -4,7 +4,7 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Preferences;
-// --- Vulkan specific imports ---
+
 import com.badlogic.gdx.assets.AssetManager;
 import com.badlogic.gdx.assets.loaders.FileHandleResolver;
 import com.badlogic.gdx.assets.loaders.resolvers.InternalFileHandleResolver;
@@ -15,65 +15,87 @@ import com.badlogic.gdx.backend.vulkan.VulkanGraphics;
 import com.badlogic.gdx.backend.vulkan.VulkanScreenViewport;
 import com.badlogic.gdx.backend.vulkan.VulkanSpriteBatch;
 import com.badlogic.gdx.backend.vulkan.VulkanStage;
-// Might need VulkanWindowConfiguration if you create it
-// import com.badlogic.gdx.backend.vulkan.VulkanWindowConfiguration;
-// --- Scene2D imports ---
+
 import com.badlogic.gdx.backend.vulkan.VulkanTexture;
 import com.badlogic.gdx.backend.vulkan.VulkanTextureAtlasLoader;
 import com.badlogic.gdx.backend.vulkan.VulkanTextureLoader;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
+
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
-// Use VulkanStage below
-import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
+import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
-import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
-import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
+import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.tests.utils.CommandLineOptions;
 import com.badlogic.gdx.tests.utils.GdxTestWrapper;
 import com.badlogic.gdx.tests.utils.GdxTests;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.viewport.Viewport;
-// --- Vulkan specific for render ---
-import org.lwjgl.vulkan.VkCommandBuffer; // If getting CB handle
+
+import org.lwjgl.vulkan.VkCommandBuffer;
 
 public class VulkanTestStarter {
     static CommandLineOptions options;
 
-    // ... (static block for natives) ...
-
     public static void main(String[] argv) {
         options = new CommandLineOptions(argv);
         VulkanApplicationConfiguration vkConfig = new VulkanApplicationConfiguration();
-        // Set default window config if needed (can be overridden)
-        vkConfig.setTitle("Vulkan Test Selector");
+        vkConfig.setTitle("Vulkan Test"); // Generic title, will be updated
         vkConfig.setWindowedMode(640, 480);
-        // Add any other default Vulkan config here
+        //vkConfig.setDebugMode(true); // Enable Vulkan validation layers for debugging
 
-        if (options.startupTestName != null) {
-            ApplicationListener test = GdxTests.newTest(options.startupTestName);
-            if (test != null) {
-                vkConfig.setTitle(options.startupTestName + " (Vulkan)"); // Update title
-                // Wrap test, disable GL error logging for Vulkan
-                new VulkanApplication(new GdxTestWrapper(test, false), vkConfig);
-            } else {
-                System.err.println("ERROR: Test specified via argument not found: " + options.startupTestName);
+        String testName = options.startupTestName;
+        ApplicationListener testInstance = null;
+
+        if (testName != null) {
+            System.out.println("Attempting to launch Vulkan test from argument: " + testName);
+            // *** Use GdxVulkanTests ***
+            testInstance = GdxVulkanTests.newTest(testName);
+            if (testInstance == null) {
+                System.err.println("ERROR: Vulkan test specified via argument not found: " + testName);
+                // *** Refer to GdxVulkanTests ***
+                System.err.println("Available Vulkan tests: " + GdxVulkanTests.getNames());
                 System.exit(1);
             }
         } else {
-            // *** LAUNCH TEST CHOOSER INSTEAD OF EXITING ***
-            new VulkanApplication(new VulkanTestChooser(), vkConfig);
+            // Launch VulkanSpriteTest directly by default
+            testName = "VulkanSpriteTest"; // Specify the test to launch by default
+            System.out.println("No test specified, launching default Vulkan test: " + testName);
+            // *** Use GdxVulkanTests ***
+            testInstance = GdxVulkanTests.newTest(testName);
+            if (testInstance == null) {
+                System.err.println("ERROR: Default Vulkan test '" + testName + "' not found!");
+                // *** Refer to GdxVulkanTests ***
+                System.err.println("Ensure it's registered in GdxVulkanTests.java");
+                System.exit(1);
+            }
+        }
+
+        // --- Launch the selected test ---
+        if (testInstance != null) {
+            vkConfig.setTitle(testName + " (Vulkan)"); // Update title
+
+            // Wrap test, disable GL error logging for Vulkan
+            // GdxTestWrapper should still work fine as it just wraps ApplicationListener
+            GdxTestWrapper wrapper = new GdxTestWrapper(testInstance, false);
+            System.out.println("Launching Vulkan test: " + testName);
+            new VulkanApplication(wrapper, vkConfig);
+        } else {
+            System.err.println("ERROR: Could not create Vulkan test instance for: " + testName);
+            System.exit(1);
         }
     }
 
-    // --- INNER CLASS ---
     static class VulkanTestChooser extends ApplicationAdapter {
+        private final String TAG = "VulkanTestChooser";
         private VulkanStage stage;
         private Skin skin;
         private VulkanSpriteBatch batch;
-        TextButton lastClickedTestButton;
-        private AssetManager assetManager; // Add AssetManager field
+        //TextButton lastClickedTestButton;
+        private AssetManager assetManager;
+        private boolean runOnce=true;
 
         @Override
         public void create() {
@@ -118,7 +140,6 @@ public class VulkanTestStarter {
                 throw new GdxRuntimeException("Failed to load uiskin via AssetManager", e);
             }
 
-
             // 4. Create Viewport and Stage
             Viewport viewport = new VulkanScreenViewport(); // Use the Vulkan-safe viewport
             stage = new VulkanStage(viewport, batch);
@@ -129,19 +150,18 @@ public class VulkanTestStarter {
             // 5. Build Scene2D UI (Same logic as Lwjgl3TestStarter)
             final Preferences prefs = Gdx.app.getPreferences("vulkan-tests"); // Use different pref file name
 
-            Table container = new Table();
-            stage.addActor(container);
-            container.setFillParent(true);
+            //Table container = new Table();
+            //stage.addActor(container);
+            //container.setFillParent(true);
 
-            Table table = new Table();
+            /*Table table = new Table();
             ScrollPane scroll = new ScrollPane(table, skin);
             scroll.setSmoothScrolling(false); // Smoother scrolling might be desired later
             scroll.setFadeScrollBars(false);
             stage.setScrollFocus(scroll);
-
+            Gdx.app.log(TAG, "setting scroll focus");
             int tableSpace = 4;
             table.pad(10).defaults().expandX().space(tableSpace);
-
             for (final String testName : GdxTests.getNames()) {
                 final TextButton testButton = new TextButton(testName, skin);
                 // TODO: Implement Vulkan compatibility check if needed
@@ -197,12 +217,12 @@ public class VulkanTestStarter {
 
                     }
                 });
-            }
+            }*/
 
-            container.add(scroll).expand().fill(); // Use expand().fill() for better layout
+            //container.add(scroll).expand().fill(); // Use expand().fill() for better layout
 
             // 6. Restore Scroll Position / Highlight
-            lastClickedTestButton = (TextButton) table.findActor(prefs.getString("LastTest"));
+            /*lastClickedTestButton = (TextButton) table.findActor(prefs.getString("LastTest"));
             if (lastClickedTestButton != null) {
                 lastClickedTestButton.setColor(Color.CYAN);
                 // Scroll calculation might need slight adjustment
@@ -214,31 +234,114 @@ public class VulkanTestStarter {
 
                 // Force update/draw to reflect scroll change immediately? Maybe not needed.
                 // stage.act(0.01f); stage.draw();
-            }
+            }*/
+
+            Label label = new Label("This is a LABEL", skin);
+            label.setPosition(20, 50);
+            label.pack();
+
+            TextButton textButton = new TextButton("This is a TEXTBUTTON", skin);
+            textButton.setPosition(20, 20);
+            textButton.addListener(new ClickListener() {
+                @Override
+                public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
+                    Gdx.app.log("ButtonClick", "Button Touch Down!");
+                    // Return true tells the input system the event was handled here,
+                    // which is needed for clicked() to fire reliably in ClickListener.
+                    return true;
+                }
+
+                @Override
+                public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
+                    Gdx.app.log("ButtonClick", "Button Touch Up!");
+                    super.touchUp(event, x, y, pointer, button);
+                }
+
+                @Override
+                public void clicked(InputEvent event, float x, float y) {
+                    Gdx.app.log("ButtonClick", "Button Clicked!");
+                    // --- Add your actual button logic here ---
+                }
+            });
+            textButton.pack();
+
+            //stage.addActor(label);
+            stage.addActor(textButton);
+
+            Gdx.app.log("ActorBounds", String.format("Label Pos=(%.1f, %.1f) Size=(%.1f, %.1f) Top=%.1f",
+                    label.getX(), label.getY(), label.getWidth(), label.getHeight(), label.getTop()));
+
+            Gdx.app.log("ActorBounds", String.format("TextButton Pos=(%.1f, %.1f) Size=(%.1f, %.1f) Top=%.1f",
+                    textButton.getX(), textButton.getY(), textButton.getWidth(), textButton.getHeight(), textButton.getTop()));
+
+            //container.pack();
+            //stage.addActor(container);
+
         }
 
         @Override
         public void render() {
-            // Render pass begin/end and screen clear are handled by VulkanGraphics.drawFrame
-
-            // Get Vulkan context (Command Buffer)
             VulkanGraphics gfx = (VulkanGraphics) Gdx.graphics;
             VkCommandBuffer cmdBuf = gfx.getCurrentCommandBuffer();
-
-            // If frame is not ready (e.g., swapchain recreating), cmdBuf might be null
             if (cmdBuf == null) {
-                // Optionally log? Should happen rarely if beginFrame handles returns correctly
-                // Gdx.app.debug("VulkanTestChooser", "Skipping render, command buffer not available.");
+                Gdx.app.error("VulkanTestChooser", "Failed to get current command buffer!");
                 return;
             }
 
-            // Update Scene2D
-            stage.act(Gdx.graphics.getDeltaTime()); // Use actual delta time
+            // --- BEGIN DIAGNOSTIC CODE ---
+            // batch.begin(cmdBuf);
 
-            // Draw Scene2D (Manage batch begin/end here)
+          /*  NinePatch patch = null;
+            try {
+                patch = skin.getPatch("default-round"); // Get the specific patch uiskin uses
+            } catch (Exception e) {
+                Gdx.app.error("DEBUG", "Failed to get patch 'default-round'", e);
+                System.exit(0);
+            }
+//Gdx.app.log(TAG, "patch is " + patch);
+            if (patch != null) {
+                //Gdx.app.log("DEBUG", "NinePatch 'default-round' found in skin: " + patch);
+                // *** CHECK COLOR IMMEDIATELY ***
+                if (patch.getColor() == null) {
+                    Gdx.app.error("DEBUG", "NinePatch 'default-round' color IS NULL after getting from skin!");
+                    // Try setting it explicitly
+                    patch.setColor(Color.WHITE);
+                    Gdx.app.log("DEBUG", "Set patch color to WHITE explicitly.");
+                } else {
+                  //  Gdx.app.log("DEBUG", "NinePatch 'default-round' color is OK: " + patch.getColor());
+                }
+                patch.setColor(Color.WHITE); // Set it regardless
+                // Now try drawing it
+                try {
+                    patch.draw(batch, 50, 50, 200, 200); // Draw test patch
+                    Gdx.app.log("DEBUG", "Successfully drew test patch.");
+                } catch(Exception e) {
+                    Gdx.app.error("DEBUG", "Crash occurred during patch.draw()", e);
+                    System.exit(0);
+                }
+
+            } else {
+                Gdx.app.error("DEBUG", "Could not find patch 'default-round' in skin!");
+                System.exit(0);
+            }*/
+            //  batch.end(); // End batch for diagnostic draw
+            // --- END DIAGNOSTIC CODE ---
+
+            stage.act(Gdx.graphics.getDeltaTime());
             batch.begin(cmdBuf);
-            stage.draw();
+            stage.draw(); // This might still crash if ScrollPane gets a different patch?
             batch.end();
+
+            if (Gdx.input.justTouched()) {
+                Vector2 screenCoords = new Vector2(Gdx.input.getX(), Gdx.input.getY());
+                Vector2 stageCoords = new Vector2(screenCoords);
+                stage.screenToStageCoordinates(stageCoords); // Unproject
+                Gdx.app.log("Coords", "Screen: " + screenCoords + " -> Stage: " + stageCoords);
+
+                Actor hitActor = stage.hit(stageCoords.x, stageCoords.y, true); // true = only touchable actors
+                Gdx.app.log("Coords", "Hit Actor: " + (hitActor == null ? "None" : hitActor.toString()));
+            }
+
         }
 
         @Override

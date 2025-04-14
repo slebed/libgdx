@@ -213,6 +213,26 @@ public class VulkanDescriptorManager implements Disposable {
         return singleTextureLayout;
     }
 
+    /**
+     * Gets the handle of the managed Vulkan descriptor pool.
+     * <p>
+     * Exposing the pool handle allows external components to allocate sets directly
+     * from this manager's pool, necessary for allocating multiple sets at once or
+     * for custom allocation strategies. Ensure the pool was created with sufficient
+     * size and types for all intended allocations.
+     *
+     * @return The VkDescriptorPool handle, or VK_NULL_HANDLE if the pool hasn't been created.
+     */
+    public long getPoolHandle() {
+        // Optional: Add check if pool is actually created, though returning NULL might be okay
+        // if the caller checks it. Throwing might be safer if it should always exist when called.
+        if (descriptorPool == VK_NULL_HANDLE) {
+            Gdx.app.error(logTag, "getPoolHandle() called before descriptor pool was created!");
+            // Consider: throw new IllegalStateException("Descriptor pool handle requested before creation.");
+        }
+        return descriptorPool;
+    }
+
     @Override
     public void dispose() {
         Gdx.app.log(logTag, "Disposing descriptor manager...");

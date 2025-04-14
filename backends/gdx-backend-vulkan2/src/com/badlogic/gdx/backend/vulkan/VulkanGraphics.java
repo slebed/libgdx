@@ -30,11 +30,9 @@ import java.util.List;
 import com.badlogic.gdx.AbstractGraphics;
 
 import com.badlogic.gdx.Application;
+import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
-import com.badlogic.gdx.graphics.VertexAttribute;
-import com.badlogic.gdx.graphics.VertexAttributes;
-import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.GridPoint2;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
@@ -59,12 +57,15 @@ import org.lwjgl.vulkan.VkBufferCopy;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkCommandBufferAllocateInfo;
 import org.lwjgl.vulkan.VkCommandBufferBeginInfo;
+import org.lwjgl.vulkan.VkExtent2D;
 import org.lwjgl.vulkan.VkPhysicalDevice;
 import org.lwjgl.vulkan.VkQueue;
+import org.lwjgl.vulkan.VkRect2D;
 import org.lwjgl.vulkan.VkSubmitInfo;
+import org.lwjgl.vulkan.VkViewport;
 
 public class VulkanGraphics extends AbstractGraphics implements Disposable {
-    final String logTag = "VulkanGraphics";
+    final String TAG = "VulkanGraphics";
     private final VulkanApplicationConfiguration config;
     private final long windowHandle;
     private final long vmaAllocator;
@@ -76,7 +77,6 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     private VulkanSyncManager syncManager;
     private VulkanRenderer vulkanRenderer;
 
-    // Assuming access to VulkanApplication components
     private VulkanApplication app = (VulkanApplication) Gdx.app; // Or get via constructor arg
 
     private VulkanDevice vulkanDevice = app.getVkDevice();           // Need getter in VulkanApplication
@@ -117,23 +117,10 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     private long singleTextureLayoutHandle = VK_NULL_HANDLE;
     private long textureDescriptorSet = VK_NULL_HANDLE;
-    private VulkanMesh quadMesh;
 
     private VkCommandBuffer currentFrameCommandBuffer = null;
     private int currentFrameImageIndex = -1;
     private long currentFrameRenderPassHandle = VK_NULL_HANDLE;
-
-    private final float[] quadVertices = {
-            // Position      // Color          // TexCoord (UV)
-            -0.5f, -0.5f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-            0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f,
-            0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f,
-            -0.5f, 0.5f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f
-            // Note: Vulkan's default screen coord Y is often down, while texture V coord is often up.
-            // You might need to flip V coordinates (0,0 top-left -> 1,1 bottom-right) depending on your image loading and coordinate system.
-            // This example assumes V=0 is top, V=1 is bottom of texture. Adjust if needed!
-    };
-    private final short[] quadIndices = {0, 1, 2, 2, 3, 0};
 
     private VkPhysicalDevice physicalDevice;
 
@@ -205,7 +192,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         this.graphicsQueue = vulkanDevice.getGraphicsQueue();
         this.presentQueue = graphicsQueue; // Assuming same queue
 
-        Gdx.app.log(logTag, "Initializing swapchain and graphics resources...");
+        Gdx.app.log(TAG, "Initializing swapchain and graphics resources...");
 
         try {
             this.descriptorManager = new VulkanDescriptorManager(this.vulkanDevice);
@@ -217,36 +204,36 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         try (MemoryStack stack = stackPush()) {
 
             // --- 2. Create Swapchain ---
-            Gdx.app.log(logTag, "Building VulkanSwapchain...");
+            Gdx.app.log(TAG, "Building VulkanSwapchain...");
             this.vulkanSwapchain = new VulkanSwapchain.Builder()
                     .device(this.vulkanDevice)
                     .surface(this.surface)
                     .windowHandle(this.windowHandle)
                     .configuration(this.config)
                     .build();
-            Gdx.app.log(logTag, "VulkanSwapchain built successfully.");
+            Gdx.app.log(TAG, "VulkanSwapchain built successfully.");
 
             // --- 3. Create Other Graphics Resources ---
 
             // Load Texture (creates VulkanImage, ImageView, Sampler)
-            Gdx.app.log(logTag, "Loading default texture...");
+            Gdx.app.log(TAG, "Loading default texture...");
             FileHandle textureFile = Gdx.files.internal("data/badlogic.jpg"); // Ensure exists
             if (!textureFile.exists()) throw new GdxRuntimeException("Default texture file not found: " + textureFile);
             this.texture = VulkanTexture.loadFromFile(textureFile, this.vulkanDevice, this.vmaAllocator);
-            Gdx.app.log(logTag, "Default texture loaded successfully.");
+            Gdx.app.log(TAG, "Default texture loaded successfully.");
 
             // Descriptor Setup (Layout is created in manager, allocate set, update)
             this.singleTextureLayoutHandle = descriptorManager.getDefaultLayout();
             if (this.singleTextureLayoutHandle == VK_NULL_HANDLE) {
                 throw new GdxRuntimeException("Failed to get default layout from DescriptorManager");
             }
-            Gdx.app.log(logTag, "Retrieved descriptor set layout from manager.");
+            Gdx.app.log(TAG, "Retrieved descriptor set layout from manager.");
 
             this.textureDescriptorSet = descriptorManager.allocateSet(this.singleTextureLayoutHandle);
             if (this.textureDescriptorSet == VK_NULL_HANDLE) {
                 throw new GdxRuntimeException("Failed to allocate descriptor set from DescriptorManager");
             }
-            Gdx.app.log(logTag, "Allocated descriptor set from manager.");
+            Gdx.app.log(TAG, "Allocated descriptor set from manager.");
 
             VulkanDescriptorManager.updateCombinedImageSampler(
                     rawDevice,
@@ -254,10 +241,10 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
                     0, // binding
                     this.texture // Pass VulkanTexture object
             );
-            Gdx.app.log(logTag, "Updated descriptor set using manager helper for texture.");
+            Gdx.app.log(TAG, "Updated descriptor set using manager helper for texture.");
 
             // Graphics Pipeline (Manager loads shaders internally now)
-            Gdx.app.log(logTag, "Creating graphics pipeline via manager...");
+            Gdx.app.log(TAG, "Creating graphics pipeline via manager...");
             FileHandle vertShaderFile = Gdx.files.internal("data/vulkan/shaders/textured.vert.spv");
             FileHandle fragShaderFile = Gdx.files.internal("data/vulkan/shaders/textured.frag.spv");
             long renderPassHandle = this.vulkanSwapchain.getRenderPass(); // Get RP handle from Swapchain
@@ -271,10 +258,10 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
                     this.singleTextureLayoutHandle,
                     renderPassHandle
             );
-            Gdx.app.log(logTag, "Graphics pipeline created via manager.");
+            Gdx.app.log(TAG, "Graphics pipeline created via manager.");
 
             // Geometry Buffers (Create VulkanMesh)
-            Gdx.app.log(logTag, "Creating quad mesh...");
+            /*Gdx.app.log(logTag, "Creating quad mesh...");
             VertexAttributes quadAttributes = new VertexAttributes(
                     new VertexAttribute(VertexAttributes.Usage.Position, 2, ShaderProgram.POSITION_ATTRIBUTE),
                     new VertexAttribute(VertexAttributes.Usage.ColorUnpacked, 3, ShaderProgram.COLOR_ATTRIBUTE),
@@ -286,28 +273,28 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
                     quadAttributes);
             this.quadMesh.setVertices(quadVertices); // Upload data
             this.quadMesh.setIndices(quadIndices);   // Upload data
-            Gdx.app.log(logTag, "Quad mesh created successfully.");
+            Gdx.app.log(logTag, "Quad mesh created successfully.");*/
 
             this.vulkanRenderer = new VulkanRenderer(this.vulkanDevice);
-            Gdx.app.log(logTag, "VulkanRenderer created.");
+            Gdx.app.log(TAG, "VulkanRenderer created.");
 
             // Main Command Buffers (per swapchain image)
             createMainCommandBuffers(stack);
-            Gdx.app.log(logTag, "Main command buffers created.");
+            Gdx.app.log(TAG, "Main command buffers created.");
 
             // Synchronization Objects
-            Gdx.app.log(logTag, "Creating sync objects via manager...");
+            Gdx.app.log(TAG, "Creating sync objects via manager...");
             this.syncManager = new VulkanSyncManager(this.vulkanDevice);
-            Gdx.app.log(logTag, "Sync objects created via manager.");
+            Gdx.app.log(TAG, "Sync objects created via manager.");
 
-            Gdx.app.log(logTag, "Initialization of swapchain and resources complete.");
+            Gdx.app.log(TAG, "Initialization of swapchain and resources complete.");
 
         } catch (Exception e) {
-            Gdx.app.error(logTag, "Exception during initializeSwapchainAndResources", e);
+            Gdx.app.error(TAG, "Exception during initializeSwapchainAndResources", e);
             try {
                 cleanupVulkan(); // Attempt cleanup
             } catch (Exception cleanupEx) {
-                Gdx.app.error(logTag, "Exception during cleanup after initialization failure", cleanupEx);
+                Gdx.app.error(TAG, "Exception during cleanup after initialization failure", cleanupEx);
             }
             throw new GdxRuntimeException("Failed to initialize Vulkan graphics resources", e);
         }
@@ -316,7 +303,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     // Simplified recreateSwapChain in VulkanGraphics
     private void recreateSwapChain() {
         if (this.vulkanSwapchain == null) {
-            Gdx.app.error(logTag, "Attempted to recreate null swapchain object!");
+            Gdx.app.error(TAG, "Attempted to recreate null swapchain object!");
             return;
         }
 
@@ -333,20 +320,20 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             }
         }
 
-        Gdx.app.log(logTag, "Waiting for device idle before swapchain recreation...");
+        Gdx.app.log(TAG, "Waiting for device idle before swapchain recreation...");
         vkDeviceWaitIdle(rawDevice);
-        Gdx.app.log(logTag, "Device idle. Calling swapchain recreate...");
+        Gdx.app.log(TAG, "Device idle. Calling swapchain recreate...");
 
         try {
             // Delegate swapchain resource recreation
             vulkanSwapchain.recreate();
-            Gdx.app.log(logTag, "Swapchain recreation delegated.");
+            Gdx.app.log(TAG, "Swapchain recreation delegated.");
 
             // Update internal size tracking
             updateFramebufferInfo();
 
             // Recreate Graphics Pipeline (uses new render pass from swapchain)
-            Gdx.app.log(logTag, "Recreating graphics pipeline after swapchain change...");
+            Gdx.app.log(TAG, "Recreating graphics pipeline after swapchain change...");
             FileHandle vertShaderFile = Gdx.files.internal("data/vulkan/shaders/textured.vert.spv");
             FileHandle fragShaderFile = Gdx.files.internal("data/vulkan/shaders/textured.frag.spv");
             long renderPassHandle = this.vulkanSwapchain.getRenderPass();
@@ -361,23 +348,24 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
                     this.singleTextureLayoutHandle,
                     renderPassHandle
             );
-            Gdx.app.log(logTag, "Graphics pipeline recreated via manager.");
+            Gdx.app.log(TAG, "Graphics pipeline recreated via manager.");
 
             // Re-allocate Command Buffers (number might have changed)
             cleanupCommandBuffers(); // Clean up old command buffer objects/handles first
             try (MemoryStack stack = stackPush()) {
                 createMainCommandBuffers(stack);
-                Gdx.app.log(logTag, "Main command buffers re-allocated.");
+                Gdx.app.log(TAG, "Main command buffers re-allocated.");
             }
 
             // Notify listener
             if (Gdx.app != null && Gdx.app.getApplicationListener() != null) {
                 Gdx.app.getApplicationListener().resize(getWidth(), getHeight());
             }
-            Gdx.app.log(logTag, "Swapchain recreation fully complete.");
+
+            Gdx.app.log(TAG, "Swapchain recreation fully complete.");
 
         } catch (Exception e) {
-            Gdx.app.error(logTag, "Failed during VulkanSwapchain recreation or dependent resource update", e);
+            Gdx.app.error(TAG, "Failed during VulkanSwapchain recreation or dependent resource update", e);
             // We might be in a bad state here, re-throwing is safest
             throw new GdxRuntimeException("Failed to fully recreate swapchain and dependent resources", e);
         }
@@ -394,7 +382,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         // but it doesn't hurt to clear the Java list.
         // If not using that flag, vkFreeCommandBuffers would be needed here.
         if (commandBuffers != null) {
-            Gdx.app.log(logTag, "Clearing main command buffer list.");
+            Gdx.app.log(TAG, "Clearing main command buffer list.");
             commandBuffers.clear(); // Clear the list of wrappers
             commandBuffers = null; // Allow GC
         }
@@ -450,14 +438,14 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
         // Check if already cleaned or device is invalid
         if (rawDevice == null) {
-            System.out.println("[" + logTag + "] Already cleaned or device object is null.");
+            System.out.println("[" + TAG + "] Already cleaned or device object is null.");
             return;
         }
 
         // 1. Wait for GPU to finish all operations using these resources
-        logInfo(logTag, "Waiting for device idle before graphics cleanup...", useGdxLog);
+        logInfo(TAG, "Waiting for device idle before graphics cleanup...", useGdxLog);
         vkDeviceWaitIdle(rawDevice); // MUST BE FIRST!
-        logInfo(logTag, "Device idle. Proceeding with graphics cleanup...", useGdxLog);
+        logInfo(TAG, "Device idle. Proceeding with graphics cleanup...", useGdxLog);
 
         // Dispose managers and resources in reverse order of dependency/creation
         if (pipelineManager != null) {
@@ -472,17 +460,13 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             texture.dispose();
             texture = null;
         }
-        if (quadMesh != null) {
-            quadMesh.dispose();
-            quadMesh = null;
-        }
         if (vulkanSwapchain != null) {
             vulkanSwapchain.dispose();
             vulkanSwapchain = null;
         }
 
         if (syncManager != null) {
-            Gdx.app.log(logTag, "Disposing sync manager...");
+            Gdx.app.log(TAG, "Disposing sync manager...");
             syncManager.dispose();
             syncManager = null;
         }
@@ -498,7 +482,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
         vulkanRenderer = null;
         rawDevice = null; // Mark this instance as cleaned
-        logInfo(logTag, "VulkanGraphics cleanup finished.", useGdxLog);
+        logInfo(TAG, "VulkanGraphics cleanup finished.", useGdxLog);
     }
 
     private void logInfo(String tag, String message, boolean useGdx) {
@@ -554,22 +538,16 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     }
 
     public boolean drawFrame() {
-        // Step 1: Check if recreation is needed BEFORE trying to begin frame
         if (framebufferResized || (vulkanSwapchain != null && vulkanSwapchain.needsRecreation())) {
-            //Gdx.app.log(logTag, "[DrawFrame] Recreation needed (resized=" + framebufferResized + ", needsRecreation=" + (vulkanSwapchain != null && vulkanSwapchain.needsRecreation()) + ").");
             framebufferResized = false; // Reset GLFW flag
             if (vulkanSwapchain == null || vulkanSwapchain.getHandle() == VK_NULL_HANDLE) {
-                Gdx.app.error(logTag, "[DrawFrame] Cannot recreate, swapchain invalid.");
-                return false; // Cannot proceed if swapchain fundamentally broken
+                Gdx.app.error(TAG, "[DrawFrame] Cannot recreate, swapchain invalid.");
+                return false;
             }
-
-            recreateSwapChain(); // Call the method to handle recreation
-
-            // Skip rendering this frame as resources changed or might still need recreation (minimized)
+            recreateSwapChain();
             return false;
         }
 
-        // Step 2: Begin the frame
         FrameInfo frameInfo = beginFrame();
         if (!frameInfo.success) {
             return false;
@@ -579,44 +557,25 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         int imageIndex = frameInfo.imageIndex; // Keep index for endFrame
 
         try {
-            // --- CORE DRAWING LOGIC (Using Renderer) ---
-            vulkanRenderer.begin(commandBuffer); // Tell renderer which CB to use
-
-            vulkanRenderer.setDynamicStates(vulkanSwapchain.getExtent()); // Set viewport/scissor
-            vulkanRenderer.bindPipeline(pipelineManager.getGraphicsPipeline()); // Bind the default pipeline
-
-            // Get the pipeline layout matching the descriptor set layout used for textureDescriptorSet
-            long layoutHandle = pipelineManager.getOrCreatePipelineLayout(this.singleTextureLayoutHandle); // <<< CORRECTED WAY
-            if (layoutHandle == VK_NULL_HANDLE) {
-                // Handle error - this shouldn't happen if initialization was successful
-                throw new GdxRuntimeException("Failed to get/create pipeline layout for default texture descriptor set layout.");
+            ApplicationListener listener = Gdx.app.getApplicationListener();
+            if (listener != null) {
+                listener.render();
+            } else {
+                Gdx.app.error(TAG, "ApplicationListener is null during drawFrame!");
             }
-            vulkanRenderer.bindDescriptorSet(layoutHandle, this.textureDescriptorSet, 0); // Bind the texture's set using the obtained layout
-
-            vulkanRenderer.drawMesh(quadMesh); // Bind and draw the mesh
-
-            vulkanRenderer.end(); // Finish renderer sequence for this CB
-            // --- END CORE DRAWING ---
 
         } catch (Exception e) {
-            Gdx.app.error(logTag, "Exception during drawing command recording via Renderer", e);
+            Gdx.app.error(TAG, "Exception during drawing command recording via Renderer", e);
             // Attempt to end frame, then re-throw
             try {
                 endFrame(commandBuffer, imageIndex);
             } catch (Exception endEx) { /* Log endEx */ }
             throw new GdxRuntimeException("Exception during drawing command recording", e);
-        } finally {
-            // Ensure renderer state is cleared even if error occurred during drawing
-            // (begin() already checks if already active)
-            if (vulkanRenderer != null) {
-                vulkanRenderer.end(); // Ensure end() is called if begin() succeeded but drawing failed
-            }
         }
 
-        // Step 3: End the frame
         endFrame(commandBuffer, imageIndex);
 
-        update(); // Update timing
+        update();
         return true; // Rendered successfully
     }
 
@@ -1148,11 +1107,11 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         this.currentFrameRenderPassHandle = VK_NULL_HANDLE;
         // --- Pre-checks ---
         if (vulkanSwapchain == null || vulkanSwapchain.getHandle() == VK_NULL_HANDLE) {
-            Gdx.app.error(logTag, "[beginFrame] Swapchain object or handle is invalid!");
+            Gdx.app.error(TAG, "[beginFrame] Swapchain object or handle is invalid!");
             return new FrameInfo(false, null, -1);
         }
         if (syncManager == null) {
-            Gdx.app.error(logTag, "[beginFrame] SyncManager is null!");
+            Gdx.app.error(TAG, "[beginFrame] SyncManager is null!");
             // Or throw new GdxRuntimeException("SyncManager not initialized");
             return new FrameInfo(false, null, -1);
         }
@@ -1178,11 +1137,11 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
             // Handle Acquire Results
             if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
-                Gdx.app.log(logTag, "[beginFrame] Swapchain out of date after acquire. Needs recreation.");
+                Gdx.app.log(TAG, "[beginFrame] Swapchain out of date after acquire. Needs recreation.");
                 // Flag is set internally by acquireNextImage, recreation check happens before beginFrame
                 return new FrameInfo(false, null, -1); // Signal failure
             } else if (acquireResult == VK_SUBOPTIMAL_KHR) {
-                Gdx.app.log(logTag, "[beginFrame] Swapchain suboptimal after acquire. Recreation pending next frame.");
+                Gdx.app.log(TAG, "[beginFrame] Swapchain suboptimal after acquire. Recreation pending next frame.");
                 // Proceed, but flag is set for next frame's check
             } else if (acquireResult != VK_SUCCESS) {
                 throw new GdxRuntimeException("[beginFrame] Failed to acquire swap chain image! Result: " + VkResultDecoder.decode(acquireResult));
@@ -1213,6 +1172,33 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             }
             renderPassManager.beginSwapchainRenderPass(commandBuffer, vulkanSwapchain, imageIndex, null); // Use default clear color
 
+            try (MemoryStack stack2 = stackPush()) {
+                VkViewport.Buffer viewport = VkViewport.calloc(1, stack2);
+                VkRect2D.Buffer scissor = VkRect2D.calloc(1, stack2);
+
+                VkExtent2D extent = vulkanSwapchain.getExtent(); // Get current swapchain size
+
+                // Configure Viewport
+                viewport.get(0)
+                        .x(0.0f)
+                        .y((float) extent.height())
+                        .width((float) extent.width())
+                        .height(-(float) extent.height()) // Positive height convention
+                        .minDepth(0.0f)
+                        .maxDepth(1.0f);
+                // If you need Y-flipping via viewport, set y = extent.height() and height = -extent.height()
+
+                // Configure Scissor (usually matches viewport for full screen)
+                scissor.get(0)
+                        .offset(o -> o.set(0, 0))
+                        .extent(extent);
+
+                // Set the dynamic states on the command buffer
+                vkCmdSetViewport(commandBuffer, 0, viewport);
+                vkCmdSetScissor(commandBuffer, 0, scissor);
+                // Gdx.app.debug(logTag, "Set dynamic viewport/scissor for command buffer"); // Optional log
+            }
+
             this.currentFrameCommandBuffer = commandBuffer;
             this.currentFrameImageIndex = imageIndex;
             this.currentFrameRenderPassHandle = rpHandle;
@@ -1220,7 +1206,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             return new FrameInfo(true, commandBuffer, imageIndex);
 
         } catch (Exception e) {
-            Gdx.app.error(logTag, "Exception during beginFrame", e);
+            Gdx.app.error(TAG, "Exception during beginFrame", e);
             return new FrameInfo(false, null, -1); // Indicate failure on any exception
         }
     }
@@ -1235,16 +1221,16 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     private void endFrame(VkCommandBuffer commandBuffer, int imageIndex) {
         // --- Pre-checks ---
         if (commandBuffer == null) {
-            Gdx.app.error(logTag, "[endFrame] Received null command buffer!");
+            Gdx.app.error(TAG, "[endFrame] Received null command buffer!");
             // Maybe throw? Continuing might leave sync objects in weird state.
             throw new GdxRuntimeException("Cannot end frame with null command buffer");
         }
         if (vulkanSwapchain == null || vulkanSwapchain.getHandle() == VK_NULL_HANDLE) {
-            Gdx.app.error(logTag, "[endFrame] Swapchain object or handle is invalid!");
+            Gdx.app.error(TAG, "[endFrame] Swapchain object or handle is invalid!");
             throw new GdxRuntimeException("Cannot end frame with invalid swapchain");
         }
         if (syncManager == null) {
-            Gdx.app.error(logTag, "[endFrame] SyncManager is null!");
+            Gdx.app.error(TAG, "[endFrame] SyncManager is null!");
             throw new GdxRuntimeException("SyncManager not initialized for endFrame");
         }
 
@@ -1294,7 +1280,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             // Logging for suboptimal/ood happens within vulkanSwapchain.present if desired
 
         } catch (Exception e) {
-            Gdx.app.error(logTag, "Exception during endFrame", e);
+            Gdx.app.error(TAG, "Exception during endFrame", e);
             throw new GdxRuntimeException("Exception during endFrame", e);
         } finally {
             this.currentFrameCommandBuffer = null;

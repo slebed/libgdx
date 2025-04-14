@@ -300,6 +300,27 @@ public class VulkanApplication implements VulkanApplicationBase {
             throw new GdxRuntimeException("Exception occurred in ApplicationListener.create()", e);
         }
 
+        try {
+            // Gdx.graphics should be valid here
+            final int initialWidth = Gdx.graphics.getWidth();
+            final int initialHeight = Gdx.graphics.getHeight();
+            if (initialWidth > 0 && initialHeight > 0) {
+                Gdx.app.log("VulkanApplication", "Calling listener.resize() with initial dimensions: " + initialWidth + "x" + initialHeight);
+                listener.resize(initialWidth, initialHeight); // <-- THE MISSING CALL
+                Gdx.app.log("VulkanApplication", "Initial listener.resize() completed.");
+            } else {
+                // Log an error if dimensions are invalid, might indicate earlier problem
+                Gdx.app.error("VulkanApplication", "Initial dimensions from Gdx.graphics are invalid ("+initialWidth+"x"+initialHeight+"), skipping initial resize call!");
+            }
+        } catch (Throwable e) {
+            // Handle potential exception during initial resize, maybe cleanup and exit
+            Gdx.app.error("VulkanApplication", "Exception occurred during initial ApplicationListener.resize()", e);
+            cleanup(); // Attempt cleanup
+            // Optionally re-throw or exit depending on desired behavior
+            throw new GdxRuntimeException("Exception occurred during initial ApplicationListener.resize()", e);
+            // System.exit(-1);
+        }
+
         // 8. Start Main Loop
         Gdx.app.log("VulkanApplication", "Starting main loop...");
         runMainLoop();
@@ -829,6 +850,11 @@ System.out.println("HERE!!!!!!!!!!");
         }
 
         System.out.println("Required instance extensions: " + extensions);
+        if (enableValidationLayers && extensions.contains(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
+            System.out.println("[Validation Check] Added VK_EXT_DEBUG_UTILS_EXTENSION_NAME.");
+        } else if (enableValidationLayers) {
+            System.out.println("[Validation Check] Validation enabled, but Debug Utils extension missing?");
+        }
         return extensions;
     }
 
@@ -866,6 +892,13 @@ System.out.println("HERE!!!!!!!!!!");
             }
 
             System.out.println("Validation layers enabled: " + DESIRED_VALIDATION_LAYERS);
+            if (enableValidationLayers && !DESIRED_VALIDATION_LAYERS.isEmpty() && availableLayerNames.containsAll(DESIRED_VALIDATION_LAYERS)) {
+                System.out.println("[Validation Check] Found and returning requested layers: " + DESIRED_VALIDATION_LAYERS);
+            } else if (enableValidationLayers) {
+                System.out.println("[Validation Check] Validation enabled, but requested layers NOT found or not available. Returning empty list.");
+            } else {
+                System.out.println("[Validation Check] Validation disabled. Returning empty list.");
+            }
             return DESIRED_VALIDATION_LAYERS; // Return the constant list
 
         } catch (Exception e) {
@@ -927,6 +960,7 @@ System.out.println("HERE!!!!!!!!!!");
                 System.err.println("WARNING: Failed to set up Vulkan debug messenger: error code " + err);
             this.debugMessenger = VK_NULL_HANDLE;
         }
+
     }
 
     private VkPhysicalDevice selectPhysicalDevice(MemoryStack stack) {

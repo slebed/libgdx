@@ -164,7 +164,7 @@ public class VulkanPipelineManager implements Disposable {
      */
     public void cleanupLayoutAndPipeline() {
         if (graphicsPipeline != VK_NULL_HANDLE) {
-            Gdx.app.log(logTag,"Destroying graphics pipeline: " + graphicsPipeline);
+            Gdx.app.log(logTag, "Destroying graphics pipeline: " + graphicsPipeline);
             vkDestroyPipeline(rawDevice, graphicsPipeline, null);
             graphicsPipeline = VK_NULL_HANDLE; // Reset the handle
         }
@@ -194,7 +194,7 @@ public class VulkanPipelineManager implements Disposable {
 
         // *** BEGIN MISSING SECTION ***
         // Clean up cached pipeline layouts
-        Gdx.app.log(logTag,"Cleaning up cached pipeline layouts (" + pipelineLayoutCache.size() + ")...");
+        Gdx.app.log(logTag, "Cleaning up cached pipeline layouts (" + pipelineLayoutCache.size() + ")...");
         for (long layoutHandle : pipelineLayoutCache.values()) { // Iterate through the handles
             if (layoutHandle != VK_NULL_HANDLE) {
                 Gdx.app.log(logTag, "Destroying cached pipeline layout: " + layoutHandle);
@@ -208,7 +208,7 @@ public class VulkanPipelineManager implements Disposable {
 
         // Destroy SpriteBatch pipeline if created
         if (spriteBatchPipeline != VK_NULL_HANDLE) {
-            Gdx.app.log(logTag,"Destroying SpriteBatch graphics pipeline: " + spriteBatchPipeline);
+            Gdx.app.log(logTag, "Destroying SpriteBatch graphics pipeline: " + spriteBatchPipeline);
             vkDestroyPipeline(rawDevice, spriteBatchPipeline, null);
             spriteBatchPipeline = VK_NULL_HANDLE;
         }
@@ -449,7 +449,7 @@ public class VulkanPipelineManager implements Disposable {
      * More complex caching might be needed if used with multiple different render passes.
      *
      * @param batchDescriptorSetLayoutHandle The descriptor set layout handle used by VulkanSpriteBatch.
-     * @param renderPassHandle Handle to a compatible render pass.
+     * @param renderPassHandle               Handle to a compatible render pass.
      * @return The VkPipeline handle for the SpriteBatch pipeline.
      */
     public synchronized long getOrCreateSpriteBatchPipeline(long batchDescriptorSetLayoutHandle, long renderPassHandle) {
@@ -461,15 +461,19 @@ public class VulkanPipelineManager implements Disposable {
             return this.spriteBatchPipeline;
         }
 
-        Gdx.app.log(logTag, "Creating SpriteBatch graphics pipeline...");
+        Gdx.app.log(logTag, "getOrCreateSpriteBatchPipeline()\t" + "Creating SpriteBatch graphics pipeline...");
 
         // --- Load SpriteBatch Shaders ---
-        FileHandle vertShaderFile = Gdx.files.internal("data/vulkan/shaders/sprite.vert.spv"); // Adjust path if needed
-        FileHandle fragShaderFile = Gdx.files.internal("data/vulkan/shaders/sprite.vert.spv"); // Adjust path if needed
-        if (!vertShaderFile.exists() || !fragShaderFile.exists()) {
-            throw new GdxRuntimeException("SpriteBatch SPIR-V shaders not found!");
+        FileHandle vertShaderFile = Gdx.files.internal("data/vulkan/shaders/spritebatch.vert.spv"); // Adjust path if needed
+        FileHandle fragShaderFile = Gdx.files.internal("data/vulkan/shaders/spritebatch.frag.spv"); // Adjust path if needed
+
+        if (!vertShaderFile.exists()) {
+            throw new GdxRuntimeException("SpriteBatch VERTEX shader not found at: " + vertShaderFile.path());
         }
-        long vertModuleHandle = loadShaderModule(vertShaderFile); // Use existing shader loading
+        if (!fragShaderFile.exists()) {
+            throw new GdxRuntimeException("SpriteBatch FRAGMENT shader not found at: " + fragShaderFile.path());
+        }
+        long vertModuleHandle = loadShaderModule(vertShaderFile);
         long fragModuleHandle = loadShaderModule(fragShaderFile);
 
         // Validate input handles
@@ -558,8 +562,7 @@ public class VulkanPipelineManager implements Disposable {
                     .basePipelineHandle(VK_NULL_HANDLE).basePipelineIndex(-1);
 
             LongBuffer pGraphicsPipeline = stack.mallocLong(1);
-            vkCheck(vkCreateGraphicsPipelines(rawDevice, this.vkPipelineCacheHandle, pipelineInfo, null, pGraphicsPipeline),
-                    "Failed to create SpriteBatch graphics pipeline");
+            vkCheck(vkCreateGraphicsPipelines(rawDevice, this.vkPipelineCacheHandle, pipelineInfo, null, pGraphicsPipeline), "Failed to create SpriteBatch graphics pipeline");
 
             this.spriteBatchPipeline = pGraphicsPipeline.get(0); // Store handle
             // Optional: Store layout handle used for validation

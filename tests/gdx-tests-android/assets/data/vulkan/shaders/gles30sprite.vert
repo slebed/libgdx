@@ -6,8 +6,8 @@ layout(location = 1) in float a_color;     // Usage.ColorPacked (float) - Packed
 layout(location = 2) in vec2 a_texCoord0;  // Usage.TextureCoordinates (vec2)
 
 // Matches VulkanSpriteBatch UBO binding
-layout(binding = 0) uniform UniformBufferObject {
-    mat4 projTrans; // Renamed for clarity within block
+layout(std140, binding = 0) uniform UniformBufferObject {
+    mat4 projTrans;
 } ubo;
 
 // Output to Fragment Shader
@@ -17,10 +17,10 @@ layout(location = 1) out vec2 v_texCoords;
 // Function to unpack the ABGR float color
 vec4 unpackColor(float packedColor) {
     uint intBits = floatBitsToUint(packedColor);
-    float a = float((intBits >> 24) & 0xFF) / 255.0;
-    float b = float((intBits >> 16) & 0xFF) / 255.0;
-    float g = float((intBits >> 8)  & 0xFF) / 255.0;
-    float r = float( intBits        & 0xFF) / 255.0;
+    float a = float((intBits >> 24) & 0xFFu) / 255.0;
+    float b = float((intBits >> 16) & 0xFFu) / 255.0;
+    float g = float((intBits >> 8)  & 0xFFu) / 255.0;
+    float r = float( intBits        & 0xFFu) / 255.0;
     return vec4(r, g, b, a);
 }
 
@@ -32,6 +32,6 @@ void main() {
     // Pass through texture coordinates
     v_texCoords = a_texCoord0;
 
-    // Calculate vertex position
-    gl_Position = ubo.projTrans * vec4(a_position.xy, 0.0, 1.0);
+    gl_Position = ubo.projTrans *  vec4(a_position.xy, 0.0, 1.0);//a_position;
+
 }

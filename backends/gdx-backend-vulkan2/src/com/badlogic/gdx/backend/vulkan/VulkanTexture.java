@@ -4,7 +4,6 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.TextureData;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
 import org.lwjgl.PointerBuffer;
@@ -27,13 +26,146 @@ import static org.lwjgl.vulkan.VK10.*;
 public class VulkanTexture extends Texture {
     private final String logTag = "VulkanTexture";
 
-    private final VulkanDevice device; // Needed for cleanup
-    private final VulkanImage vulkanImage; // Holds VkImage and VmaAllocation
+    // Make fields final if they are always initialized in constructors
+    private final VulkanDevice device;
+    private final VulkanImage vulkanImage;
     private final long imageViewHandle;
     private final long samplerHandle;
     private final int width;
     private final int height;
     private final int format; // Store VkFormat
+    private boolean disposed = false;
+
+    /**
+     * Constructor that automatically retrieves Vulkan context from Gdx.graphics.
+     * Assumes Vulkan backend is initialized and active.
+     *
+     * @param file The FileHandle of the image to load.
+     * @throws GdxRuntimeException if Gdx.graphics is not VulkanGraphics or context is invalid.
+     */
+    public VulkanTexture(FileHandle file) {
+        super(); // Call the protected no-op Texture() constructor FIRST
+
+        if (file == null || !file.exists()) {
+            throw new GdxRuntimeException("FileHandle cannot be null and must exist: " + file);
+        }
+
+        Gdx.app.log(logTag, "(Constructor) Loading texture from: " + file.path());
+
+        // 1. Get Vulkan Context (Device and Allocator)
+        if (!(Gdx.graphics instanceof VulkanGraphics)) {
+            throw new GdxRuntimeException("Cannot create VulkanTexture: Gdx.graphics is not an instance of VulkanGraphics.");
+        }
+        VulkanGraphics gfx = (VulkanGraphics) Gdx.graphics;
+        VulkanDevice retrievedDevice = gfx.getVulkanDevice();
+        long vmaAllocator = gfx.getVmaAllocator();
+
+        if (retrievedDevice == null || vmaAllocator == VK_NULL_HANDLE) {
+            throw new GdxRuntimeException("Cannot create VulkanTexture: VulkanDevice or VMA Allocator not available from VulkanGraphics.");
+        }
+
+        // Temporary variables for resource handles to allow cleanup in case of partial failure
+        VulkanBuffer stagingBuffer = null;
+        VulkanImage tempGpuImage = null;
+        long tempImageView = VK_NULL_HANDLE;
+        long tempSampler = VK_NULL_HANDLE;
+        Pixmap originalPixmap = null;
+        Pixmap rgbaPixmap = null;
+
+        try {
+            // 2. Load Pixmap & ensure RGBA8888
+            originalPixmap = new Pixmap(file);
+            if (originalPixmap.getFormat() != Pixmap.Format.RGBA8888) {
+                Gdx.app.log(logTag, "Converting Pixmap to RGBA8888...");
+                rgbaPixmap = new Pixmap(originalPixmap.getWidth(), originalPixmap.getHeight(), Pixmap.Format.RGBA8888);
+                rgbaPixmap.setBlending(Pixmap.Blending.None); // Disable blending for direct copy
+                rgbaPixmap.drawPixmap(originalPixmap, 0, 0);
+                originalPixmap.dispose(); // Dispose original immediately
+                originalPixmap = null;
+            } else {
+                rgbaPixmap = originalPixmap;
+                originalPixmap = null; // Original is now the rgbaPixmap
+            }
+
+            int texWidth = rgbaPixmap.getWidth();
+            int texHeight = rgbaPixmap.getHeight();
+            int vkFormat = VK_FORMAT_R8G8B8A8_SRGB; // Assuming SRGB for typical image files
+            long imageSize = (long) texWidth * texHeight * 4;
+            ByteBuffer pixelBuffer = rgbaPixmap.getPixels();
+
+            // 3. Create Staging Buffer via VMA
+            stagingBuffer = VulkanResourceUtil.createManagedBuffer(
+                    vmaAllocator, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VMA_MEMORY_USAGE_AUTO,
+                    VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
+            );
+
+            // 4. Map, Copy Pixmap data, Unmap
+            PointerBuffer pData = MemoryUtil.memAllocPointer(1);
+            try {
+                vkCheck(vmaMapMemory(vmaAllocator, stagingBuffer.allocationHandle, pData), "VMA Failed to map texture staging buffer");
+                ByteBuffer stagingByteBuffer = MemoryUtil.memByteBuffer(pData.get(0), (int) imageSize);
+                stagingByteBuffer.put(pixelBuffer); // Copy data from Pixmap buffer
+                stagingByteBuffer.flip(); // Not strictly needed after put, but good practice
+                vmaUnmapMemory(vmaAllocator, stagingBuffer.allocationHandle);
+            } finally {
+                MemoryUtil.memFree(pData);
+            }
+            // We can dispose the Pixmap now as its data is in the staging buffer
+            rgbaPixmap.dispose();
+            rgbaPixmap = null;
+
+
+            // 5. Create Final GPU Image via VMA
+            tempGpuImage = VulkanResourceUtil.createManagedImage(
+                    vmaAllocator, texWidth, texHeight, vkFormat, VK_IMAGE_TILING_OPTIMAL,
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0
+            );
+
+            // 6. Perform Layout Transitions and Copy (using the retrieved device)
+            transitionImageLayoutCmd(retrievedDevice, tempGpuImage.imageHandle, vkFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            copyBufferToImageCmd(retrievedDevice, stagingBuffer.bufferHandle, tempGpuImage.imageHandle, texWidth, texHeight);
+            transitionImageLayoutCmd(retrievedDevice, tempGpuImage.imageHandle, vkFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+            Gdx.app.log(logTag, "VMA Image created and data uploaded.");
+
+            // 7. Create ImageView
+            tempImageView = createImageViewInternal(retrievedDevice.getRawDevice(), tempGpuImage.imageHandle, vkFormat);
+            Gdx.app.log(logTag, "ImageView created: " + tempImageView);
+
+            // 8. Create Sampler
+            tempSampler = createSamplerInternal(retrievedDevice.getRawDevice());
+            Gdx.app.log(logTag, "Sampler created: " + tempSampler);
+
+            // 9. Assign to final fields *after* all steps succeed
+            this.device = retrievedDevice;
+            this.vulkanImage = tempGpuImage;
+            this.imageViewHandle = tempImageView;
+            this.samplerHandle = tempSampler;
+            this.width = texWidth;
+            this.height = texHeight;
+            this.format = vkFormat;
+
+            Gdx.app.log(logTag, "VulkanTexture created successfully from " + file.path());
+
+        } catch (Exception e) {
+            // Cleanup intermediate resources if constructor failed
+            Gdx.app.error(logTag, "Failed during VulkanTexture constructor for: " + file.path(), e);
+            // Destroy in reverse order of creation attempt
+            if (tempSampler != VK_NULL_HANDLE) vkDestroySampler(retrievedDevice.getRawDevice(), tempSampler, null);
+            if (tempImageView != VK_NULL_HANDLE) vkDestroyImageView(retrievedDevice.getRawDevice(), tempImageView, null);
+            if (tempGpuImage != null) tempGpuImage.dispose(); // Calls vmaDestroyImage
+
+            // stagingBuffer and pixmaps are handled in finally block
+            throw new GdxRuntimeException("Failed to create VulkanTexture from FileHandle", e); // Re-throw
+        } finally {
+            // Always cleanup staging buffer and any remaining pixmaps
+            if (stagingBuffer != null) stagingBuffer.dispose(); // Calls vmaDestroyBuffer
+            if (rgbaPixmap != null) rgbaPixmap.dispose();       // Should be null if successful put(), but check anyway
+            if (originalPixmap != null) originalPixmap.dispose(); // Should be null anyway
+        }
+    }
 
     // Private constructor, use loadFromFile factory method
     private VulkanTexture(VulkanDevice device, VulkanImage vulkanImage, long imageViewHandle, long samplerHandle) {
@@ -47,73 +179,7 @@ public class VulkanTexture extends Texture {
         this.width = vulkanImage.width;
         this.height = vulkanImage.height;
         this.format = vulkanImage.format;
-        /*super(createDummyTextureData(vulkanImage.width, vulkanImage.height));
-        this.device = device;
-        this.vulkanImage = vulkanImage;
-        this.imageViewHandle = imageViewHandle;
-        this.samplerHandle = samplerHandle;
-        this.width = vulkanImage.width;
-        this.height = vulkanImage.height;
-        this.format = vulkanImage.format;*/
     }
-
-    // Helper to create minimal TextureData for the super constructor
-    /*private static TextureData createDummyTextureData(final int w, final int h) {
-        return new TextureData() {
-            @Override
-            public TextureDataType getType() {
-                return TextureDataType.Custom;
-            }
-
-            @Override
-            public boolean isPrepared() {
-                return true;
-            } // Mark as prepared
-
-            @Override
-            public void prepare() {
-            } // No-op
-
-            @Override
-            public Pixmap consumePixmap() {
-                return null;
-            } // Doesn't provide Pixmap
-
-            @Override
-            public boolean disposePixmap() {
-                return false;
-            }
-
-            @Override
-            public void consumeCustomData(int target) {
-            } // No GL ops needed
-
-            @Override
-            public int getWidth() {
-                return w;
-            }
-
-            @Override
-            public int getHeight() {
-                return h;
-            }
-
-            @Override
-            public Pixmap.Format getFormat() {
-                return Pixmap.Format.RGBA8888;
-            } // Assume default?
-
-            @Override
-            public boolean useMipMaps() {
-                return false;
-            } // Assuming no mipmaps initially
-
-            @Override
-            public boolean isManaged() {
-                return false;
-            } // Vulkan resources aren't managed by TextureData
-        };
-    }*/
 
     // --- Getters ---
     public long getImageViewHandle() {
@@ -330,7 +396,9 @@ public class VulkanTexture extends Texture {
         device.executeSingleTimeCommands(commandBuffer -> {
             try (MemoryStack stack = stackPush()) {
                 VkBufferImageCopy.Buffer region = VkBufferImageCopy.calloc(1, stack)
-                        .bufferOffset(0).bufferRowLength(0).bufferImageHeight(0)
+                        .bufferOffset(0)
+                        .bufferRowLength(width)
+                        .bufferImageHeight(0)
                         .imageSubresource(is -> is.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1))
                         .imageOffset(off -> off.set(0, 0, 0))
                         .imageExtent(ext -> ext.set(width, height, 1));
@@ -348,29 +416,38 @@ public class VulkanTexture extends Texture {
     @Override
     public void dispose() {
         Gdx.app.log(logTag, "Disposing texture (" + width + "x" + height + ")...");
+
+        if (disposed) {
+            Gdx.app.debug(logTag, "Texture already disposed."); // Optional log
+            return;
+        }
+        // Check device validity early
         VkDevice rawDevice = (device != null) ? device.getRawDevice() : null;
         if (rawDevice == null) {
-            Gdx.app.error(logTag, "Cannot dispose texture, VulkanDevice reference is null!");
+            Gdx.app.error(logTag, "Cannot dispose texture, VulkanDevice reference is null! Handles might leak.");
+            disposed = true; // Mark as disposed even if cleanup failed
             return;
         }
 
         // Destroy view and sampler FIRST
-        if (imageViewHandle != VK_NULL_HANDLE) {
+        if (imageViewHandle != VK_NULL_HANDLE) { // Check required if field isn't nulled below
             Gdx.app.log(logTag, "Destroying image view: " + imageViewHandle);
             vkDestroyImageView(rawDevice, imageViewHandle, null);
-            // imageViewHandle = VK_NULL_HANDLE; // No need to null if object is disposed
+            // imageViewHandle = VK_NULL_HANDLE; // Cannot do if final
         }
-        if (samplerHandle != VK_NULL_HANDLE) {
+        if (samplerHandle != VK_NULL_HANDLE) { // Check required if field isn't nulled below
             Gdx.app.log(logTag, "Destroying sampler: " + samplerHandle);
             vkDestroySampler(rawDevice, samplerHandle, null);
-            // samplerHandle = VK_NULL_HANDLE;
-            // TODO: If using sampler cache, release reference instead of destroying
+            // samplerHandle = VK_NULL_HANDLE; // Cannot do if final
         }
 
-        // Dispose the underlying VulkanImage (which calls vmaDestroyImage)
+        // Dispose the underlying VulkanImage
         if (vulkanImage != null) {
-            vulkanImage.dispose();
+            vulkanImage.dispose(); // VulkanImage.dispose needs to be idempotent too!
+            // vulkanImage = null; // Cannot do if final
         }
+
+        disposed = true; // --- Mark as disposed ---
         Gdx.app.log(logTag, "Texture disposed.");
     }
 
@@ -429,5 +506,25 @@ public class VulkanTexture extends Texture {
     @Override
     public int getDepth() {
         return 0; // Only 2D textures implemented currently
+    }
+
+    @Override
+    public void setFilter(TextureFilter minFilter, TextureFilter magFilter) {
+        // NO-OP for VulkanTexture in this basic implementation.
+        // The VkSampler used by this texture was created with fixed settings during load.
+        // To properly support this, we would need to potentially find or create
+        // a new VkSampler matching these filters and update descriptor sets referencing it,
+        // which is significantly more complex.
+        Gdx.app.debug(logTag, "VulkanTexture.setFilter() called, ignoring. Min: " + minFilter + ", Mag: " + magFilter);
+        // DO NOT call super.setFilter(minFilter, magFilter);
+    }
+
+    @Override
+    public void setWrap(TextureWrap u, TextureWrap v) {
+        // NO-OP for VulkanTexture in this basic implementation.
+        // The VkSampler used by this texture was created with fixed settings during load.
+        // Similar complexity to setFilter applies to supporting runtime wrap changes.
+        Gdx.app.debug(logTag, "VulkanTexture.setWrap() called, ignoring. U: " + u + ", V: " + v);
+        // DO NOT call super.setWrap(u, v);
     }
 }
