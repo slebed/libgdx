@@ -32,7 +32,6 @@ import com.badlogic.gdx.AbstractGraphics;
 import com.badlogic.gdx.Application;
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.math.GridPoint2;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
@@ -75,7 +74,6 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     private List<VkCommandBuffer> commandBuffers; // VkCommandBuffer objects
 
     private VulkanSyncManager syncManager;
-    private VulkanRenderer vulkanRenderer;
 
     private VulkanApplication app = (VulkanApplication) Gdx.app; // Or get via constructor arg
 
@@ -111,12 +109,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     IntBuffer tmpBuffer = BufferUtils.createIntBuffer(1);
     IntBuffer tmpBuffer2 = BufferUtils.createIntBuffer(1);
 
-    private VulkanTexture texture;
-
     private VulkanDescriptorManager descriptorManager;
-
-    private long singleTextureLayoutHandle = VK_NULL_HANDLE;
-    private long textureDescriptorSet = VK_NULL_HANDLE;
 
     private VkCommandBuffer currentFrameCommandBuffer = null;
     private int currentFrameImageIndex = -1;
@@ -195,7 +188,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         Gdx.app.log(TAG, "Initializing swapchain and graphics resources...");
 
         try {
-            this.descriptorManager = new VulkanDescriptorManager(this.vulkanDevice);
+            this.descriptorManager = new VulkanDescriptorManager(this.vulkanDevice.getRawDevice());
             this.pipelineManager = new VulkanPipelineManager(this.vulkanDevice);
         } catch (Exception e) {
             throw new GdxRuntimeException("Failed to create managers during init", e);
@@ -213,69 +206,6 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
                     .build();
             Gdx.app.log(TAG, "VulkanSwapchain built successfully.");
 
-            // --- 3. Create Other Graphics Resources ---
-
-            // Load Texture (creates VulkanImage, ImageView, Sampler)
-            Gdx.app.log(TAG, "Loading default texture...");
-            FileHandle textureFile = Gdx.files.internal("data/badlogic.jpg"); // Ensure exists
-            if (!textureFile.exists()) throw new GdxRuntimeException("Default texture file not found: " + textureFile);
-            this.texture = VulkanTexture.loadFromFile(textureFile, this.vulkanDevice, this.vmaAllocator);
-            Gdx.app.log(TAG, "Default texture loaded successfully.");
-
-            // Descriptor Setup (Layout is created in manager, allocate set, update)
-            this.singleTextureLayoutHandle = descriptorManager.getDefaultLayout();
-            if (this.singleTextureLayoutHandle == VK_NULL_HANDLE) {
-                throw new GdxRuntimeException("Failed to get default layout from DescriptorManager");
-            }
-            Gdx.app.log(TAG, "Retrieved descriptor set layout from manager.");
-
-            this.textureDescriptorSet = descriptorManager.allocateSet(this.singleTextureLayoutHandle);
-            if (this.textureDescriptorSet == VK_NULL_HANDLE) {
-                throw new GdxRuntimeException("Failed to allocate descriptor set from DescriptorManager");
-            }
-            Gdx.app.log(TAG, "Allocated descriptor set from manager.");
-
-            VulkanDescriptorManager.updateCombinedImageSampler(
-                    rawDevice,
-                    this.textureDescriptorSet,
-                    0, // binding
-                    this.texture // Pass VulkanTexture object
-            );
-            Gdx.app.log(TAG, "Updated descriptor set using manager helper for texture.");
-
-            // Graphics Pipeline (Manager loads shaders internally now)
-            Gdx.app.log(TAG, "Creating graphics pipeline via manager...");
-            FileHandle vertShaderFile = Gdx.files.internal("data/vulkan/shaders/textured.vert.spv");
-            FileHandle fragShaderFile = Gdx.files.internal("data/vulkan/shaders/textured.frag.spv");
-            long renderPassHandle = this.vulkanSwapchain.getRenderPass(); // Get RP handle from Swapchain
-            if (renderPassHandle == VK_NULL_HANDLE) throw new GdxRuntimeException("Render pass handle invalid for pipeline creation");
-            if (!vertShaderFile.exists()) throw new GdxRuntimeException("Vertex shader file not found: " + vertShaderFile);
-            if (!fragShaderFile.exists()) throw new GdxRuntimeException("Fragment shader file not found: " + fragShaderFile);
-
-            pipelineManager.createDefaultPipeline(
-                    vertShaderFile,
-                    fragShaderFile,
-                    this.singleTextureLayoutHandle,
-                    renderPassHandle
-            );
-            Gdx.app.log(TAG, "Graphics pipeline created via manager.");
-
-            // Geometry Buffers (Create VulkanMesh)
-            /*Gdx.app.log(logTag, "Creating quad mesh...");
-            VertexAttributes quadAttributes = new VertexAttributes(
-                    new VertexAttribute(VertexAttributes.Usage.Position, 2, ShaderProgram.POSITION_ATTRIBUTE),
-                    new VertexAttribute(VertexAttributes.Usage.ColorUnpacked, 3, ShaderProgram.COLOR_ATTRIBUTE),
-                    new VertexAttribute(VertexAttributes.Usage.TextureCoordinates, 2, ShaderProgram.TEXCOORD_ATTRIBUTE + "0")
-            );
-            this.quadMesh = new VulkanMesh(this.vulkanDevice, this.vmaAllocator, true, // isStatic = true
-                    quadVertices.length / 7, // numVertices = 4
-                    quadIndices.length,    // numIndices = 6
-                    quadAttributes);
-            this.quadMesh.setVertices(quadVertices); // Upload data
-            this.quadMesh.setIndices(quadIndices);   // Upload data
-            Gdx.app.log(logTag, "Quad mesh created successfully.");*/
-
-            this.vulkanRenderer = new VulkanRenderer(this.vulkanDevice);
             Gdx.app.log(TAG, "VulkanRenderer created.");
 
             // Main Command Buffers (per swapchain image)
@@ -331,24 +261,6 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
             // Update internal size tracking
             updateFramebufferInfo();
-
-            // Recreate Graphics Pipeline (uses new render pass from swapchain)
-            Gdx.app.log(TAG, "Recreating graphics pipeline after swapchain change...");
-            FileHandle vertShaderFile = Gdx.files.internal("data/vulkan/shaders/textured.vert.spv");
-            FileHandle fragShaderFile = Gdx.files.internal("data/vulkan/shaders/textured.frag.spv");
-            long renderPassHandle = this.vulkanSwapchain.getRenderPass();
-            // Assume layout handle (singleTextureLayoutHandle) is still valid
-            if (pipelineManager == null || renderPassHandle == VK_NULL_HANDLE || singleTextureLayoutHandle == VK_NULL_HANDLE
-                    || !vertShaderFile.exists() || !fragShaderFile.exists()) {
-                throw new GdxRuntimeException("Missing dependencies for pipeline recreation during swapchain recreate.");
-            }
-            pipelineManager.createDefaultPipeline(
-                    vertShaderFile,
-                    fragShaderFile,
-                    this.singleTextureLayoutHandle,
-                    renderPassHandle
-            );
-            Gdx.app.log(TAG, "Graphics pipeline recreated via manager.");
 
             // Re-allocate Command Buffers (number might have changed)
             cleanupCommandBuffers(); // Clean up old command buffer objects/handles first
@@ -456,10 +368,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             descriptorManager.dispose();
             descriptorManager = null;
         }
-        if (texture != null) {
-            texture.dispose();
-            texture = null;
-        }
+
         if (vulkanSwapchain != null) {
             vulkanSwapchain.dispose();
             vulkanSwapchain = null;
@@ -471,16 +380,12 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             syncManager = null;
         }
 
-        singleTextureLayoutHandle = VK_NULL_HANDLE;
-        textureDescriptorSet = VK_NULL_HANDLE;
-
         // Clear command buffer list reference (actual buffers tied to pool)
         if (commandBuffers != null) {
             commandBuffers.clear();
             commandBuffers = null;
         }
 
-        vulkanRenderer = null;
         rawDevice = null; // Mark this instance as cleaned
         logInfo(TAG, "VulkanGraphics cleanup finished.", useGdxLog);
     }
@@ -990,7 +895,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
      */
     @Override
     public void setForegroundFPS(int fps) {
-        getWindow().getConfig().foregroundFPS = fps;
+        getWindow().getApplicationConfig().foregroundFPS = fps;
     }
 
     @Override

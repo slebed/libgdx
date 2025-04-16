@@ -1,254 +1,249 @@
 package com.badlogic.gdx.backend.vulkan;
 
-import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.utils.Disposable;
-import com.badlogic.gdx.utils.GdxRuntimeException;
-
-import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.*;
 import org.lwjgl.vulkan.*;
 
 import java.nio.LongBuffer;
-
-import static com.badlogic.gdx.backend.vulkan.VkMemoryUtil.vkCheck;
-import static org.lwjgl.system.MemoryStack.stackPush;
+import java.util.*;
 import static org.lwjgl.vulkan.VK10.*;
+import static org.lwjgl.system.MemoryStack.*;
 
-/**
- * Manages Vulkan Descriptor Set Layouts, Pools, and Sets.
- * (Initial version handles one default layout and pool configuration).
- */
-public class VulkanDescriptorManager implements Disposable {
-    private final String logTag = "VulkanDescriptorManager";
-    private final VulkanDevice device;
-    private final VkDevice rawDevice;
+public class VulkanDescriptorManager {
 
-    // Handles managed by this class
-    private long descriptorPool = VK_NULL_HANDLE;
-    private long singleTextureLayout = VK_NULL_HANDLE; // Layout for a single combined image sampler at binding 0
+    private static final int MAX_SETS_PER_POOL = 100; // Example value
+    private static final int MAX_UBOS_PER_POOL = 100;  // Example value
+    private static final int MAX_SAMPLERS_PER_POOL = 100; // Example value
 
-    public VulkanDescriptorManager(VulkanDevice device) {
-        this.device = device;
-        this.rawDevice = device.getRawDevice();
+    private final VkDevice device;
+    private long descriptorPool;
 
-        try {
-            createLayout(); // Create the specific layout we need now
-            createPool();   // Create a reasonably sized pool
-        } catch (Exception e) {
-            // Ensure cleanup if constructor fails partially
-            dispose();
-            throw new GdxRuntimeException("Failed to initialize VulkanDescriptorManager", e);
-        }
-        Gdx.app.log(logTag, "Initialized successfully.");
+    // Cache layouts to avoid recreating identical ones
+    private final Map<String, Long> layoutCache = new HashMap<>();
+    // Define keys for common layouts
+    public static final String LAYOUT_KEY_SPRITEBATCH = "SpriteBatch_UBO0_Sampler1";
+    public static final String LAYOUT_KEY_SINGLE_SAMPLER = "SingleSampler0"; // Keep if needed elsewhere
+
+    public VulkanDescriptorManager(VkDevice device) {
+        this.device = Objects.requireNonNull(device);
+        createPool();
+        // Layouts are now created on demand via getOrCreate methods
     }
 
-    /**
-     * Creates the specific hardcoded layout for a single Combined Image Sampler at binding 0.
-     * TODO: Extend this later to create/cache layouts based on input bindings.
-     */
-    private void createLayout() {
-        Gdx.app.log(logTag, "Creating default descriptor set layout (1 CombinedImageSampler@0)...");
+    // --- Layout Creation/Retrieval ---
+
+    public long getOrCreateSpriteBatchLayout() {
+        return layoutCache.computeIfAbsent(LAYOUT_KEY_SPRITEBATCH, k -> createSpriteBatchLayout());
+    }
+
+    // Example: Keep the old single sampler layout if needed elsewhere
+    public long getOrCreateSingleSamplerLayout() {
+        return layoutCache.computeIfAbsent(LAYOUT_KEY_SINGLE_SAMPLER, k -> createSingleSamplerLayout());
+    }
+
+    // You could add a more generic method if needed:
+    // public synchronized long getOrCreateLayout(String key, VkDescriptorSetLayoutBinding.Buffer bindings) { ... }
+
+    private long createSpriteBatchLayout() {
         try (MemoryStack stack = stackPush()) {
-            VkDescriptorSetLayoutBinding.Buffer samplerLayoutBinding = VkDescriptorSetLayoutBinding.calloc(1, stack);
-            samplerLayoutBinding.get(0)
-                    .binding(0) // Binding 0
-                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                    .descriptorCount(1)
-                    .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT) // Used in fragment shader
-                    .pImmutableSamplers(null);
+            VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(2, stack);
 
-            VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
-                    .sType$Default()
-                    .pBindings(samplerLayoutBinding);
+            // Binding 0: Uniform Buffer (Vertex Shader)
+            VkDescriptorSetLayoutBinding uboBinding = bindings.get(0);
+            uboBinding.binding(0);
+            uboBinding.descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+            uboBinding.descriptorCount(1);
+            uboBinding.stageFlags(VK_SHADER_STAGE_VERTEX_BIT);
+            uboBinding.pImmutableSamplers(null); // Optional
 
-            LongBuffer pDescriptorSetLayout = stack.mallocLong(1);
-            vkCheck(vkCreateDescriptorSetLayout(rawDevice, layoutInfo, null, pDescriptorSetLayout), "Failed to create default descriptor set layout");
-            this.singleTextureLayout = pDescriptorSetLayout.get(0);
-            Gdx.app.log(logTag, "Default layout created: " + this.singleTextureLayout);
+            // Binding 1: Combined Image Sampler (Fragment Shader)
+            VkDescriptorSetLayoutBinding samplerBinding = bindings.get(1);
+            samplerBinding.binding(1);
+            samplerBinding.descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            samplerBinding.descriptorCount(1);
+            samplerBinding.stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+            samplerBinding.pImmutableSamplers(null); // Optional
+
+            VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack);
+            layoutInfo.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
+            layoutInfo.pBindings(bindings);
+            // layoutInfo.flags(...) // Optional flags
+
+            LongBuffer pLayout = stack.mallocLong(1);
+            int result = vkCreateDescriptorSetLayout(device, layoutInfo, null, pLayout);
+            if (result != VK_SUCCESS) {
+                throw new RuntimeException("Failed to create SpriteBatch descriptor set layout: " + result);
+            }
+            System.out.println("Created SpriteBatch Descriptor Set Layout: " + pLayout.get(0));
+            return pLayout.get(0);
         }
     }
 
-    /**
-     * Creates the main descriptor pool.
-     * Sized generously enough for common scenarios, but might need adjustment/extension later.
-     */
+    private long createSingleSamplerLayout() {
+        try (MemoryStack stack = stackPush()) {
+            VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(1, stack);
+
+            // Binding 0: Combined Image Sampler (Fragment Shader)
+            VkDescriptorSetLayoutBinding samplerBinding = bindings.get(0);
+            samplerBinding.binding(0); // Original binding was 0
+            samplerBinding.descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            samplerBinding.descriptorCount(1);
+            samplerBinding.stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+            samplerBinding.pImmutableSamplers(null);
+
+            VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack);
+            layoutInfo.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
+            layoutInfo.pBindings(bindings);
+
+            LongBuffer pLayout = stack.mallocLong(1);
+            int result = vkCreateDescriptorSetLayout(device, layoutInfo, null, pLayout);
+            if (result != VK_SUCCESS) {
+                throw new RuntimeException("Failed to create Single Sampler descriptor set layout: " + result);
+            }
+            System.out.println("Created Single Sampler Descriptor Set Layout: " + pLayout.get(0));
+            return pLayout.get(0);
+        }
+    }
+
+    // --- Pool and Allocation ---
+
     private void createPool() {
-        Gdx.app.log(logTag, "Creating descriptor pool...");
-        final int MAX_SETS = 100; // Max descriptor SETS we can allocate
-        final int MAX_UBOS_PER_POOL = MAX_SETS; // Allow one UBO per set potentially
-
         try (MemoryStack stack = stackPush()) {
-            // Define pool sizes (adjust counts as needed for your app)
-            VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(2, stack); // Expand this if using more descriptor types
+            VkDescriptorPoolSize.Buffer poolSizes = VkDescriptorPoolSize.calloc(2, stack);
+
+            // Size for Uniform Buffers
+            poolSizes.get(0).type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+            poolSizes.get(0).descriptorCount(MAX_UBOS_PER_POOL);
 
             // Size for Combined Image Samplers
-            poolSizes.get(0)
-                    .type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                    .descriptorCount(MAX_SETS); // Allow up to MAX_SETS samplers in total across all sets
+            poolSizes.get(1).type(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            poolSizes.get(1).descriptorCount(MAX_SAMPLERS_PER_POOL);
 
-            // Size for Uniform Buffers (NEW)
-            poolSizes.get(1)
-                    .type(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-                    .descriptorCount(MAX_UBOS_PER_POOL); // Max total UBOs
-
-            VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack)
-                    .sType$Default()
-                    .pPoolSizes(poolSizes)
-                    .maxSets(MAX_SETS); // Total number of sets that can be allocated
-            // Optional: .flags(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT); // If you need to free individual sets
+            VkDescriptorPoolCreateInfo poolInfo = VkDescriptorPoolCreateInfo.calloc(stack);
+            poolInfo.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO);
+            poolInfo.pPoolSizes(poolSizes);
+            poolInfo.maxSets(MAX_SETS_PER_POOL); // Max total sets from this pool
+            poolInfo.flags(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT); // Optional: Allows freeing individual sets
 
             LongBuffer pDescriptorPool = stack.mallocLong(1);
-            vkCheck(vkCreateDescriptorPool(rawDevice, poolInfo, null, pDescriptorPool), "Failed to create descriptor pool");
+            int result = vkCreateDescriptorPool(device, poolInfo, null, pDescriptorPool);
+            if (result != VK_SUCCESS) {
+                throw new RuntimeException("Failed to create descriptor pool: " + result);
+            }
             this.descriptorPool = pDescriptorPool.get(0);
-            Gdx.app.log(logTag, "Descriptor pool created: " + this.descriptorPool);
         }
     }
 
-    /**
-     * Allocates a descriptor set using the specified layout.
-     * @param layoutHandle The handle of the VkDescriptorSetLayout to use for allocation.
-     * @return The handle of the allocated VkDescriptorSet.
-     */
-    public long allocateSet(long layoutHandle) { // Changed signature
-        if (descriptorPool == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Descriptor pool not initialized before allocateSet");
-        }
-        if (layoutHandle == VK_NULL_HANDLE) {
-            throw new IllegalArgumentException("Layout handle cannot be VK_NULL_HANDLE");
-        }
-
-        Gdx.app.log(logTag, "Allocating descriptor set with layout: " + layoutHandle);
+    public long allocateSet(long layoutHandle) {
         try (MemoryStack stack = stackPush()) {
-            VkDescriptorSetAllocateInfo allocInfo = VkDescriptorSetAllocateInfo.calloc(stack)
-                    .sType$Default()
-                    .descriptorPool(descriptorPool)
-                    // Use the PASSED-IN layout handle:
-                    .pSetLayouts(stack.longs(layoutHandle)); // <<<<< FIXED
+            VkDescriptorSetAllocateInfo allocInfo = VkDescriptorSetAllocateInfo.calloc(stack);
+            allocInfo.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO);
+            allocInfo.descriptorPool(descriptorPool);
+            allocInfo.pSetLayouts(stack.longs(layoutHandle)); // Pass the specific layout handle
 
             LongBuffer pDescriptorSet = stack.mallocLong(1);
-            // Use vkAllocateDescriptorSets (plural) even for one set
-            int err = vkAllocateDescriptorSets(rawDevice, allocInfo, pDescriptorSet);
-            // Add specific error logging if needed
-            if (err != VK_SUCCESS) {
-                Gdx.app.error(logTag, "vkAllocateDescriptorSets failed with error code: " + err);
-                // Consider checking for specific errors like OUT_OF_POOL_MEMORY
+            int result = vkAllocateDescriptorSets(device, allocInfo, pDescriptorSet);
+            if (result != VK_SUCCESS) {
+                // Consider specific error handling, maybe pool is full?
+                throw new RuntimeException("Failed to allocate descriptor set: " + result);
             }
-            vkCheck(err,"Failed to allocate descriptor set (Layout: " + layoutHandle + ")"); // Pass error code to vkCheck
-
-            long setHandle = pDescriptorSet.get(0);
-            Gdx.app.log(logTag, "Descriptor set allocated: " + setHandle);
-            return setHandle;
+            System.out.println("Allocated Descriptor Set: " + pDescriptorSet.get(0) + " with Layout: " + layoutHandle);
+            return pDescriptorSet.get(0);
         }
     }
 
-    /**
-     * Helper to update a descriptor set for a single combined image sampler.
-     * Assumes binding 0.
-     *
-     * @param device         The VkDevice.
-     * @param set            The VkDescriptorSet handle to update.
-     * @param imageView      The VkImageView handle.
-     * @param sampler        The VkSampler handle.
-     * @param imageLayout    The layout the image is expected to be in (e.g., SHADER_READ_ONLY_OPTIMAL).
-     *//*
-    public static void updateCombinedImageSampler(VkDevice device, long set, int binding, long imageView, long sampler, int imageLayout) {
-        Gdx.app.log("VulkanDescriptorManager", "Updating descriptor set " + set + " binding " + binding);
-        try (MemoryStack stack = stackPush()) {
-            VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack)
-                    .imageLayout(imageLayout)
-                    .imageView(imageView)
-                    .sampler(sampler);
-
-            VkWriteDescriptorSet.Buffer descriptorWrite = VkWriteDescriptorSet.calloc(1, stack);
-            descriptorWrite.get(0)
-                    .sType$Default()
-                    .dstSet(set)
-                    .dstBinding(binding) // Use specified binding
-                    .dstArrayElement(0)
-                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                    .descriptorCount(1)
-                    .pImageInfo(imageInfo);
-
-            vkUpdateDescriptorSets(device, descriptorWrite, null); // null for copies
-        }
-    }*/
+    // --- Update Helpers ---
 
     /**
-     * Helper to update a descriptor set for a single combined image sampler.
-     * Assumes binding 0.
-     *
-     * @param device  The VkDevice.
-     * @param set     The VkDescriptorSet handle to update.
-     * @param binding The destination binding index.
-     * @param texture The VulkanTexture containing the view and sampler.
+     * Static helper to update a Combined Image Sampler descriptor.
      */
     public static void updateCombinedImageSampler(VkDevice device, long set, int binding, VulkanTexture texture) {
         if (texture == null || texture.getImageViewHandle() == VK_NULL_HANDLE || texture.getSamplerHandle() == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Cannot update descriptor set, texture or its view/sampler handle is null.");
+            System.err.println("WARN: Attempting to update sampler binding " + binding + " with invalid texture.");
+            return; // Avoid crash, but log this!
         }
-        Gdx.app.log("VulkanDescriptorManager", "Updating descriptor set " + set + " binding " + binding + " with Texture");
         try (MemoryStack stack = stackPush()) {
-            VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack)
-                    .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) // Expect shader read layout
-                    .imageView(texture.getImageViewHandle())             // Get view from texture
-                    .sampler(texture.getSamplerHandle());                // Get sampler from texture
+            VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack);
+            imageInfo.imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            imageInfo.imageView(texture.getImageViewHandle()); // Method from your VulkanTexture class
+            imageInfo.sampler(texture.getSamplerHandle());     // Method from your VulkanTexture class
 
             VkWriteDescriptorSet.Buffer descriptorWrite = VkWriteDescriptorSet.calloc(1, stack);
-            descriptorWrite.get(0)
-                    .sType$Default()
-                    .dstSet(set)
-                    .dstBinding(binding)
-                    .dstArrayElement(0)
-                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                    .descriptorCount(1)
-                    .pImageInfo(imageInfo);
+            descriptorWrite.sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+            descriptorWrite.dstSet(set);
+            descriptorWrite.dstBinding(binding); // Use the provided binding
+            descriptorWrite.dstArrayElement(0);
+            descriptorWrite.descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            descriptorWrite.descriptorCount(1);
+            descriptorWrite.pImageInfo(imageInfo);
+            descriptorWrite.pBufferInfo(null);
+            descriptorWrite.pTexelBufferView(null);
 
             vkUpdateDescriptorSets(device, descriptorWrite, null);
+            //System.out.println("Updated Sampler Set: " + set + " Binding: " + binding + " Texture: " + texture.getId()); // Debug logging
         }
     }
 
     /**
-     * @return The handle for the default single-texture descriptor set layout.
+     * Static helper to update a Uniform Buffer descriptor. (NEW)
      */
-    public long getDefaultLayout() {
-        return singleTextureLayout;
+    public static void updateUniformBuffer(VkDevice device, long set, int binding, VulkanUniformBuffer ubo) {
+        if (ubo == null || ubo.getBufferHandle() == VK_NULL_HANDLE) {
+            System.err.println("WARN: Attempting to update UBO binding " + binding + " with invalid buffer.");
+            return; // Avoid crash
+        }
+        updateUniformBuffer(device, set, binding, ubo.getBufferHandle(), ubo.getOffset(), ubo.getRange());
     }
 
     /**
-     * Gets the handle of the managed Vulkan descriptor pool.
-     * <p>
-     * Exposing the pool handle allows external components to allocate sets directly
-     * from this manager's pool, necessary for allocating multiple sets at once or
-     * for custom allocation strategies. Ensure the pool was created with sufficient
-     * size and types for all intended allocations.
-     *
-     * @return The VkDescriptorPool handle, or VK_NULL_HANDLE if the pool hasn't been created.
+     * Static helper to update a Uniform Buffer descriptor with explicit details. (NEW)
      */
-    public long getPoolHandle() {
-        // Optional: Add check if pool is actually created, though returning NULL might be okay
-        // if the caller checks it. Throwing might be safer if it should always exist when called.
-        if (descriptorPool == VK_NULL_HANDLE) {
-            Gdx.app.error(logTag, "getPoolHandle() called before descriptor pool was created!");
-            // Consider: throw new IllegalStateException("Descriptor pool handle requested before creation.");
+    public static void updateUniformBuffer(VkDevice device, long set, int binding, long bufferHandle, long offset, long range) {
+        if (bufferHandle == VK_NULL_HANDLE) {
+            System.err.println("WARN: Attempting to update UBO binding " + binding + " with null buffer handle.");
+            return; // Avoid crash
         }
-        return descriptorPool;
+        if (range <= 0) {
+            System.err.println("WARN: Attempting to update UBO binding " + binding + " with zero or negative range ("+range+").");
+            // This might be valid if allowed by spec/extensions, but often indicates an error.
+            // Decide whether to return or proceed based on your engine's logic.
+            // return;
+        }
+
+        try (MemoryStack stack = stackPush()) {
+            VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack);
+            bufferInfo.buffer(bufferHandle);    // Handle from your VulkanUniformBuffer
+            bufferInfo.offset(offset);          // Offset from your VulkanUniformBuffer
+            bufferInfo.range(range);            // Range/Size from your VulkanUniformBuffer
+
+            VkWriteDescriptorSet.Buffer descriptorWrite = VkWriteDescriptorSet.calloc(1, stack);
+            descriptorWrite.sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+            descriptorWrite.dstSet(set);
+            descriptorWrite.dstBinding(binding); // Use the provided binding
+            descriptorWrite.dstArrayElement(0);
+            descriptorWrite.descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+            descriptorWrite.descriptorCount(1);
+            descriptorWrite.pBufferInfo(bufferInfo);
+            descriptorWrite.pImageInfo(null);
+            descriptorWrite.pTexelBufferView(null);
+
+            vkUpdateDescriptorSets(device, descriptorWrite, null);
+            //System.out.println("Updated UBO Set: " + set + " Binding: " + binding + " Buffer: " + bufferHandle); // Debug logging
+        }
     }
 
-    @Override
+    // --- Cleanup ---
+
     public void dispose() {
-        Gdx.app.log(logTag, "Disposing descriptor manager...");
-        // Sets are implicitly freed when the pool is destroyed
+        // Destroy all cached layouts
+        for (long layoutHandle : layoutCache.values()) {
+            vkDestroyDescriptorSetLayout(device, layoutHandle, null);
+        }
+        layoutCache.clear();
+
+        // Destroy the pool (implicitly frees all sets allocated from it)
         if (descriptorPool != VK_NULL_HANDLE) {
-            Gdx.app.log(logTag, "Destroying descriptor pool: " + descriptorPool);
-            vkDestroyDescriptorPool(rawDevice, descriptorPool, null);
+            vkDestroyDescriptorPool(device, descriptorPool, null);
             descriptorPool = VK_NULL_HANDLE;
         }
-        // Layouts must be destroyed explicitly
-        if (singleTextureLayout != VK_NULL_HANDLE) {
-            Gdx.app.log(logTag, "Destroying descriptor layout: " + singleTextureLayout);
-            vkDestroyDescriptorSetLayout(rawDevice, singleTextureLayout, null);
-            singleTextureLayout = VK_NULL_HANDLE;
-        }
-        // TODO: If caching layouts, iterate through cache and destroy all.
-        Gdx.app.log(logTag, "Descriptor manager disposed.");
     }
 }

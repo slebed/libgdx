@@ -33,5 +33,5 @@ void main() {
     v_texCoords = a_texCoord0;
 
     gl_Position = ubo.projTrans *  vec4(a_position.xy, 0.0, 1.0);//a_position;
-
+    gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;// convert libGDX opengl -1:1 range to vulkan 0:1 range
 }
