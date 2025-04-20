@@ -67,15 +67,15 @@ public class VulkanStage extends Stage {
         Camera camera = viewport.getCamera();
         Batch batch = getBatch();
 
-        if (batch == null) {
+        if (batch == null || !getRoot().isVisible()) {
             Gdx.app.error(TAG, "Stage.draw() called but Batch is null!");
             return;
         }
 
         viewport.apply();
 
-        batch.begin();
         batch.setProjectionMatrix(camera.combined);
+        batch.begin();
         getRoot().draw(batch, 1.0f);
         batch.end();
     }
@@ -87,6 +87,7 @@ public class VulkanStage extends Stage {
      */
     @Override
     public void dispose() {
+        Gdx.app.log(TAG, "Disposing VulkanStage...");
         super.dispose();
         Batch batch = getBatch();
         if (managesInternalBatch && batch != null) {

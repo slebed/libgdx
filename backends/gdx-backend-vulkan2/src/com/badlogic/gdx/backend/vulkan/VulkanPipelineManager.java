@@ -28,8 +28,6 @@ public class VulkanPipelineManager implements Disposable {
     private final VulkanDevice device;
     private final VkDevice rawDevice;
 
-    // Handles managed by this class
-    //private long pipelineLayout = VK_NULL_HANDLE;
     private long graphicsPipeline = VK_NULL_HANDLE;
     private final Map<String, Long> shaderModuleCache; // Cache: File path -> Module Handle
     private long vkPipelineCacheHandle = VK_NULL_HANDLE; // Optional Vulkan pipeline cache object
@@ -64,11 +62,9 @@ public class VulkanPipelineManager implements Disposable {
      * @param renderPassHandle          Handle to a compatible render pass.
      */
     public void createDefaultPipeline(FileHandle vertShaderFile, FileHandle fragShaderFile, long descriptorSetLayoutHandle, long renderPassHandle) {
-        // Load shader modules using the internal loader/cache
         long vertModuleHandle = loadShaderModule(vertShaderFile);
         long fragModuleHandle = loadShaderModule(fragShaderFile);
 
-        // Validate input handles
         if (descriptorSetLayoutHandle == VK_NULL_HANDLE) {
             throw new GdxRuntimeException("Descriptor Set Layout handle cannot be NULL for pipeline creation.");
         }
@@ -93,7 +89,6 @@ public class VulkanPipelineManager implements Disposable {
             // This ensures layout reuse and centralizes management.
             long layoutHandle = getOrCreatePipelineLayout(descriptorSetLayoutHandle); // <<< Uses the caching method
             Gdx.app.log(TAG, "Using pipeline layout: " + layoutHandle); // Log the handle being used
-
 
             // --- Define Pipeline States (Using internal helpers) ---
             // These helper methods define vertex input, blending, rasterization etc.
@@ -521,7 +516,8 @@ public class VulkanPipelineManager implements Disposable {
 
             VkPipelineColorBlendStateCreateInfo colorBlending = VkPipelineColorBlendStateCreateInfo.calloc(stack)
                     .sType$Default()
-                    .logicOpEnable(false) // Logic op typically disabled
+                    .logicOpEnable(false)
+                    .attachmentCount(colorBlendAttachment.remaining())
                     .pAttachments(colorBlendAttachment);
             // Optional: Set blend constants if needed
 

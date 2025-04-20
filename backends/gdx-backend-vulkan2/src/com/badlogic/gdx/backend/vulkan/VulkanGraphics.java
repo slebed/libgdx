@@ -16,29 +16,16 @@
 
 package com.badlogic.gdx.backend.vulkan;
 
-import static com.badlogic.gdx.backend.vulkan.VkMemoryUtil.vkCheck;
-import static org.lwjgl.system.MemoryStack.stackPush;
-import static org.lwjgl.vulkan.KHRSwapchain.VK_ERROR_OUT_OF_DATE_KHR;
-import static org.lwjgl.vulkan.KHRSwapchain.VK_SUBOPTIMAL_KHR;
+import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.vulkan.VK10.*;
 
+import static java.awt.SystemColor.window;
+
 import java.nio.IntBuffer;
-import java.nio.LongBuffer;
-import java.util.ArrayList;
-import java.util.List;
 
 import com.badlogic.gdx.AbstractGraphics;
-
 import com.badlogic.gdx.Application;
-import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.math.GridPoint2;
-import com.badlogic.gdx.utils.GdxRuntimeException;
-
-import org.lwjgl.BufferUtils;
-import org.lwjgl.PointerBuffer;
-import org.lwjgl.glfw.GLFW;
-import org.lwjgl.glfw.GLFWFramebufferSizeCallback;
 
 import com.badlogic.gdx.graphics.Cursor;
 import com.badlogic.gdx.graphics.Cursor.SystemCursor;
@@ -46,51 +33,46 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.GL31;
 import com.badlogic.gdx.graphics.GL32;
+import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.glutils.GLVersion;
 import com.badlogic.gdx.graphics.glutils.HdpiMode;
-import com.badlogic.gdx.graphics.Pixmap;
+
+import com.badlogic.gdx.math.GridPoint2;
 import com.badlogic.gdx.utils.Disposable;
+import com.badlogic.gdx.utils.GdxRuntimeException;
+
+import org.lwjgl.BufferUtils;
+import org.lwjgl.PointerBuffer;
+import org.lwjgl.glfw.GLFW;
 
 import org.lwjgl.system.MemoryStack;
-import org.lwjgl.vulkan.VkBufferCopy;
-import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkCommandBufferAllocateInfo;
-import org.lwjgl.vulkan.VkCommandBufferBeginInfo;
-import org.lwjgl.vulkan.VkExtent2D;
-import org.lwjgl.vulkan.VkPhysicalDevice;
-import org.lwjgl.vulkan.VkQueue;
-import org.lwjgl.vulkan.VkRect2D;
-import org.lwjgl.vulkan.VkSubmitInfo;
-import org.lwjgl.vulkan.VkViewport;
+import org.lwjgl.vulkan.VkCommandBuffer; // Keep for currentRecordingCommandBuffer
 
 public class VulkanGraphics extends AbstractGraphics implements Disposable {
-    final String TAG = "VulkanGraphics";
-    private final VulkanApplicationConfiguration config;
-    private final long windowHandle;
-    private final long vmaAllocator;
-    volatile boolean framebufferResized = false; // Flag for resize/vsync change
+    private final String TAG = "VulkanGraphics"; // Keep TAG
 
-    private boolean vsyncEnabled = true; // Store desired vsync state, default true
-    private List<VkCommandBuffer> commandBuffers; // VkCommandBuffer objects
+    // --- Fields to Keep ---
+    private final VulkanApplicationConfiguration config; // Store config for settings like HDPI mode
+    private final long primaryWindowHandle; // Store handle of the FIRST window created
+    private final VulkanApplication app; // Reference to application
+    private final VulkanDevice vulkanDevice; // Shared logical device wrapper
+    private final long vmaAllocator; // Shared VMA allocator handle
+    private VulkanPipelineManager pipelineManager; // Shared pipeline manager
+    private VulkanDescriptorManager descriptorManager; // Shared descriptor manager
 
-    private VulkanSyncManager syncManager;
+    // Current rendering context (set by active VulkanWindow.update)
+    private VkCommandBuffer currentRecordingCommandBuffer = null;
+    private long currentRenderPassHandle = VK_NULL_HANDLE;
+    private int currentFrameIndex = 0;
 
-    private VulkanApplication app = (VulkanApplication) Gdx.app; // Or get via constructor arg
-
-    private VulkanDevice vulkanDevice = app.getVkDevice();           // Need getter in VulkanApplication
-    private long surface;     // Need getter in VulkanApplication
-    private org.lwjgl.vulkan.VkDevice rawDevice = vulkanDevice.getRawDevice(); // Get raw device from VulkanDevice wrapper
-    private VkQueue graphicsQueue = vulkanDevice.getGraphicsQueue();       // Get from VulkanDevice wrapper
-    private VkQueue presentQueue = graphicsQueue; // Assume graphics and present are the same for simplicity
-    private final VulkanRenderPassManager renderPassManager;
-    private VulkanPipelineManager pipelineManager;
+    // Primary window state / Global info
     private final GLVersion glVersion;
     private volatile int backBufferWidth;
     private volatile int backBufferHeight;
     private volatile int logicalWidth;
     private volatile int logicalHeight;
-    private volatile boolean isContinuous = true;
-    private BufferFormat bufferFormat;
+    private volatile boolean isContinuous = true; // Default continuous rendering
+    private BufferFormat bufferFormat; // Info about primary window format
     private long lastFrameTime = -1;
     private float deltaTime;
     private boolean resetDeltaTime = false;
@@ -98,315 +80,98 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     private long frameCounterStart = 0;
     private int frames;
     private int fps;
+
+    // Fullscreen state (related to primary window)
     private int windowPosXBeforeFullscreen;
     private int windowPosYBeforeFullscreen;
     private int windowWidthBeforeFullscreen;
     private int windowHeightBeforeFullscreen;
     private DisplayMode displayModeBeforeFullscreen = null;
-    private VulkanSwapchain vulkanSwapchain;
 
-    VulkanWindow window;
-    IntBuffer tmpBuffer = BufferUtils.createIntBuffer(1);
-    IntBuffer tmpBuffer2 = BufferUtils.createIntBuffer(1);
+    // Utility buffers
+    private final IntBuffer tmpBuffer = BufferUtils.createIntBuffer(1);
+    private final IntBuffer tmpBuffer2 = BufferUtils.createIntBuffer(1);
 
-    private VulkanDescriptorManager descriptorManager;
+    // Constructor - Simplified
+    public VulkanGraphics(long primaryWindowHandle, VulkanApplicationConfiguration config, VulkanDevice device, long vmaAllocatorHandle) {
+        this.primaryWindowHandle = primaryWindowHandle; // Store handle of the first window
+        this.config = config;
+        this.app = (VulkanApplication) Gdx.app; // Get app reference
+        this.vulkanDevice = device;
+        this.vmaAllocator = vmaAllocatorHandle;
 
-    private VkCommandBuffer currentFrameCommandBuffer = null;
-    private int currentFrameImageIndex = -1;
-    private long currentFrameRenderPassHandle = VK_NULL_HANDLE;
-
-    private VkPhysicalDevice physicalDevice;
-
-    private static final class FrameInfo { // final makes the class itself non-extendable
-        final boolean success;           // final fields ensure immutability after construction
-        final VkCommandBuffer commandBuffer;
-        final int imageIndex;
-
-        // Constructor to initialize the final fields
-        FrameInfo(boolean success, VkCommandBuffer commandBuffer, int imageIndex) {
-            this.success = success;
-            this.commandBuffer = commandBuffer;
-            this.imageIndex = imageIndex;
-        }
-    }
-
-    GLFWFramebufferSizeCallback resizeCallback = new GLFWFramebufferSizeCallback() {
-        @Override
-        public void invoke(long windowHandle, final int width, final int height) {
-            if (Gdx.graphics instanceof VulkanGraphics) {
-                ((VulkanGraphics) Gdx.graphics).framebufferResized(width, height);
-            }
-            System.out.println("Framebuffer resize requested: " + width + "x" + height);
-        }
-    };
-
-    public VulkanGraphics(long windowHandle, VulkanApplicationConfiguration config, VulkanDevice device, long vmaAllocatorHandle) {
-        this.windowHandle = windowHandle;
-        this.config = config; // Keep local copy if needed, or use Gdx.app.getConfig()
-        this.vulkanDevice = device; // Store the VulkanDevice reference
-        this.vmaAllocator = vmaAllocatorHandle; // Store the VMA handle
-
-        this.renderPassManager = new VulkanRenderPassManager();
-
-        if (this.vulkanDevice == null) {
-            throw new GdxRuntimeException("VulkanDevice cannot be null for VulkanGraphics");
-        }
-        if (this.vmaAllocator == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("VMA Allocator handle cannot be null for VulkanGraphics");
+        if (this.vulkanDevice == null || this.vmaAllocator == VK_NULL_HANDLE) {
+            throw new GdxRuntimeException("VulkanDevice or VMA Allocator handle cannot be null for VulkanGraphics");
         }
 
-        // Initial size query can happen here or later
+        // Initialize shared managers
+        this.pipelineManager = new VulkanPipelineManager(this.vulkanDevice);
+        this.descriptorManager = new VulkanDescriptorManager(this.vulkanDevice.getRawDevice());
+
+        // Get initial size info for the primary window
         updateFramebufferInfo();
 
+        // Set GLVersion stub
         this.glVersion = new GLVersion(Application.ApplicationType.Desktop, "", "", "Vulkan");
     }
 
-    public VulkanWindow getWindow() {
-        return window;
-    }
-
-    public void initializeSwapchainAndResources() {
-        // --- 1. Get Core Vulkan Dependencies ---
-        this.app = (VulkanApplication) Gdx.app;
-        if (this.app == null) {
-            throw new GdxRuntimeException("Gdx.app is null, cannot initialize VulkanGraphics resources.");
-        }
-        this.vulkanDevice = app.getVkDevice();
-        if (this.vulkanDevice == null || this.vulkanDevice.getRawDevice() == null || this.vulkanDevice.getRawDevice().address() == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("VulkanDevice is not initialized in VulkanApplication.");
-        }
-        this.surface = app.getSurface(this.windowHandle);
-        if (this.surface == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Vulkan Surface KHR is not created for window handle: " + windowHandle);
-        }
-        // Get other device components (already done if fields are initialized from constructor)
-        this.rawDevice = vulkanDevice.getRawDevice();
-        this.physicalDevice = vulkanDevice.getPhysicalDevice();
-        this.graphicsQueue = vulkanDevice.getGraphicsQueue();
-        this.presentQueue = graphicsQueue; // Assuming same queue
-
-        Gdx.app.log(TAG, "Initializing swapchain and graphics resources...");
-
-        try {
-            this.descriptorManager = new VulkanDescriptorManager(this.vulkanDevice.getRawDevice());
-            this.pipelineManager = new VulkanPipelineManager(this.vulkanDevice);
-        } catch (Exception e) {
-            throw new GdxRuntimeException("Failed to create managers during init", e);
-        }
-
-        try (MemoryStack stack = stackPush()) {
-
-            // --- 2. Create Swapchain ---
-            Gdx.app.log(TAG, "Building VulkanSwapchain...");
-            this.vulkanSwapchain = new VulkanSwapchain.Builder()
-                    .device(this.vulkanDevice)
-                    .surface(this.surface)
-                    .windowHandle(this.windowHandle)
-                    .configuration(this.config)
-                    .build();
-            Gdx.app.log(TAG, "VulkanSwapchain built successfully.");
-
-            Gdx.app.log(TAG, "VulkanRenderer created.");
-
-            // Main Command Buffers (per swapchain image)
-            createMainCommandBuffers(stack);
-            Gdx.app.log(TAG, "Main command buffers created.");
-
-            // Synchronization Objects
-            Gdx.app.log(TAG, "Creating sync objects via manager...");
-            this.syncManager = new VulkanSyncManager(this.vulkanDevice);
-            Gdx.app.log(TAG, "Sync objects created via manager.");
-
-            Gdx.app.log(TAG, "Initialization of swapchain and resources complete.");
-
-        } catch (Exception e) {
-            Gdx.app.error(TAG, "Exception during initializeSwapchainAndResources", e);
-            try {
-                cleanupVulkan(); // Attempt cleanup
-            } catch (Exception cleanupEx) {
-                Gdx.app.error(TAG, "Exception during cleanup after initialization failure", cleanupEx);
-            }
-            throw new GdxRuntimeException("Failed to initialize Vulkan graphics resources", e);
-        }
-    }
-
-    // Simplified recreateSwapChain in VulkanGraphics
-    private void recreateSwapChain() {
-        if (this.vulkanSwapchain == null) {
-            Gdx.app.error(TAG, "Attempted to recreate null swapchain object!");
-            return;
-        }
-
-        // Check for minimized window
-        try (MemoryStack stack = stackPush()) {
-            IntBuffer pWidth = stack.mallocInt(1);
-            IntBuffer pHeight = stack.mallocInt(1);
-            GLFW.glfwGetFramebufferSize(this.windowHandle, pWidth, pHeight);
-            if (pWidth.get(0) == 0 || pHeight.get(0) == 0) {
-                //Gdx.app.log(logTag, "Window minimized, deferring swapchain recreation.");
-                this.vulkanSwapchain.needsRecreation = true;
-                this.framebufferResized = true;
-                return;
-            }
-        }
-
-        Gdx.app.log(TAG, "Waiting for device idle before swapchain recreation...");
-        vkDeviceWaitIdle(rawDevice);
-        Gdx.app.log(TAG, "Device idle. Calling swapchain recreate...");
-
-        try {
-            // Delegate swapchain resource recreation
-            vulkanSwapchain.recreate();
-            Gdx.app.log(TAG, "Swapchain recreation delegated.");
-
-            // Update internal size tracking
-            updateFramebufferInfo();
-
-            // Re-allocate Command Buffers (number might have changed)
-            cleanupCommandBuffers(); // Clean up old command buffer objects/handles first
-            try (MemoryStack stack = stackPush()) {
-                createMainCommandBuffers(stack);
-                Gdx.app.log(TAG, "Main command buffers re-allocated.");
-            }
-
-            // Notify listener
-            if (Gdx.app != null && Gdx.app.getApplicationListener() != null) {
-                Gdx.app.getApplicationListener().resize(getWidth(), getHeight());
-            }
-
-            Gdx.app.log(TAG, "Swapchain recreation fully complete.");
-
-        } catch (Exception e) {
-            Gdx.app.error(TAG, "Failed during VulkanSwapchain recreation or dependent resource update", e);
-            // We might be in a bad state here, re-throwing is safest
-            throw new GdxRuntimeException("Failed to fully recreate swapchain and dependent resources", e);
-        }
+    /**
+     * Sets the command buffer that is currently being recorded. Called by active VulkanWindow.update().
+     */
+    public void setCurrentCommandBuffer(VkCommandBuffer cmd) {
+        this.currentRecordingCommandBuffer = cmd;
     }
 
     /**
-     * Cleans up the main command buffer List and potentially frees buffers
-     * if the pool wasn't created with RESET_COMMAND_BUFFER_BIT (though ours is).
-     * Primarily clears the Java list reference.
+     * Gets the command buffer currently being recorded, if any. Called by VulkanSpriteBatch etc.
      */
-    private void cleanupCommandBuffers() {
-        // For pools created with VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-        // explicitly freeing individual buffers isn't strictly required before resetting/reallocating,
-        // but it doesn't hurt to clear the Java list.
-        // If not using that flag, vkFreeCommandBuffers would be needed here.
-        if (commandBuffers != null) {
-            Gdx.app.log(TAG, "Clearing main command buffer list.");
-            commandBuffers.clear(); // Clear the list of wrappers
-            commandBuffers = null; // Allow GC
-        }
+    public VkCommandBuffer getCurrentCommandBuffer() {
+        return this.currentRecordingCommandBuffer;
     }
 
     /**
-     * Creates the command buffers used for recording rendering commands each frame.
-     * One command buffer is typically allocated per swapchain image.
+     * Sets the handle of the VkRenderPass that is currently active. Called by active VulkanWindow.update().
      */
-    private void createMainCommandBuffers(MemoryStack stack) {
-        if (vulkanSwapchain == null || vulkanSwapchain.getImageCount() == 0) {
-            throw new GdxRuntimeException("Cannot create main command buffers before swapchain exists.");
-        }
-        int count = vulkanSwapchain.getImageCount();
-        commandBuffers = new ArrayList<>(count); // Assuming commandBuffers is List<VkCommandBuffer> field
-
-        VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack)
-                .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
-                .commandPool(vulkanDevice.getCommandPool()) // Use main command pool from VulkanDevice
-                .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
-                .commandBufferCount(count);
-
-        PointerBuffer pCommandBuffers = stack.mallocPointer(count);
-        vkCheck(vkAllocateCommandBuffers(rawDevice, allocInfo, pCommandBuffers), "Failed to allocate main command buffers");
-
-        for (int i = 0; i < count; i++) {
-            // Create the LWJGL wrapper object for each handle
-            commandBuffers.add(new VkCommandBuffer(pCommandBuffers.get(i), rawDevice));
-        }
-        Gdx.app.log("VulkanGraphics", "Allocated " + count + " main command buffers.");
+    public void setCurrentRenderPassHandle(long rpHandle) {
+        this.currentRenderPassHandle = rpHandle;
     }
 
     /**
-     * Called by the GLFW framebuffer resize callback. Should just set a flag
-     * to be handled by the render thread, as GLFW callbacks can occur on
-     * separate threads.
-     *
-     * @param width  New framebuffer width
-     * @param height New framebuffer height
+     * Gets the handle of the VkRenderPass currently active, if any. Called by VulkanSpriteBatch etc.
      */
-    private void framebufferResized(int width, int height) {
-        if (width > 0 && height > 0) {
-            this.framebufferResized = true;
-            // Using Gdx.app here might be risky if called very early or from wrong thread
-            // System.out.println("Framebuffer resize flagged: " + width + "x" + height);
-        }
+    public long getCurrentRenderPassHandle() {
+        return this.currentRenderPassHandle;
     }
 
-    // --- Need cleanupVulkan() method for dispose() and error handling ---
-    private void cleanupVulkan() {
-        // Use Gdx.app logger if available, otherwise System.out/err
-        final boolean useGdxLog = (Gdx.app != null && Gdx.app.getApplicationLogger() != null);
-
-        // Check if already cleaned or device is invalid
-        if (rawDevice == null) {
-            System.out.println("[" + TAG + "] Already cleaned or device object is null.");
-            return;
-        }
-
-        // 1. Wait for GPU to finish all operations using these resources
-        logInfo(TAG, "Waiting for device idle before graphics cleanup...", useGdxLog);
-        vkDeviceWaitIdle(rawDevice); // MUST BE FIRST!
-        logInfo(TAG, "Device idle. Proceeding with graphics cleanup...", useGdxLog);
-
-        // Dispose managers and resources in reverse order of dependency/creation
-        if (pipelineManager != null) {
-            pipelineManager.dispose();
-            pipelineManager = null;
-        }
-        if (descriptorManager != null) {
-            descriptorManager.dispose();
-            descriptorManager = null;
-        }
-
-        if (vulkanSwapchain != null) {
-            vulkanSwapchain.dispose();
-            vulkanSwapchain = null;
-        }
-
-        if (syncManager != null) {
-            Gdx.app.log(TAG, "Disposing sync manager...");
-            syncManager.dispose();
-            syncManager = null;
-        }
-
-        // Clear command buffer list reference (actual buffers tied to pool)
-        if (commandBuffers != null) {
-            commandBuffers.clear();
-            commandBuffers = null;
-        }
-
-        rawDevice = null; // Mark this instance as cleaned
-        logInfo(TAG, "VulkanGraphics cleanup finished.", useGdxLog);
+    /**
+     * Sets the index of the frame-in-flight currently being processed. Called by active VulkanWindow.update().
+     */
+    public void setCurrentFrameIndex(int index) {
+        this.currentFrameIndex = index;
     }
 
-    private void logInfo(String tag, String message, boolean useGdx) {
-        if (useGdx) Gdx.app.log(tag, message);
-        else System.out.println("[" + tag + "] " + message);
+    /**
+     * Gets the index of the frame-in-flight currently being processed. Called by VulkanSpriteBatch etc.
+     */
+    public int getCurrentFrameIndex() {
+        return this.currentFrameIndex;
     }
 
+    /**
+     * Updates stored size info based on the primary window handle.
+     */
     void updateFramebufferInfo() {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer pWidth = stack.mallocInt(1);
             IntBuffer pHeight = stack.mallocInt(1);
 
             // Use the stored windowHandle field
-            GLFW.glfwGetFramebufferSize(this.windowHandle, pWidth, pHeight);
+            GLFW.glfwGetFramebufferSize(this.primaryWindowHandle, pWidth, pHeight);
             this.backBufferWidth = pWidth.get(0);
             this.backBufferHeight = pHeight.get(0);
 
             // Also get logical size using the handle
-            GLFW.glfwGetWindowSize(this.windowHandle, pWidth, pHeight);
+            GLFW.glfwGetWindowSize(this.primaryWindowHandle, pWidth, pHeight);
             this.logicalWidth = pWidth.get(0);
             this.logicalHeight = pHeight.get(0);
 
@@ -423,6 +188,9 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         }
     }
 
+    /**
+     * Updates delta time and FPS counter. Called by VulkanApplication.loop().
+     */
     void update() {
         long time = System.nanoTime();
         if (lastFrameTime == -1) lastFrameTime = time;
@@ -442,46 +210,20 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         frameId++;
     }
 
-    public boolean drawFrame() {
-        if (framebufferResized || (vulkanSwapchain != null && vulkanSwapchain.needsRecreation())) {
-            framebufferResized = false; // Reset GLFW flag
-            if (vulkanSwapchain == null || vulkanSwapchain.getHandle() == VK_NULL_HANDLE) {
-                Gdx.app.error(TAG, "[DrawFrame] Cannot recreate, swapchain invalid.");
-                return false;
-            }
-            recreateSwapChain();
-            return false;
-        }
+    public VulkanDevice getVulkanDevice() {
+        return this.vulkanDevice;
+    }
 
-        FrameInfo frameInfo = beginFrame();
-        if (!frameInfo.success) {
-            return false;
-        }
+    public long getVmaAllocator() {
+        return this.vmaAllocator;
+    }
 
-        VkCommandBuffer commandBuffer = frameInfo.commandBuffer;
-        int imageIndex = frameInfo.imageIndex; // Keep index for endFrame
+    public VulkanPipelineManager getPipelineManager() {
+        return this.pipelineManager;
+    }
 
-        try {
-            ApplicationListener listener = Gdx.app.getApplicationListener();
-            if (listener != null) {
-                listener.render();
-            } else {
-                Gdx.app.error(TAG, "ApplicationListener is null during drawFrame!");
-            }
-
-        } catch (Exception e) {
-            Gdx.app.error(TAG, "Exception during drawing command recording via Renderer", e);
-            // Attempt to end frame, then re-throw
-            try {
-                endFrame(commandBuffer, imageIndex);
-            } catch (Exception endEx) { /* Log endEx */ }
-            throw new GdxRuntimeException("Exception during drawing command recording", e);
-        }
-
-        endFrame(commandBuffer, imageIndex);
-
-        update();
-        return true; // Rendered successfully
+    public VulkanDescriptorManager getDescriptorManager() {
+        return this.descriptorManager;
     }
 
     @Override
@@ -519,45 +261,30 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         return null;
     }
 
-
     @Override
     public void setGL20(GL20 gl20) {
-
     }
 
     @Override
     public void setGL30(GL30 gl30) {
-
     }
 
     @Override
     public void setGL31(GL31 gl31) {
-
     }
 
     @Override
     public void setGL32(GL32 gl32) {
-
     }
 
     @Override
     public int getWidth() {
-        if (this.config != null && this.config.hdpiMode == HdpiMode.Pixels) {
-            return backBufferWidth; // Use the stored back buffer width
-        } else {
-            // If config is null or mode isn't Pixels, return logical width
-            return logicalWidth; // Use the stored logical width
-        }
+        return (config.hdpiMode == HdpiMode.Pixels) ? backBufferWidth : logicalWidth;
     }
 
     @Override
     public int getHeight() {
-        if (this.config != null && this.config.hdpiMode == HdpiMode.Pixels) {
-            return backBufferHeight; // Use the stored back buffer height
-        } else {
-            // If config is null or mode isn't Pixels, return logical height
-            return logicalHeight; // Use the stored logical height
-        }
+        return (config.hdpiMode == HdpiMode.Pixels) ? backBufferHeight : logicalHeight;
     }
 
     @Override
@@ -568,76 +295,6 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     @Override
     public int getBackBufferHeight() {
         return backBufferHeight;
-    }
-
-
-
-    public VulkanDevice getVulkanDevice() {
-        return this.vulkanDevice;
-    }
-
-    public long getVmaAllocator() {
-        // Consider adding null check if there's any scenario it might be null when accessed
-        return this.vmaAllocator;
-    }
-
-    public VulkanPipelineManager getPipelineManager() {
-        // Consider adding null check
-        return this.pipelineManager;
-    }
-
-    public VulkanDescriptorManager getDescriptorManager() {
-        // Consider adding null check
-        return this.descriptorManager;
-    }
-
-    /**
-     * Gets the command buffer currently being recorded for this frame's rendering.
-     * This is only valid between successful calls to internal beginFrame() and endFrame()
-     * methods within the main render loop. Returns null otherwise.
-     * <p>
-     * Primarily intended for use by the ApplicationListener/Screen's render method
-     * to pass the command buffer to Vulkan-aware rendering components like VulkanSpriteBatch.
-     *
-     * @return The active VkCommandBuffer for the current frame, or null if none is active.
-     */
-    public VkCommandBuffer getCurrentCommandBuffer() {
-        return currentFrameCommandBuffer;
-    }
-
-    /**
-     * Gets the index of the swapchain image currently being rendered to.
-     * This is only valid between successful calls to internal beginFrame() and endFrame().
-     * Returns -1 otherwise.
-     *
-     * @return The active swapchain image index for the current frame, or -1 if none is active.
-     */
-    public int getCurrentFrameImageIndex() {
-        return currentFrameImageIndex;
-    }
-
-    /**
-     * Gets the handle of the render pass currently active on the command buffer for this frame.
-     * This is typically the swapchain's main render pass, captured during beginFrame().
-     * This is only valid between successful calls to internal beginFrame() and endFrame().
-     * Returns VK_NULL_HANDLE otherwise.
-     *
-     * @return The active VkRenderPass handle for the current frame, or VK_NULL_HANDLE if none is active.
-     */
-    public long getCurrentRenderPassHandle() {
-        return this.currentFrameRenderPassHandle;
-    }
-
-    public VulkanSwapchain getSwapchain() {
-        return this.vulkanSwapchain;
-    }
-
-    public int getLogicalWidth() {
-        return logicalWidth;
-    }
-
-    public int getLogicalHeight() {
-        return logicalHeight;
     }
 
     @Override
@@ -698,52 +355,45 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     }
 
     @Override
+    public float getDensity() {
+        return getPpiX() / 160f;
+    }
+
+    @Override
     public boolean supportsDisplayModeChange() {
         return true;
     }
 
-    @Override
-    public Monitor getPrimaryMonitor() {
-        return VulkanApplicationConfiguration.toVulkanMonitor(GLFW.glfwGetPrimaryMonitor());
-    }
 
     @Override
     public Monitor getMonitor() {
+        // Find monitor the primary window is on
         Monitor[] monitors = getMonitors();
+        if (monitors.length == 0) return getPrimaryMonitor(); // Fallback
         Monitor result = monitors[0];
+        // Simplified logic: return primary if only one monitor
+        if (monitors.length == 1) return result;
 
-        GLFW.glfwGetWindowPos(window.getWindowHandle(), tmpBuffer, tmpBuffer2);
+        // Get primary window position and size
+        GLFW.glfwGetWindowPos(primaryWindowHandle, tmpBuffer, tmpBuffer2);
         int windowX = tmpBuffer.get(0);
         int windowY = tmpBuffer2.get(0);
-        GLFW.glfwGetWindowSize(window.getWindowHandle(), tmpBuffer, tmpBuffer2);
+        GLFW.glfwGetWindowSize(primaryWindowHandle, tmpBuffer, tmpBuffer2);
         int windowWidth = tmpBuffer.get(0);
         int windowHeight = tmpBuffer2.get(0);
+
         int overlap;
         int bestOverlap = 0;
-
         for (Monitor monitor : monitors) {
-            DisplayMode mode = getDisplayMode(monitor);
-
-            overlap = Math.max(0,
-                    Math.min(windowX + windowWidth, monitor.virtualX + mode.width) - Math.max(windowX, monitor.virtualX))
+            DisplayMode mode = getDisplayMode(monitor); // Use helper
+            overlap = Math.max(0, Math.min(windowX + windowWidth, monitor.virtualX + mode.width) - Math.max(windowX, monitor.virtualX))
                     * Math.max(0, Math.min(windowY + windowHeight, monitor.virtualY + mode.height) - Math.max(windowY, monitor.virtualY));
-
             if (bestOverlap < overlap) {
                 bestOverlap = overlap;
                 result = monitor;
             }
         }
         return result;
-    }
-
-    @Override
-    public Monitor[] getMonitors() {
-        PointerBuffer glfwMonitors = GLFW.glfwGetMonitors();
-        Monitor[] monitors = new Monitor[glfwMonitors.limit()];
-        for (int i = 0; i < glfwMonitors.limit(); i++) {
-            monitors[i] = VulkanApplicationConfiguration.toVulkanMonitor(glfwMonitors.get(i));
-        }
-        return monitors;
     }
 
     @Override
@@ -788,114 +438,157 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     @Override
     public boolean setFullscreenMode(DisplayMode displayMode) {
-        window.getInput().resetPollingStates();
+        VulkanWindow primaryWindow = app.getPrimaryWindow();
+        if (primaryWindow == null || primaryWindow.getInput() == null) {
+            Gdx.app.error(TAG, "Cannot set fullscreen mode, primary window or its input is null");
+            return false;
+        }
+        primaryWindow.getInput().resetPollingStates(); // Reset input state
+
+        // Ensure displayMode is the correct type
+        if (!(displayMode instanceof VulkanDisplayMode)) {
+            Gdx.app.error(TAG, "Invalid DisplayMode type provided to setFullscreenMode.");
+            return false;
+        }
         VulkanDisplayMode newMode = (VulkanDisplayMode) displayMode;
-        if (isFullscreen()) {
-            VulkanDisplayMode currentMode = (VulkanDisplayMode) getDisplayMode();
-            if (currentMode.getMonitor() == newMode.getMonitor() && currentMode.refreshRate == newMode.refreshRate) {
-                // same monitor and refresh rate
-                GLFW.glfwSetWindowSize(window.getWindowHandle(), newMode.width, newMode.height);
+
+        if (isFullscreen()) { // Check based on primary window handle
+            // Already fullscreen, potentially change mode or monitor
+            VulkanDisplayMode currentMode = (VulkanDisplayMode) getDisplayMode(getMonitor()); // Get current mode for primary monitor
+            if (currentMode.monitorHandle == newMode.monitorHandle && currentMode.refreshRate == newMode.refreshRate) {
+                // Same monitor and refresh rate, just change resolution
+                GLFW.glfwSetWindowSize(primaryWindowHandle, newMode.width, newMode.height);
             } else {
-                // different monitor and/or refresh rate
-                GLFW.glfwSetWindowMonitor(window.getWindowHandle(), newMode.getMonitor(), 0, 0, newMode.width, newMode.height,
-                        newMode.refreshRate);
+                // Different monitor or refresh rate, need to use glfwSetWindowMonitor
+                GLFW.glfwSetWindowMonitor(primaryWindowHandle, newMode.monitorHandle, 0, 0, newMode.width, newMode.height, newMode.refreshRate);
             }
         } else {
-            // store window position so we can restore it when switching from fullscreen to windowed later
-            storeCurrentWindowPositionAndDisplayMode();
-
-            // switch from windowed to fullscreen
-            GLFW.glfwSetWindowMonitor(window.getWindowHandle(), newMode.getMonitor(), 0, 0, newMode.width, newMode.height,
-                    newMode.refreshRate);
+            // Switching from windowed to fullscreen
+            storeCurrentWindowPositionAndDisplayMode(); // Store state BEFORE changing
+            GLFW.glfwSetWindowMonitor(primaryWindowHandle, newMode.monitorHandle, 0, 0, newMode.width, newMode.height, newMode.refreshRate);
         }
-        updateFramebufferInfo();
 
-        setVSync(window.getConfig().vSyncEnabled);
+        updateFramebufferInfo(); // Update cached sizes
+
+        // Re-apply VSync based on primary window's config AFTER mode change
+        if (primaryWindow.getConfig() != null) {
+            setVSync(primaryWindow.getConfig().vSyncEnabled);
+        }
 
         return true;
-    }
-
-    private void storeCurrentWindowPositionAndDisplayMode() {
-        windowPosXBeforeFullscreen = window.getPositionX();
-        windowPosYBeforeFullscreen = window.getPositionY();
-        windowWidthBeforeFullscreen = logicalWidth;
-        windowHeightBeforeFullscreen = logicalHeight;
-        displayModeBeforeFullscreen = getDisplayMode();
     }
 
     @Override
     public boolean setWindowedMode(int width, int height) {
-        window.getInput().resetPollingStates();
+        VulkanWindow primaryWindow = app.getPrimaryWindow();
+        if (primaryWindow == null || primaryWindow.getInput() == null) {
+            Gdx.app.error(TAG, "Cannot set windowed mode, primary window or its input is null");
+            return false;
+        }
+        primaryWindow.getInput().resetPollingStates(); // Reset input state
+
         if (!isFullscreen()) {
+            // Already windowed, just resize and potentially center
             GridPoint2 newPos = null;
             boolean centerWindow = false;
-            if (width != logicalWidth || height != logicalHeight) {
-                centerWindow = true; // recenter the window since its size changed
+
+            if (width != this.logicalWidth || height != this.logicalHeight) {
+                centerWindow = true;
                 newPos = VulkanApplicationConfiguration.calculateCenteredWindowPosition((VulkanMonitor) getMonitor(), width, height);
             }
-            GLFW.glfwSetWindowSize(window.getWindowHandle(), width, height);
-            if (centerWindow) {
-                window.setPosition(newPos.x, newPos.y); // on macOS the centering has to happen _after_ the new window size was set
+            GLFW.glfwSetWindowSize(primaryWindowHandle, width, height);
+            if (centerWindow && newPos != null) {
+                // Use the primary window's setPosition method
+                primaryWindow.setPosition(newPos.x, newPos.y);
             }
-        } else { // if we were in fullscreen mode, we should consider restoring a previous display mode
+        } else {
+            // Switching from fullscreen to windowed
             if (displayModeBeforeFullscreen == null) {
+                // If previous state wasn't stored (shouldn't happen often), store current fullscreen state
                 storeCurrentWindowPositionAndDisplayMode();
             }
-            if (width != windowWidthBeforeFullscreen || height != windowHeightBeforeFullscreen) { // center the window since its size
-                // changed
-                GridPoint2 newPos = VulkanApplicationConfiguration.calculateCenteredWindowPosition((VulkanMonitor) getMonitor(), width,
-                        height);
-                GLFW.glfwSetWindowMonitor(window.getWindowHandle(), 0, newPos.x, newPos.y, width, height,
-                        displayModeBeforeFullscreen.refreshRate);
-            } else { // restore previous position
-                GLFW.glfwSetWindowMonitor(window.getWindowHandle(), 0, windowPosXBeforeFullscreen, windowPosYBeforeFullscreen, width,
-                        height, displayModeBeforeFullscreen.refreshRate);
+
+            // Decide where to place the windowed mode window
+            int posX, posY;
+            if (width != windowWidthBeforeFullscreen || height != windowHeightBeforeFullscreen) {
+                // Size changed, center it on the monitor it was fullscreen on
+                Monitor monitor = (displayModeBeforeFullscreen instanceof VulkanDisplayMode)
+                        ? toVulkanMonitor(((VulkanDisplayMode)displayModeBeforeFullscreen).monitorHandle)
+                        : getPrimaryMonitor(); // Fallback
+                GridPoint2 newPos = VulkanApplicationConfiguration.calculateCenteredWindowPosition((VulkanMonitor)monitor, width, height);
+                posX = newPos.x;
+                posY = newPos.y;
+            } else {
+                // Restore previous position and size
+                posX = windowPosXBeforeFullscreen;
+                posY = windowPosYBeforeFullscreen;
+                // width and height are already correct
             }
+            // Get refresh rate from stored mode or default
+            int refreshRate = (displayModeBeforeFullscreen != null) ? displayModeBeforeFullscreen.refreshRate : GLFW.GLFW_DONT_CARE;
+
+            // Switch back to windowed mode
+            GLFW.glfwSetWindowMonitor(primaryWindowHandle, NULL, posX, posY, width, height, refreshRate);
         }
-        updateFramebufferInfo();
+
+        updateFramebufferInfo(); // Update cached sizes
         return true;
+    }
+
+    private void storeCurrentWindowPositionAndDisplayMode() {
+        VulkanWindow primary = app.getPrimaryWindow();
+        if (primary != null) {
+            // Use the window's getters for current state
+            windowPosXBeforeFullscreen = primary.getPositionX();
+            windowPosYBeforeFullscreen = primary.getPositionY();
+            windowWidthBeforeFullscreen = primary.getLogicalWidth();
+            windowHeightBeforeFullscreen = primary.getLogicalHeight();
+        } else {
+            // Fallback using potentially stale graphics fields
+            windowPosXBeforeFullscreen = 0; // Or get from primaryWindowHandle? Less safe if window moved.
+            windowPosYBeforeFullscreen = 0;
+            windowWidthBeforeFullscreen = logicalWidth;
+            windowHeightBeforeFullscreen = logicalHeight;
+            Gdx.app.error(TAG, "Could not get primary window to store position/size before fullscreen.");
+        }
+        // Get display mode of the monitor the primary window is currently on
+        displayModeBeforeFullscreen = getDisplayMode(getMonitor());
     }
 
     @Override
     public void setTitle(String title) {
-        if (title == null) {
-            title = "";
-        }
-        GLFW.glfwSetWindowTitle(window.getWindowHandle(), title);
-    }
+        GLFW.glfwSetWindowTitle(primaryWindowHandle, title);
+    } // Operates on primary window
 
     @Override
     public void setUndecorated(boolean undecorated) {
-        getWindow().getConfig().setDecorated(!undecorated);
-        GLFW.glfwSetWindowAttrib(window.getWindowHandle(), GLFW.GLFW_DECORATED, undecorated ? GLFW.GLFW_FALSE : GLFW.GLFW_TRUE);
+        GLFW.glfwSetWindowAttrib(primaryWindowHandle, GLFW.GLFW_DECORATED, undecorated ? GLFW.GLFW_FALSE : GLFW.GLFW_TRUE);
     }
 
     @Override
     public void setResizable(boolean resizable) {
-        getWindow().getConfig().setResizable(resizable);
-        GLFW.glfwSetWindowAttrib(window.getWindowHandle(), GLFW.GLFW_RESIZABLE, resizable ? GLFW.GLFW_TRUE : GLFW.GLFW_FALSE);
+        GLFW.glfwSetWindowAttrib(primaryWindowHandle, GLFW.GLFW_RESIZABLE, resizable ? GLFW.GLFW_TRUE : GLFW.GLFW_FALSE);
     }
 
     @Override
     public void setVSync(boolean vsync) {
-        if (this.vsyncEnabled != vsync) {
-            this.vsyncEnabled = vsync;
-            // Trigger swap chain recreation to apply the new present mode
-            this.framebufferResized = true; // Reuse the resize flag
-            vulkanSwapchain.setVSync(vsync);
-            System.out.println("VSync changed to: " + vsync + ", requesting swapchain recreation.");
+        if (app != null) {
+            VulkanWindow primaryWindow = app.getPrimaryWindow(); // Assumes getter exists
+            if (primaryWindow != null) {
+                VulkanWindowConfiguration windowConfig = primaryWindow.getConfig(); // Assumes getter exists
+                if (windowConfig != null && windowConfig.vSyncEnabled != vsync) {
+                    Gdx.app.log(TAG, "Setting VSync for primary window (" + primaryWindow.hashCode() + ") to: " + vsync);
+                    windowConfig.vSyncEnabled = vsync; // Update config
+                    // Trigger recreation by setting the flag on the window instance
+                    primaryWindow.framebufferResized = true; // Reuse resize flag
+                    primaryWindow.requestRendering(); // Ensure update loop runs to check flag
+                }
+            } else {
+                Gdx.app.error(TAG, "setVSync: Cannot find primary window.");
+            }
+        } else {
+            Gdx.app.error(TAG, "setVSync: VulkanApplication reference is null.");
         }
-    }
-
-    /**
-     * Sets the target framerate for the application, when using continuous rendering. Must be positive. The cpu sleeps as needed.
-     * Use 0 to never sleep. If there are multiple windows, the value for the first window created is used for all. Default is 0.
-     *
-     * @param fps fps
-     */
-    @Override
-    public void setForegroundFPS(int fps) {
-        getWindow().getApplicationConfig().foregroundFPS = fps;
     }
 
     @Override
@@ -920,57 +613,81 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     @Override
     public void requestRendering() {
-
+        if (app != null) {
+            VulkanWindow primary = app.getPrimaryWindow();
+            if (primary != null) {
+                primary.requestRendering();
+            }
+        }
     }
 
     @Override
     public boolean isFullscreen() {
-        return GLFW.glfwGetWindowMonitor(window.getWindowHandle()) != 0;
+        return GLFW.glfwGetWindowMonitor(primaryWindowHandle) != 0;
     }
 
     @Override
     public Cursor newCursor(Pixmap pixmap, int xHotspot, int yHotspot) {
-        return new VulkanCursor(getWindow(), pixmap, xHotspot, yHotspot);
+        return new VulkanCursor(app.getPrimaryWindow(), pixmap, xHotspot, yHotspot);
     }
 
     @Override
     public void setCursor(Cursor cursor) {
-        GLFW.glfwSetCursor(getWindow().getWindowHandle(), ((VulkanCursor) cursor).glfwCursor);
+        GLFW.glfwSetCursor(app.getPrimaryWindow().getWindowHandle(), ((VulkanCursor) cursor).glfwCursor);
     }
 
     @Override
     public void setSystemCursor(SystemCursor systemCursor) {
-        VulkanCursor.setSystemCursor(getWindow().getWindowHandle(), systemCursor);
+        VulkanCursor.setSystemCursor(app.getPrimaryWindow().getWindowHandle(), systemCursor);
+    }
+
+    @Override
+    public void setForegroundFPS(int fps) {
+        if (config != null) {
+            config.foregroundFPS = fps;
+        }
     }
 
     @Override
     public void dispose() {
-        cleanupVulkan(); // Call full Vulkan cleanup
-        if (this.resizeCallback != null) {
-            this.resizeCallback.free(); // Free GLFW callback
+        Gdx.app.log(TAG, "Disposing VulkanGraphics...");
+
+        if (vulkanDevice != null && vulkanDevice.getRawDevice() != null) {
+            Gdx.app.log(TAG, "Waiting for device idle before graphics cleanup...");
+            try {
+                vkDeviceWaitIdle(vulkanDevice.getRawDevice());
+                Gdx.app.log(TAG, "Device idle. Proceeding with graphics cleanup...");
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "Error waiting for device idle during graphics dispose", e);
+            }
         }
-        System.out.println("VulkanGraphics disposed.");
+
+        // Dispose shared managers FIRST
+        if (pipelineManager != null) {
+            pipelineManager.dispose();
+            pipelineManager = null;
+        }
+        if (descriptorManager != null) {
+            descriptorManager.dispose();
+            descriptorManager = null;
+        }
+
+        // Clear context state
+        this.currentRecordingCommandBuffer = null;
+        this.currentRenderPassHandle = VK_NULL_HANDLE;
+
+        Gdx.app.log(TAG, "VulkanGraphics cleanup finished.");
     }
 
-    public static class VulkanDisplayMode extends DisplayMode {
-        final long monitorHandle;
-
-        VulkanDisplayMode(long monitor, int width, int height, int refreshRate, int bitsPerPixel) {
-            super(width, height, refreshRate, bitsPerPixel);
-            this.monitorHandle = monitor;
-        }
-
-        public long getMonitor() {
-            return monitorHandle;
-        }
-    }
-
+    /**
+     * Vulkan-specific implementation of Monitor.
+     */
     public static class VulkanMonitor extends Monitor {
-        final long monitorHandle;
+        final long monitorHandle; // Store the GLFW monitor handle
 
-        VulkanMonitor(long monitor, int virtualX, int virtualY, String name) {
+        protected VulkanMonitor(long handle, int virtualX, int virtualY, String name) {
             super(virtualX, virtualY, name);
-            this.monitorHandle = monitor;
+            this.monitorHandle = handle;
         }
 
         public long getMonitorHandle() {
@@ -979,219 +696,63 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     }
 
     /**
-     * Copies data from one VkBuffer to another using a single-time command buffer.
+     * Helper method to convert a GLFW monitor handle to a VulkanMonitor object.
+     * (Could also reside in VulkanApplicationConfiguration).
      *
-     * @param srcBuffer The source VkBuffer handle.
-     * @param dstBuffer The destination VkBuffer handle.
-     * @param size      The number of bytes to copy.
+     * @param glfwMonitor Handle to the GLFW monitor.
+     * @return A VulkanMonitor instance.
      */
-    private void copyBuffer(long srcBuffer, long dstBuffer, long size) {
-        if (vulkanDevice == null) throw new GdxRuntimeException("VulkanDevice not initialized for copyBuffer");
+    public static VulkanMonitor toVulkanMonitor(long glfwMonitor) { // Ensure public static
+        if (glfwMonitor == NULL) {
+            throw new GdxRuntimeException("Cannot create VulkanMonitor from NULL GLFW handle.");
+        }
 
-        vulkanDevice.executeSingleTimeCommands(commandBuffer -> { // Pass lambda for recording
-            try (MemoryStack stack = stackPush()) {
-                VkBufferCopy.Buffer copyRegion = VkBufferCopy.calloc(1, stack)
-                        .srcOffset(0)  // Optional: if copying from specific offset
-                        .dstOffset(0)  // Optional: if copying to specific offset
-                        .size(size);
-                vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, copyRegion);
-            } // Stack frame for copyRegion is automatically managed
-        }); // executeSingleTimeCommands handles begin, end, submit, wait, free
+        IntBuffer x = BufferUtils.createIntBuffer(1); // Or use stack allocation if in instance method
+        IntBuffer y = BufferUtils.createIntBuffer(1);
+        GLFW.glfwGetMonitorPos(glfwMonitor, x, y);
+        String name = GLFW.glfwGetMonitorName(glfwMonitor);
+        if (name == null) name = "Unknown";
+        return new VulkanMonitor(glfwMonitor, x.get(0), y.get(0), name);
+    }
+
+    @Override
+    public Monitor getPrimaryMonitor() {
+        return toVulkanMonitor(GLFW.glfwGetPrimaryMonitor()); // No cast needed
+    }
+
+    @Override
+    public Monitor[] getMonitors() {
+        PointerBuffer glfwMonitors = GLFW.glfwGetMonitors();
+        if (glfwMonitors == null) return new Monitor[0];
+        Monitor[] monitors = new Monitor[glfwMonitors.limit()];
+        for (int i = 0; i < glfwMonitors.limit(); i++) {
+            monitors[i] = toVulkanMonitor(glfwMonitors.get(i)); // Use helper
+        }
+        return monitors;
     }
 
     /**
-     * Handles start-of-frame Vulkan operations: waits for GPU, acquires swapchain image,
-     * resets fence, begins command buffer, and begins the render pass.
+     * Gets the GLFW window handle of the primary application window.
      *
-     * @return A FrameInfo object containing success status, the active command buffer, and the swapchain image index.
-     * Returns success=false if swapchain is out of date or acquire failed non-critically, requiring recreation check.
+     * @return The primary window handle.
      */
-    private FrameInfo beginFrame() {
-        this.currentFrameCommandBuffer = null;
-        this.currentFrameImageIndex = -1;
-        this.currentFrameRenderPassHandle = VK_NULL_HANDLE;
-        // --- Pre-checks ---
-        if (vulkanSwapchain == null || vulkanSwapchain.getHandle() == VK_NULL_HANDLE) {
-            Gdx.app.error(TAG, "[beginFrame] Swapchain object or handle is invalid!");
-            return new FrameInfo(false, null, -1);
-        }
-        if (syncManager == null) {
-            Gdx.app.error(TAG, "[beginFrame] SyncManager is null!");
-            // Or throw new GdxRuntimeException("SyncManager not initialized");
-            return new FrameInfo(false, null, -1);
-        }
-
-        try (MemoryStack stack = stackPush()) {
-            // --- 1. Wait for the Previous Frame to Finish ---
-            long fence = syncManager.getInFlightFence(); // Get fence from manager
-            if (fence == VK_NULL_HANDLE) throw new GdxRuntimeException("In-flight fence handle is NULL!");
-            vkCheck(vkWaitForFences(rawDevice, fence, true, Long.MAX_VALUE),
-                    "vkWaitForFences failed!");
-
-            // --- 2. Acquire Next Swapchain Image ---
-            IntBuffer pImageIndex = stack.mallocInt(1);
-            long imageAcquireSemaphore = syncManager.getImageAvailableSemaphore(); // Get semaphore from manager
-            if (imageAcquireSemaphore == VK_NULL_HANDLE) throw new GdxRuntimeException("Image available semaphore handle is NULL!");
-
-            int acquireResult = vulkanSwapchain.acquireNextImage(
-                    imageAcquireSemaphore,
-                    VK_NULL_HANDLE, // No fence needed for acquire
-                    pImageIndex);
-
-            int imageIndex = pImageIndex.get(0);
-
-            // Handle Acquire Results
-            if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
-                Gdx.app.log(TAG, "[beginFrame] Swapchain out of date after acquire. Needs recreation.");
-                // Flag is set internally by acquireNextImage, recreation check happens before beginFrame
-                return new FrameInfo(false, null, -1); // Signal failure
-            } else if (acquireResult == VK_SUBOPTIMAL_KHR) {
-                Gdx.app.log(TAG, "[beginFrame] Swapchain suboptimal after acquire. Recreation pending next frame.");
-                // Proceed, but flag is set for next frame's check
-            } else if (acquireResult != VK_SUCCESS) {
-                throw new GdxRuntimeException("[beginFrame] Failed to acquire swap chain image! Result: " + VkResultDecoder.decode(acquireResult));
-            }
-
-            // --- 3. Reset Fence ---
-            // Fence waited successfully, image acquired successfully (or suboptimal), reset the fence
-            vkCheck(vkResetFences(rawDevice, fence), "vkResetFences failed!"); // Use fence handle obtained earlier
-
-            // --- 4. Prepare Command Buffer ---
-            if (commandBuffers == null || imageIndex < 0 || imageIndex >= commandBuffers.size()) {
-                throw new GdxRuntimeException("[beginFrame] CommandBuffers list invalid or imageIndex (" + imageIndex + ") out of bounds. CB Size=" + (commandBuffers != null ? commandBuffers.size() : "null"));
-            }
-            VkCommandBuffer commandBuffer = commandBuffers.get(imageIndex);
-
-            vkCheck(vkResetCommandBuffer(commandBuffer, 0), "vkResetCommandBuffer failed!");
-
-            VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack).sType$Default();
-            vkCheck(vkBeginCommandBuffer(commandBuffer, beginInfo), "vkBeginCommandBuffer failed!");
-
-            // --- 5. Begin Render Pass ---
-            if (renderPassManager == null) throw new GdxRuntimeException("RenderPassManager is null!");
-            long rpHandle = (vulkanSwapchain != null) ? vulkanSwapchain.getRenderPass() : VK_NULL_HANDLE;
-            if (rpHandle == VK_NULL_HANDLE) {
-                // Cannot proceed without a valid render pass
-                try { vkEndCommandBuffer(commandBuffer); } catch (Exception ignored) {} // Try to end CB
-                throw new GdxRuntimeException("Cannot begin frame: Invalid RenderPass handle from swapchain.");
-            }
-            renderPassManager.beginSwapchainRenderPass(commandBuffer, vulkanSwapchain, imageIndex, null); // Use default clear color
-
-            try (MemoryStack stack2 = stackPush()) {
-                VkViewport.Buffer viewport = VkViewport.calloc(1, stack2);
-                VkRect2D.Buffer scissor = VkRect2D.calloc(1, stack2);
-
-                VkExtent2D extent = vulkanSwapchain.getExtent(); // Get current swapchain size
-
-                // Configure Viewport
-                viewport.get(0)
-                        .x(0.0f)
-                        .y((float) extent.height())
-                        .width((float) extent.width())
-                        .height(-(float) extent.height()) // Positive height convention
-                        .minDepth(0.0f)
-                        .maxDepth(1.0f);
-                // If you need Y-flipping via viewport, set y = extent.height() and height = -extent.height()
-
-                // Configure Scissor (usually matches viewport for full screen)
-                scissor.get(0)
-                        .offset(o -> o.set(0, 0))
-                        .extent(extent);
-
-                // Set the dynamic states on the command buffer
-                vkCmdSetViewport(commandBuffer, 0, viewport);
-                vkCmdSetScissor(commandBuffer, 0, scissor);
-                // Gdx.app.debug(logTag, "Set dynamic viewport/scissor for command buffer"); // Optional log
-            }
-
-            this.currentFrameCommandBuffer = commandBuffer;
-            this.currentFrameImageIndex = imageIndex;
-            this.currentFrameRenderPassHandle = rpHandle;
-
-            return new FrameInfo(true, commandBuffer, imageIndex);
-
-        } catch (Exception e) {
-            Gdx.app.error(TAG, "Exception during beginFrame", e);
-            return new FrameInfo(false, null, -1); // Indicate failure on any exception
-        }
+    public long getPrimaryWindowHandle() {
+        return this.primaryWindowHandle;
     }
 
     /**
-     * Handles end-of-frame Vulkan operations: ends render pass, ends command buffer,
-     * submits command buffer to queue, and presents the swapchain image.
-     *
-     * @param commandBuffer The command buffer that was recorded into.
-     * @param imageIndex    The index of the swapchain image that was acquired and rendered to.
+     * Vulkan-specific implementation of DisplayMode.
      */
-    private void endFrame(VkCommandBuffer commandBuffer, int imageIndex) {
-        // --- Pre-checks ---
-        if (commandBuffer == null) {
-            Gdx.app.error(TAG, "[endFrame] Received null command buffer!");
-            // Maybe throw? Continuing might leave sync objects in weird state.
-            throw new GdxRuntimeException("Cannot end frame with null command buffer");
-        }
-        if (vulkanSwapchain == null || vulkanSwapchain.getHandle() == VK_NULL_HANDLE) {
-            Gdx.app.error(TAG, "[endFrame] Swapchain object or handle is invalid!");
-            throw new GdxRuntimeException("Cannot end frame with invalid swapchain");
-        }
-        if (syncManager == null) {
-            Gdx.app.error(TAG, "[endFrame] SyncManager is null!");
-            throw new GdxRuntimeException("SyncManager not initialized for endFrame");
+    public static class VulkanDisplayMode extends DisplayMode { // <<< ADDED CLASS
+        final long monitorHandle; // Store associated monitor handle
+
+        protected VulkanDisplayMode(long monitorHandle, int width, int height, int refreshRate, int bitsPerPixel) {
+            super(width, height, refreshRate, bitsPerPixel);
+            this.monitorHandle = monitorHandle;
         }
 
-
-        try (MemoryStack stack = stackPush()) {
-
-            // --- 1. End Render Pass & Command Buffer ---
-            if (renderPassManager == null) throw new GdxRuntimeException("RenderPassManager is null!");
-            renderPassManager.endRenderPass(commandBuffer);
-            vkCheck(vkEndCommandBuffer(commandBuffer), "vkEndCommandBuffer failed!");
-
-            // --- 2. Submit Command Buffer ---
-            VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack).sType$Default();
-
-            // Get sync object handles from manager
-            long imgAvailSem = syncManager.getImageAvailableSemaphore();
-            long renderFinSem = syncManager.getRenderFinishedSemaphore();
-            long fence = syncManager.getInFlightFence();
-            if (imgAvailSem == VK_NULL_HANDLE || renderFinSem == VK_NULL_HANDLE || fence == VK_NULL_HANDLE) {
-                throw new GdxRuntimeException("One or more sync object handles are NULL in endFrame!");
-            }
-
-
-            LongBuffer waitSemaphores = stack.longs(imgAvailSem); // Wait for image available
-            IntBuffer waitStages = stack.ints(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
-            LongBuffer signalSemaphores = stack.longs(renderFinSem); // Signal render finished
-
-            submitInfo.waitSemaphoreCount(1).pWaitSemaphores(waitSemaphores).pWaitDstStageMask(waitStages);
-            submitInfo.pCommandBuffers(stack.pointers(commandBuffer.address()));
-            submitInfo.pSignalSemaphores(signalSemaphores);
-
-            // Submit to the graphics queue, signaling the inFlightFence
-            vkCheck(vkQueueSubmit(graphicsQueue, submitInfo, fence), // Use fence from manager
-                    "vkQueueSubmit failed!");
-
-            // --- 3. Presentation ---
-            int presentResult = vulkanSwapchain.present(
-                    presentQueue,            // Use present queue
-                    imageIndex,
-                    renderFinSem);           // Wait for render finished semaphore from manager
-
-            // Handle Present Results (needsRecreation flag is set internally if needed)
-            if (presentResult != VK_SUCCESS && presentResult != VK_SUBOPTIMAL_KHR && presentResult != VK_ERROR_OUT_OF_DATE_KHR) {
-                // Throw only for critical errors, OOD/Suboptimal are handled by recreation check next frame
-                throw new GdxRuntimeException("[endFrame] Failed to present swap chain image! Result: " + VkResultDecoder.decode(presentResult));
-            }
-            // Logging for suboptimal/ood happens within vulkanSwapchain.present if desired
-
-        } catch (Exception e) {
-            Gdx.app.error(TAG, "Exception during endFrame", e);
-            throw new GdxRuntimeException("Exception during endFrame", e);
-        } finally {
-            this.currentFrameCommandBuffer = null;
-            this.currentFrameImageIndex = -1;
-            this.currentFrameRenderPassHandle = VK_NULL_HANDLE;
+        public long getMonitorHandle() {
+            return monitorHandle;
         }
     }
-
 }

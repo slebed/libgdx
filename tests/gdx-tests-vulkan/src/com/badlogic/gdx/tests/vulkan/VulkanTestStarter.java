@@ -30,6 +30,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
@@ -97,10 +98,12 @@ public class VulkanTestStarter {
         private Skin skin;
         private AssetManager assetManager;
         TextButton lastClickedTestButton;
+        Preferences prefs;
+        private int cnt = 0;
 
         @Override
         public void create() {
-            final Preferences prefs = Gdx.app.getPreferences("vulkan-tests");
+            prefs = Gdx.app.getPreferences("vulkan-tests");
 
             assetManager = new AssetManager();
             FileHandleResolver resolver = new InternalFileHandleResolver();
@@ -129,11 +132,11 @@ public class VulkanTestStarter {
             stage = new VulkanStage(viewport);
             stage.addListener(new InputListener() {
                 @Override
-                public boolean touchDown (InputEvent event, float x, float y, int pointer, int button) {
+                public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
                     int screenX = Gdx.input.getX(pointer); // Get raw screen X
                     int screenY = Gdx.input.getY(pointer); // Get raw screen Y
                     String firstTestName = GdxVulkanTests.getNames().get(0);
-                    Gdx.app.log("StageInputDebug", "touchDown Listener Coords (Screen): (" + screenX + ", " + screenY + ") "+ firstTestName);
+                    Gdx.app.log("StageInputDebug", "touchDown Listener Coords (Screen): (" + screenX + ", " + screenY + ") " + firstTestName);
 
                     // Unproject manually using the stage's viewport
                     Vector2 stageCoords = new Vector2();
@@ -161,8 +164,9 @@ public class VulkanTestStarter {
 
                     return false; // Let event propagate
                 }
+
                 @Override
-                public void touchUp (InputEvent event, float x, float y, int pointer, int button) {
+                public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
                     Gdx.app.log("StageInputDebug", "touchUp Stage Coords: (" + x + ", " + y + ")");
                 }
             });
@@ -204,27 +208,7 @@ public class VulkanTestStarter {
                 testButton.addListener(new ChangeListener() {
                     @Override
                     public void changed(ChangeEvent event, Actor actor) {
-                        ApplicationListener test = GdxVulkanTests.newTest(testName);
-                        VulkanWindowConfiguration winConfig = new VulkanWindowConfiguration();
-                        winConfig.setTitle(testName);
-                        winConfig.setWindowedMode(640, 480);
-
-                        VulkanApplication app = (VulkanApplication) Gdx.app;
-                        VulkanWindow primaryWin = app.getCurrentWindow();
-
-                        if (primaryWin != null) {
-                            // Get position from the VulkanWindow instance
-                            int currentX = primaryWin.getPositionX();
-                            int currentY = primaryWin.getPositionY();
-                            winConfig.setWindowPosition(currentX + 40, currentY + 40);
-                            Gdx.app.log("VulkanTestChooser", "Positioning new window relative to: " + currentX + "," + currentY);
-                        } else {
-                            Gdx.app.error("VulkanTestChooser", "Could not get primary window reference to position new window.");
-                        }
-
-                        winConfig.useVsync(false);
-                        ((VulkanApplication) Gdx.app).newWindow(new GdxTestWrapper(test, options.logGLErrors), winConfig);
-                        System.out.println("Started test: " + testName);
+                        launchTest(testName);
                         prefs.putString("LastTest", testName);
                         prefs.flush();
                         if (testButton != lastClickedTestButton) {
@@ -257,14 +241,45 @@ public class VulkanTestStarter {
             Gdx.app.log(TAG, "Chooser create() finished.");
         }
 
+        private void launchTest(String testName) {
+            ApplicationListener test = GdxVulkanTests.newTest(testName);
+            VulkanWindowConfiguration winConfig = new VulkanWindowConfiguration();
+            winConfig.setTitle(testName);
+            winConfig.setWindowedMode(640, 480);
+
+            VulkanApplication app = (VulkanApplication) Gdx.app;
+            VulkanWindow primaryWin = app.getCurrentWindow();
+
+            if (primaryWin != null) {
+                // Get position from the VulkanWindow instance
+                int currentX = primaryWin.getPositionX();
+                int currentY = primaryWin.getPositionY();
+                winConfig.setWindowPosition(currentX + 40, currentY + 40);
+                Gdx.app.log("VulkanTestChooser", "Positioning new window relative to: " + currentX + "," + currentY);
+            } else {
+                Gdx.app.error("VulkanTestChooser", "Could not get primary window reference to position new window.");
+            }
+
+            winConfig.useVsync(false);
+            ((VulkanApplication) Gdx.app).newWindow(new GdxTestWrapper(test, options.logGLErrors), winConfig);
+            System.out.println("Started test: " + testName);
+
+
+        }
+
         @Override
         public void render() {
             stage.act(Gdx.graphics.getDeltaTime());
             stage.draw();
+            cnt++;
+            if (cnt == 20) {
+                //    launchTest("VulkanClearScreenTest");
+            }
         }
 
         @Override
         public void resize(int width, int height) {
+            Gdx.app.log(TAG, "Resizing to: " + width + "x" + height + (stage != null ? "Stage is not null" : "Stage is null"));
             if (stage != null && stage.getViewport() != null) {
                 stage.getViewport().update(width, height, true);
             }
