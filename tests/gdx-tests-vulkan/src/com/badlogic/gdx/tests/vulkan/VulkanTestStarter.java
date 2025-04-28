@@ -1,3 +1,4 @@
+
 package com.badlogic.gdx.tests.vulkan;
 
 import static com.badlogic.gdx.scenes.scene2d.ui.Table.Debug.table;
@@ -13,8 +14,6 @@ import com.badlogic.gdx.assets.loaders.FileHandleResolver;
 import com.badlogic.gdx.assets.loaders.resolvers.InternalFileHandleResolver;
 import com.badlogic.gdx.backend.vulkan.VulkanApplication;
 import com.badlogic.gdx.backend.vulkan.VulkanApplicationConfiguration;
-import com.badlogic.gdx.backend.vulkan.VulkanDevice;
-import com.badlogic.gdx.backend.vulkan.VulkanGraphics;
 import com.badlogic.gdx.backend.vulkan.VulkanScreenViewport;
 
 import com.badlogic.gdx.backend.vulkan.VulkanStage;
@@ -25,12 +24,8 @@ import com.badlogic.gdx.backend.vulkan.VulkanWindow;
 import com.badlogic.gdx.backend.vulkan.VulkanWindowConfiguration;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
-import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
-import com.badlogic.gdx.scenes.scene2d.InputEvent;
-import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
@@ -42,307 +37,303 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.viewport.Viewport;
 
 public class VulkanTestStarter {
-    static CommandLineOptions options;
+	static CommandLineOptions options;
 
-    public static void main(String[] argv) {
-        options = new CommandLineOptions(argv);
-        VulkanApplicationConfiguration vkConfig = new VulkanApplicationConfiguration();
-        vkConfig.setTitle("Vulkan Test"); // Default title
-        vkConfig.setWindowedMode(640, 480);
-vkConfig.enableValidationLayers(true, null);
-        vkConfig.setPresentationMode(VulkanApplicationConfiguration.SwapchainPresentMode.MAILBOX); // Example
+	public static void main (String[] argv) {
+		options = new CommandLineOptions(argv);
+		VulkanApplicationConfiguration vkConfig = new VulkanApplicationConfiguration();
+		vkConfig.setTitle("Vulkan Test"); // Default title
+		vkConfig.setWindowedMode(640, 480);
+		vkConfig.enableValidationLayers(true, null);
+		vkConfig.setPresentationMode(VulkanApplicationConfiguration.SwapchainPresentMode.MAILBOX); // Example
 
-        ApplicationListener listenerToStart = null;
-        String testName = options.startupTestName;
+		ApplicationListener listenerToStart = null;
+		String testName = options.startupTestName;
 
-        if (testName != null) {
-            System.out.println("Attempting to launch Vulkan test from argument: " + testName);
-            // Use your Vulkan test registry
-            listenerToStart = GdxVulkanTests.newTest(testName);
+		if (testName != null) {
+			System.out.println("Attempting to launch Vulkan test from argument: " + testName);
+			// Use your Vulkan test registry
+			listenerToStart = GdxVulkanTests.newTest(testName);
 
-            if (listenerToStart != null) {
-                System.out.println("Launching Vulkan test: " + testName);
-                vkConfig.setTitle(testName + " (Vulkan)"); // Set specific title
-                // Wrap the test listener
-                listenerToStart = new GdxTestWrapper(listenerToStart, false); // false = disable GL errors
-                try {
-                    new VulkanApplication(listenerToStart, vkConfig);
-                } catch (Throwable t) {
-                    System.err.println("Exception thrown during VulkanApplication creation:");
-                    t.printStackTrace();
-                    System.exit(1); // Exit if application creation fails critically
-                }
-            } else {
-                System.err.println("ERROR: Vulkan test specified via argument not found: " + testName);
-                // Optionally list available tests if GdxVulkanTests provides a way
-                // System.err.println("Available Vulkan tests: " + GdxVulkanTests.getNames());
-                System.err.println("Falling back to Test Chooser.");
-                // listenerToStart remains null, chooser will be launched
-            }
-        }
+			if (listenerToStart != null) {
+				System.out.println("Launching Vulkan test: " + testName);
+				vkConfig.setTitle(testName + " (Vulkan)"); // Set specific title
+				// Wrap the test listener
+				listenerToStart = new GdxTestWrapper(listenerToStart, false); // false = disable GL errors
+				try {
+					new VulkanApplication(listenerToStart, vkConfig);
+				} catch (Throwable t) {
+					System.err.println("Exception thrown during VulkanApplication creation:");
+					t.printStackTrace();
+					System.exit(1); // Exit if application creation fails critically
+				}
+			} else {
+				System.err.println("ERROR: Vulkan test specified via argument not found: " + testName);
+				// Optionally list available tests if GdxVulkanTests provides a way
+				// System.err.println("Available Vulkan tests: " + GdxVulkanTests.getNames());
+				System.err.println("Falling back to Test Chooser.");
+				// listenerToStart remains null, chooser will be launched
+			}
+		}
 
-        if (options.startupTestName != null) {
-            ApplicationListener test = GdxVulkanTests.newTest(options.startupTestName);
-            if (test != null) {
-                new VulkanApplication(test, vkConfig);
-                return;
-            }
-            // Otherwise, fall back to showing the list
-        }
-        new VulkanApplication(new VulkanTestChooser(), vkConfig);
-    }
+		if (options.startupTestName != null) {
+			ApplicationListener test = GdxVulkanTests.newTest(options.startupTestName);
+			if (test != null) {
+				new VulkanApplication(test, vkConfig);
+				return;
+			}
+			// Otherwise, fall back to showing the list
+		}
+		new VulkanApplication(new VulkanTestChooser(), vkConfig);
+	}
 
-    static class VulkanTestChooser extends ApplicationAdapter {
-        private final String TAG = "VulkanTestChooser";
-        private VulkanStage stage;
-        private Skin skin;
-        private AssetManager assetManager;
-        TextButton lastClickedTestButton;
-        Preferences prefs;
-        private int cnt = 0;
+	static class VulkanTestChooser extends ApplicationAdapter {
+		private final String TAG = "VulkanTestChooser";
+		private VulkanStage stage;
+		private Skin skin;
+		private AssetManager assetManager;
+		TextButton lastClickedTestButton;
+		Preferences prefs;
+		private int cnt = 0;
 
-        @Override
-        public void create() {
-            Gdx.app.log(TAG, "create() called. Hash: " + this.hashCode());
-            prefs = Gdx.app.getPreferences("vulkan-tests");
+		@Override
+		public void create () {
+			Gdx.app.log(TAG, "create() called. Hash: " + this.hashCode());
+			prefs = Gdx.app.getPreferences("vulkan-tests");
 
-            FileHandleResolver resolver = new InternalFileHandleResolver();
+			FileHandleResolver resolver = new InternalFileHandleResolver();
 
-            assetManager = new AssetManager();
-            assetManager.setLoader(VulkanTexture.class, new VulkanTextureLoader(resolver));
-            assetManager.setLoader(TextureAtlas.class, new VulkanTextureAtlasLoader(resolver));
+			assetManager = new AssetManager();
+			assetManager.setLoader(VulkanTexture.class, new VulkanTextureLoader(resolver));
+			assetManager.setLoader(TextureAtlas.class, new VulkanTextureAtlasLoader(resolver));
 
-            String skinPath = "data/uiskin.json";
-            try {
-                Gdx.app.log(TAG, "Queueing skin for loading: " + skinPath);
-                assetManager.load(skinPath, Skin.class);
-                assetManager.finishLoading();
-                skin = assetManager.get(skinPath, Skin.class);
-                Gdx.app.log(TAG, "Skin retrieved from AssetManager.");
-            } catch (Exception e) {
-                if (assetManager != null) assetManager.dispose();
-                throw new GdxRuntimeException("Failed to load uiskin via AssetManager", e);
-            }
+			String skinPath = "data/uiskin.json";
+			try {
+				Gdx.app.log(TAG, "Queueing skin for loading: " + skinPath);
+				assetManager.load(skinPath, Skin.class);
+				assetManager.finishLoading();
+				skin = assetManager.get(skinPath, Skin.class);
+				Gdx.app.log(TAG, "Skin retrieved from AssetManager.");
+			} catch (Exception e) {
+				if (assetManager != null) assetManager.dispose();
+				throw new GdxRuntimeException("Failed to load uiskin via AssetManager", e);
+			}
 
-            Viewport viewport = new VulkanScreenViewport();
-            stage = new VulkanStage(viewport);
-            /*stage.addListener(new InputListener() {
-                @Override
-                public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-                    int screenX = Gdx.input.getX(pointer); // Get raw screen X
-                    int screenY = Gdx.input.getY(pointer); // Get raw screen Y
-                    String firstTestName = GdxVulkanTests.getNames().get(0);
-                    Gdx.app.log("StageInputDebug", "touchDown Listener Coords (Screen): (" + screenX + ", " + screenY + ") " + firstTestName);
+			Viewport viewport = new VulkanScreenViewport();
+			stage = new VulkanStage(viewport);
+			/*
+			 * stage.addListener(new InputListener() {
+			 * 
+			 * @Override public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) { int screenX =
+			 * Gdx.input.getX(pointer); // Get raw screen X int screenY = Gdx.input.getY(pointer); // Get raw screen Y String
+			 * firstTestName = GdxVulkanTests.getNames().get(0); Gdx.app.log("StageInputDebug",
+			 * "touchDown Listener Coords (Screen): (" + screenX + ", " + screenY + ") " + firstTestName);
+			 * 
+			 * // Unproject manually using the stage's viewport Vector2 stageCoords = new Vector2(); // Ensure stage and its viewport
+			 * are not null here for safety if (stage != null && stage.getViewport() != null) {
+			 * stage.getViewport().unproject(stageCoords.set(screenX, screenY)); Gdx.app.log("StageInputDebug",
+			 * "touchDown Unprojected Coords: (" + stageCoords.x + ", " + stageCoords.y + ")");
+			 * 
+			 * // Optionally, test hit detection directly here TextButton testButton = stage.getRoot().findActor(firstTestName); if
+			 * (testButton != null) { boolean hit = (testButton.hit(stageCoords.x, stageCoords.y, true) != null);
+			 * Gdx.app.log("StageInputDebug", "Hit test on '" + testButton.getName() + "' with unprojected coords: " + hit); } else {
+			 * Gdx.app.log("StageInputDebug", "Could not find test button for hit test."); }
+			 * 
+			 * } else { Gdx.app.log("StageInputDebug", "Stage or Viewport is null, cannot unproject."); }
+			 * 
+			 * 
+			 * Gdx.app.log("StageInputDebug", "touchDown Screen Coords: (" + screenX + ", " + screenY + ")");
+			 * Gdx.app.log("StageInputDebug", "touchDown Listener Coords (Stage): (" + x + ", " + y + ")");
+			 * 
+			 * return false; }
+			 * 
+			 * @Override public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
+			 * Gdx.app.log("StageInputDebug", "touchUp Stage Coords: (" + x + ", " + y + ")"); } });
+			 */
 
-                    // Unproject manually using the stage's viewport
-                    Vector2 stageCoords = new Vector2();
-                    // Ensure stage and its viewport are not null here for safety
-                    if (stage != null && stage.getViewport() != null) {
-                        stage.getViewport().unproject(stageCoords.set(screenX, screenY));
-                        Gdx.app.log("StageInputDebug", "touchDown Unprojected Coords: (" + stageCoords.x + ", " + stageCoords.y + ")");
+			if (Gdx.input != null) {
+				Gdx.app.log("VulkanTestChooser", "Setting InputProcessor on Gdx.input instance hash: " + Gdx.input.hashCode());
+				Gdx.input.setInputProcessor(stage);
 
-                        // Optionally, test hit detection directly here
-                        TextButton testButton = stage.getRoot().findActor(firstTestName);
-                        if (testButton != null) {
-                            boolean hit = (testButton.hit(stageCoords.x, stageCoords.y, true) != null);
-                            Gdx.app.log("StageInputDebug", "Hit test on '" + testButton.getName() + "' with unprojected coords: " + hit);
-                        } else {
-                            Gdx.app.log("StageInputDebug", "Could not find test button for hit test.");
-                        }
+				Gdx.app.log("VulkanTestChooser", "InputProcessor set.");
+				InputProcessor processorAfterSet = Gdx.input.getInputProcessor();
+				Gdx.app.log("VulkanTestChooser",
+					"Processor is now: " + (processorAfterSet == null ? "NULL" : processorAfterSet.getClass().getName())
+						+ " on instance hash: " + Gdx.input.hashCode());
+			} else {
+				Gdx.app.log("VulkanTestChooser", "Cannot set InputProcessor, Gdx.input is NULL!");
+			}
 
-                    } else {
-                        Gdx.app.log("StageInputDebug", "Stage or Viewport is null, cannot unproject.");
-                    }
+			Label label = new Label("Vulkan Tests", skin);
 
+			Table container = new Table();
+			stage.addActor(container);
+			container.setFillParent(true);
+			container.add(label).pad(10).row();
+// stage.setDebugAll(true);
+			Table table = new Table();
 
-                    Gdx.app.log("StageInputDebug", "touchDown Screen Coords: (" + screenX + ", " + screenY + ")");
-                    Gdx.app.log("StageInputDebug", "touchDown Listener Coords (Stage): (" + x + ", " + y + ")");
+			// ScrollPane scroll = new ScrollPane(table, skin);
+			// scroll.setSmoothScrolling(false);
+			// scroll.setFadeScrollBars(false);
+			// stage.setScrollFocus(scroll);
 
-                    return false;
-                }
+			int tableSpace = 4;
+			table.pad(10).defaults().expandX().space(tableSpace);
+			Gdx.app.log(TAG, "Adding " + GdxVulkanTests.getNames().size() + " tests to container...");
+			for (final String testName : GdxVulkanTests.getNames()) {
+				final TextButton testButton = new TextButton(testName, skin);
+				// testButton.setDisabled(!options.isTestCompatible(testName));
+				testButton.setName(testName);
+				table.add(testButton).fillX();
+				table.row();
+				testButton.addListener(new ChangeListener() {
+					@Override
+					public void changed (ChangeEvent event, Actor actor) {
+						launchTest(testName);
+						prefs.putString("LastTest", testName);
+						prefs.flush();
+						if (testButton != lastClickedTestButton) {
+							testButton.setColor(Color.CYAN);
+							if (lastClickedTestButton != null) {
+								lastClickedTestButton.setColor(Color.WHITE);
+							}
+							lastClickedTestButton = testButton;
+						}
+					}
+				});
+			}
+			// Gdx.app.log(TAG, "Adding scroll pane to container...");
+			container.add(table).grow();
+			// container.add(scroll).grow();
+			container.row();
 
-                @Override
-                public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
-                    Gdx.app.log("StageInputDebug", "touchUp Stage Coords: (" + x + ", " + y + ")");
-                }
-            });*/
+			lastClickedTestButton = table.findActor(prefs.getString("LastTest"));
+			if (lastClickedTestButton != null) {
+				lastClickedTestButton.setColor(Color.CYAN);
+				// scroll.layout();
+				// float scrollY = lastClickedTestButton.getY() + scroll.getScrollHeight() / 2 + lastClickedTestButton.getHeight() / 2
+				// + tableSpace * 2 + 20;
+				// scroll.scrollTo(0, scrollY, 0, 0, false, false);
 
-            if (Gdx.input != null) {
-                Gdx.app.log("VulkanTestChooser", "Setting InputProcessor on Gdx.input instance hash: " + Gdx.input.hashCode());
-                Gdx.input.setInputProcessor(stage);
+				// stage.act(1f);
+				// stage.act(1f);
+				// stage.draw();
+			}
 
-                Gdx.app.log("VulkanTestChooser", "InputProcessor set.");
-                InputProcessor processorAfterSet = Gdx.input.getInputProcessor();
-                Gdx.app.log("VulkanTestChooser", "Processor is now: " + (processorAfterSet == null ? "NULL" : processorAfterSet.getClass().getName()) + " on instance hash: " + Gdx.input.hashCode());
-            } else {
-                Gdx.app.log("VulkanTestChooser", "Cannot set InputProcessor, Gdx.input is NULL!");
-            }
+			Gdx.app.log(TAG, "Chooser create() finished.");
+		}
 
-            Label label = new Label("Vulkan Tests", skin);
+		private void launchTest (String testName) {
+			ApplicationListener test = GdxVulkanTests.newTest(testName);
 
-            Table container = new Table();
-            stage.addActor(container);
-            container.setFillParent(true);
-            container.add(label).pad(10).row();
-//stage.setDebugAll(true);
-            Table table = new Table();
+			// 1. Create the configuration for the new test window
+			VulkanWindowConfiguration winConfig = new VulkanWindowConfiguration();
 
-            //ScrollPane scroll = new ScrollPane(table, skin);
-            //scroll.setSmoothScrolling(false);
-            //scroll.setFadeScrollBars(false);
-            //stage.setScrollFocus(scroll);
+			// 2. Set standard window properties
+			winConfig.setTitle(testName + " (Vulkan Test)"); // Add tag for clarity
+			winConfig.setWindowedMode(800, 600); // Or desired size
 
-            int tableSpace = 4;
-            table.pad(10).defaults().expandX().space(tableSpace);
-            Gdx.app.log(TAG, "Adding " + GdxVulkanTests.getNames().size() + " tests to container...");
-            for (final String testName : GdxVulkanTests.getNames()) {
-                final TextButton testButton = new TextButton(testName, skin);
-                //testButton.setDisabled(!options.isTestCompatible(testName));
-                testButton.setName(testName);
-                table.add(testButton).fillX();
-                table.row();
-                testButton.addListener(new ChangeListener() {
-                    @Override
-                    public void changed(ChangeEvent event, Actor actor) {
-                        launchTest(testName);
-                        prefs.putString("LastTest", testName);
-                        prefs.flush();
-                        if (testButton != lastClickedTestButton) {
-                            testButton.setColor(Color.CYAN);
-                            if (lastClickedTestButton != null) {
-                                lastClickedTestButton.setColor(Color.WHITE);
-                            }
-                            lastClickedTestButton = testButton;
-                        }
-                    }
-                });
-            }
-            //Gdx.app.log(TAG, "Adding scroll pane to container...");
-            container.add(table).grow();
-            //container.add(scroll).grow();
-            container.row();
+			// 3. (Optional but good) Copy defaults from App config if needed,
+			// but be careful not to overwrite the presentMode you set below.
+			// If you copy *after* setting presentMode, make sure the copy logic
+			// doesn't reset it. If you copy *before*, it's simpler.
+			// Example: winConfig.setFromApplicationConfiguration(((VulkanApplication)Gdx.app).getAppConfig());
 
-            lastClickedTestButton = table.findActor(prefs.getString("LastTest"));
-            if (lastClickedTestButton != null) {
-                lastClickedTestButton.setColor(Color.CYAN);
-                //scroll.layout();
-                //float scrollY = lastClickedTestButton.getY() + scroll.getScrollHeight() / 2 + lastClickedTestButton.getHeight() / 2 + tableSpace * 2 + 20;
-                //scroll.scrollTo(0, scrollY, 0, 0, false, false);
+			// 4. Set relative position (as you already do)
+			VulkanApplication app = (VulkanApplication)Gdx.app;
+			VulkanWindow primaryWin = app.getCurrentWindow(); // Use getCurrentWindow or getPrimaryWindow
+			if (primaryWin != null) {
+				int currentX = primaryWin.getPositionX();
+				int currentY = primaryWin.getPositionY();
+				winConfig.setWindowPosition(currentX + 40, currentY + 40);
+				Gdx.app.log("VulkanTestChooser", "Positioning new window relative to: " + currentX + "," + currentY);
+			} else {
+				Gdx.app.error("VulkanTestChooser", "Could not get primary/current window reference to position new window.");
+			}
 
-                //stage.act(1f);
-                //stage.act(1f);
-                //stage.draw();
-            }
+			// ---> 5. SET THE DESIRED PRESENT MODE HERE <---
+			winConfig.setPresentMode(VulkanApplicationConfiguration.SwapchainPresentMode.FIFO);
+			Gdx.app.log("VulkanTestChooser", "Setting present mode for '" + testName + "' to: " + winConfig.getPresentMode());
+			// ---------------------------------------------
 
-            Gdx.app.log(TAG, "Chooser create() finished.");
-        }
+			// 6. Launch the new window with the specific config
+			app.newWindow(new GdxTestWrapper(test, options.logGLErrors), winConfig);
+			System.out.println("Started test: " + testName + " with Present Mode: " + winConfig.getPresentMode());
+		}
 
-        private void launchTest(String testName) {
-            ApplicationListener test = GdxVulkanTests.newTest(testName);
+		@Override
+		public void render () {
+			stage.act(Gdx.graphics.getDeltaTime());
+			stage.draw();
+			cnt++;
+			// if (cnt == 4) {
+			// launchTest("Scene2dTest");
+			// }
+		}
 
-            // 1. Create the configuration for the new test window
-            VulkanWindowConfiguration winConfig = new VulkanWindowConfiguration();
+		@Override
+		public void resize (int width, int height) {
+			// Log the incoming logical width/height for comparison
+			System.out.println("--- Scene2dTest resize(" + width + ", " + height + ") CALLED (Logical Dims?) ---");
 
-            // 2. Set standard window properties
-            winConfig.setTitle(testName + " (Vulkan Test)"); // Add tag for clarity
-            winConfig.setWindowedMode(800, 600); // Or desired size
+			if (stage != null && stage.getViewport() != null) {
+				// Get the PHYSICAL back buffer dimensions
+				int backBufferWidth = Gdx.graphics.getBackBufferWidth();
+				int backBufferHeight = Gdx.graphics.getBackBufferHeight();
+				System.out.println("    Using Physical BackBuffer Dimensions: " + backBufferWidth + "x" + backBufferHeight);
 
-            // 3. (Optional but good) Copy defaults from App config if needed,
-            //    but be careful not to overwrite the presentMode you set below.
-            //    If you copy *after* setting presentMode, make sure the copy logic
-            //    doesn't reset it. If you copy *before*, it's simpler.
-            // Example: winConfig.setFromApplicationConfiguration(((VulkanApplication)Gdx.app).getAppConfig());
+				System.out.println("    Viewport BEFORE update: screen=" + stage.getViewport().getScreenWidth() + "x"
+					+ stage.getViewport().getScreenHeight() + ", world=" + stage.getViewport().getWorldWidth() + "x"
+					+ stage.getViewport().getWorldHeight());
+				try {
+					// Update viewport using PHYSICAL dimensions
+					stage.getViewport().update(backBufferWidth, backBufferHeight, true); // centerCamera=true
 
-            // 4. Set relative position (as you already do)
-            VulkanApplication app = (VulkanApplication) Gdx.app;
-            VulkanWindow primaryWin = app.getCurrentWindow(); // Use getCurrentWindow or getPrimaryWindow
-            if (primaryWin != null) {
-                int currentX = primaryWin.getPositionX();
-                int currentY = primaryWin.getPositionY();
-                winConfig.setWindowPosition(currentX + 40, currentY + 40);
-                Gdx.app.log("VulkanTestChooser", "Positioning new window relative to: " + currentX + "," + currentY);
-            } else {
-                Gdx.app.error("VulkanTestChooser", "Could not get primary/current window reference to position new window.");
-            }
+					System.out.println("    Viewport AFTER update: screen=" + stage.getViewport().getScreenWidth() + "x"
+						+ stage.getViewport().getScreenHeight() + ", world=" + stage.getViewport().getWorldWidth() + "x"
+						+ stage.getViewport().getWorldHeight());
 
-            // ---> 5. SET THE DESIRED PRESENT MODE HERE <---
-            winConfig.setPresentMode(VulkanApplicationConfiguration.SwapchainPresentMode.FIFO);
-            Gdx.app.log("VulkanTestChooser", "Setting present mode for '" + testName + "' to: " + winConfig.getPresentMode());
-            // ---------------------------------------------
+					// Optional Camera Logging
+					if (stage.getCamera() != null) {
+						// ... (your existing camera logging) ...
+						stage.getCamera().update(); // Ensure camera matrices are updated based on viewport
+					} else {
+						System.out.println("    Camera is NULL after viewport update!");
+					}
 
-            // 6. Launch the new window with the specific config
-            app.newWindow(new GdxTestWrapper(test, options.logGLErrors), winConfig);
-            System.out.println("Started test: " + testName + " with Present Mode: " + winConfig.getPresentMode());
-        }
+				} catch (Exception e) {
+					System.err.println("    ERROR during viewport.update: " + e.getMessage());
+					e.printStackTrace(); // Print stack trace for more detail
+				}
+			} else {
+				System.out.println("    Stage or Viewport is NULL during resize!");
+			}
+// Gdx.app.log(TAG, "Resizing to: " + width + "x" + height + (stage != null ? "Stage is not null" : "Stage is null"));
+// if (stage != null && stage.getViewport() != null) {
+// stage.getViewport().update(width, height, true);
+// }
+		}
 
-        @Override
-        public void render() {
-            stage.act(Gdx.graphics.getDeltaTime());
-            stage.draw();
-            cnt++;
-            //if (cnt == 4) {
-            //    launchTest("Scene2dTest");
-            //}
-        }
+		@Override
+		public void dispose () {
+			Gdx.app.log(TAG, "dispose() called. Hash: " + this.hashCode());
+			Gdx.app.log(TAG, "Disposing...");
+			if (assetManager != null) {
+				assetManager.dispose(); // Disposes skin, atlas, textures loaded by it
+				assetManager = null;
+				skin = null; // Nullify reference
+				Gdx.app.log(TAG, "AssetManager disposed.");
+			} else if (skin != null) {
+				skin.dispose(); // Should not happen if AM was used, but safety check
+				skin = null;
+			}
+			if (stage != null) {
+				stage.dispose();
+				stage = null;
+			}
 
-        @Override
-        public void resize(int width, int height) {
-            // Log the incoming logical width/height for comparison
-            System.out.println("--- Scene2dTest resize(" + width + ", " + height + ") CALLED (Logical Dims?) ---");
-
-            if (stage != null && stage.getViewport() != null) {
-                // Get the PHYSICAL back buffer dimensions
-                int backBufferWidth = Gdx.graphics.getBackBufferWidth();
-                int backBufferHeight = Gdx.graphics.getBackBufferHeight();
-                System.out.println("    Using Physical BackBuffer Dimensions: " + backBufferWidth + "x" + backBufferHeight);
-
-                System.out.println("    Viewport BEFORE update: screen=" + stage.getViewport().getScreenWidth() + "x" + stage.getViewport().getScreenHeight() + ", world=" + stage.getViewport().getWorldWidth() + "x" + stage.getViewport().getWorldHeight());
-                try {
-                    // Update viewport using PHYSICAL dimensions
-                    stage.getViewport().update(backBufferWidth, backBufferHeight, true); // centerCamera=true
-
-                    System.out.println("    Viewport AFTER update: screen=" + stage.getViewport().getScreenWidth() + "x" + stage.getViewport().getScreenHeight() + ", world=" + stage.getViewport().getWorldWidth() + "x" + stage.getViewport().getWorldHeight());
-
-                    // Optional Camera Logging
-                    if (stage.getCamera() != null) {
-                        // ... (your existing camera logging) ...
-                        stage.getCamera().update(); // Ensure camera matrices are updated based on viewport
-                    } else {
-                        System.out.println("    Camera is NULL after viewport update!");
-                    }
-
-                } catch (Exception e) {
-                    System.err.println("    ERROR during viewport.update: " + e.getMessage());
-                    e.printStackTrace(); // Print stack trace for more detail
-                }
-            } else {
-                System.out.println("    Stage or Viewport is NULL during resize!");
-            }
-//            Gdx.app.log(TAG, "Resizing to: " + width + "x" + height + (stage != null ? "Stage is not null" : "Stage is null"));
-//            if (stage != null && stage.getViewport() != null) {
-//                stage.getViewport().update(width, height, true);
-//            }
-        }
-
-        @Override
-        public void dispose() {
-            Gdx.app.log(TAG, "dispose() called. Hash: " + this.hashCode());
-            Gdx.app.log(TAG, "Disposing...");
-            if (assetManager != null) {
-                assetManager.dispose(); // Disposes skin, atlas, textures loaded by it
-                assetManager = null;
-                skin = null; // Nullify reference
-                Gdx.app.log(TAG, "AssetManager disposed.");
-            } else if (skin != null) {
-                skin.dispose(); // Should not happen if AM was used, but safety check
-                skin = null;
-            }
-            if (stage != null) {
-                stage.dispose();
-                stage = null;
-            }
-
-            Gdx.app.log(TAG, "Chooser disposed.");
-        }
-    }
+			Gdx.app.log(TAG, "Chooser disposed.");
+		}
+	}
 }
