@@ -10,9 +10,9 @@ import static org.lwjgl.system.MemoryStack.*;
 
 public class VulkanDescriptorManager {
 
-    private static final int MAX_SETS_PER_POOL = 100; // Example value
-    private static final int MAX_UBOS_PER_POOL = 100;  // Example value
-    private static final int MAX_SAMPLERS_PER_POOL = 100; // Example value
+    private static final int MAX_SETS_PER_POOL = 1000;
+    private static final int MAX_UBOS_PER_POOL = 1000;
+    private static final int MAX_SAMPLERS_PER_POOL = 1000;
 
     private final VkDevice device;
     private long descriptorPool;
@@ -231,7 +231,30 @@ public class VulkanDescriptorManager {
         }
     }
 
-    // --- Cleanup ---
+    public void freeSets(List<Long> setHandles) {
+        if (setHandles == null || setHandles.isEmpty() || this.descriptorPool == VK_NULL_HANDLE) {
+            return;
+        }
+        try (MemoryStack stack = stackPush()) {
+            LongBuffer pSets = stack.mallocLong(setHandles.size());
+            for (int i = 0; i < setHandles.size(); i++) {
+                pSets.put(i, setHandles.get(i)); // Use indexed put
+            }
+            // No flip needed if using indexed put correctly
+
+            // Requires VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT on pool
+            int result = vkFreeDescriptorSets(device, descriptorPool, pSets);
+            if (result != VK_SUCCESS) {
+                System.err.println("VulkanDescriptorManager WARN: vkFreeDescriptorSets failed with result: " + result);
+            } else {
+                // Optional: Log success
+                System.out.println("VulkanDescriptorManager: Freed " + setHandles.size() + " descriptor sets.");
+            }
+        } catch (Exception e) {
+            System.err.println("VulkanDescriptorManager ERROR: Exception during vkFreeDescriptorSets: " + e.getMessage());
+            e.printStackTrace(); // Log stack trace for unexpected errors
+        }
+    }
 
     public void dispose() {
         // Destroy all cached layouts

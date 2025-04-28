@@ -19,6 +19,7 @@ package com.badlogic.gdx.backend.vulkan;
 import static com.badlogic.gdx.backend.vulkan.VkMemoryUtil.vkCheck;
 import static org.lwjgl.glfw.GLFWVulkan.glfwGetRequiredInstanceExtensions;
 import static org.lwjgl.system.MemoryStack.stackPush;
+import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.util.vma.Vma.vmaCreateAllocator;
 import static org.lwjgl.util.vma.Vma.vmaDestroyAllocator;
 import static org.lwjgl.vulkan.EXTDebugUtils.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
@@ -42,6 +43,7 @@ import java.io.File;
 import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 import com.badlogic.gdx.ApplicationLogger;
@@ -49,8 +51,11 @@ import com.badlogic.gdx.InputProcessor;
 import com.badlogic.gdx.backend.vulkan.audio.OpenALLwjgl3Audio;
 import com.badlogic.gdx.backend.vulkan.audio.VulkanAudio;
 
+import com.badlogic.gdx.graphics.Cursor;
+import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.utils.*;
 
+import org.lwjgl.BufferUtils;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWErrorCallback;
@@ -62,9 +67,9 @@ import org.lwjgl.util.vma.VmaVulkanFunctions;
 import org.lwjgl.vulkan.EXTDebugUtils;
 import org.lwjgl.vulkan.KHRSurface;
 import org.lwjgl.vulkan.VK10;
+import org.lwjgl.vulkan.VkInstance;
 import org.lwjgl.vulkan.VkPhysicalDevice;
 
-import com.badlogic.gdx.Application;
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Audio;
 import com.badlogic.gdx.Files;
@@ -107,44 +112,68 @@ import org.lwjgl.vulkan.VkSurfaceCapabilitiesKHR;
 import org.lwjgl.vulkan.VkSurfaceFormatKHR;
 
 public class VulkanApplication implements VulkanApplicationBase {
-    final String TAG = "    VulkanApplication";
-    final Array<VulkanWindow> windows = new Array<>();
-    private final long primaryWindowHandle;
-    private VulkanInstance vulkanInstance;
-    private volatile VulkanWindow currentWindow;
-    private VulkanAudio audio;
-    private final Files files;
-    private final Net net;
-    private final ObjectMap<String, Preferences> preferences = new ObjectMap<String, Preferences>();
-    private int logLevel = LOG_INFO;
-    private ApplicationLogger applicationLogger;
-    private volatile boolean running = true;
-    private final Array<Runnable> runnables = new Array<Runnable>();
-    private final Array<Runnable> executedRunnables = new Array<Runnable>();
-    private final Array<LifecycleListener> lifecycleListeners = new Array<>();
+    private static final String TAG = "VulkanApplication";
     private static GLFWErrorCallback errorCallback;
-
-    private VkPhysicalDevice physicalDevice; // You'll need logic to select this
-    private VulkanDevice vulkanDevice;
-
-    private long primarySurface = VK_NULL_HANDLE; // For the first window
-    private final VulkanClipboard clipboard;
-    private final VulkanApplicationConfiguration appConfig;
-    private long debugMessenger;
-    private boolean enableValidationLayers = true;
-
     private static final Set<String> DEVICE_EXTENSIONS = Collections.singleton(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     private static final List<String> DESIRED_VALIDATION_LAYERS = Collections.singletonList("VK_LAYER_KHRONOS_validation");
-    //private static final List<String> DESIRED_VALIDATION_LAYERS = Collections.singletonList(null);
 
-    private long vmaAllocator = VK_NULL_HANDLE;
+    private final Array<Runnable> runnables = new Array<>();
+    private final Array<Runnable> executedRunnables = new Array<>();
+    private final Array<LifecycleListener> lifecycleListeners = new Array<>();
+    private final Files files;
+    private final Net net;
+    private final ObjectMap<String, Preferences> preferences = new ObjectMap<>();
+    private final VulkanClipboard clipboard;
+    private final VulkanApplicationConfiguration appConfig;
+    private final Map<Long, Long> windowSurfaces = new ConcurrentHashMap<>();
+    private final ApplicationListener mainListener;
 
+    private final long primaryWindowHandle;
+    private final boolean enableValidationLayers = true;
+
+    private VulkanInstance vulkanInstance;
+    private VkPhysicalDevice physicalDevice; // You'll need logic to select this
+    private VulkanDevice vulkanDevice;
+    private VulkanAudio audio;
     private VkDebugUtilsMessengerCallbackEXT debugCallbackInstance = null;
-
     private Integer graphicsQueueFamily;
     private Integer presentQueueFamily;
+    private ApplicationLogger applicationLogger;
 
-    private final Map<Long, Long> windowSurfaces = new ConcurrentHashMap<>();
+    private long primarySurface = VK_NULL_HANDLE; // For the first window
+    private long debugMessenger;
+    private long vmaAllocator = VK_NULL_HANDLE;
+    private int logLevel = LOG_INFO;
+
+    private volatile boolean running = true;
+    private volatile VulkanWindow currentWindow;
+
+    //final Array<VulkanWindow> windows = new Array<>();
+    private long lastFrameTime;
+    private long frameCounterStart;
+    boolean resetDeltaTime;
+    float deltaTime;
+    private int frames;
+    int frameId;
+    int fps;
+
+    private volatile int backBufferWidth;
+    private volatile int backBufferHeight;
+    private volatile int logicalWidth;
+    private volatile int logicalHeight;
+    private int windowPosXBeforeFullscreen;
+    private int windowPosYBeforeFullscreen;
+    private int windowWidthBeforeFullscreen;
+    private int windowHeightBeforeFullscreen;
+    private Graphics.DisplayMode displayModeBeforeFullscreen = null;
+    private final Map<Long, VulkanGraphics> windowGraphicsMap = new HashMap<>();
+    private final IntBuffer tmpBuffer = org.lwjgl.BufferUtils.createIntBuffer(1);
+    private final IntBuffer tmpBuffer2 = BufferUtils.createIntBuffer(1);
+    private VulkanPipelineManager pipelineManager;
+    private VulkanDescriptorManager descriptorManager;
+    private Graphics.BufferFormat bufferFormat;
+    final Array<VulkanWindow> windows = new Array<>();
+    private SnapshotArray<VulkanWindow> currentWindowsSnapshot;// = new SnapshotArray<>(windows); // Initialize here
 
     static void initializeGlfw() {
         if (errorCallback == null) {
@@ -164,7 +193,8 @@ public class VulkanApplication implements VulkanApplicationBase {
         try (MemoryStack stack = MemoryStack.stackPush()) {
 
             List<String> requiredExtensions = getRequiredInstanceExtensions(stack);
-            List<String> validationLayers = getValidationLayers(); // Get based on config
+            Gdx.app.log(TAG, "Required Instance Extensions: " + requiredExtensions);
+            List<String> validationLayers = getValidationLayers();
 
             this.vulkanInstance = new VulkanInstance.Builder()
                     .setApplicationName(appConfig.title)
@@ -173,7 +203,7 @@ public class VulkanApplication implements VulkanApplicationBase {
                     .build();
             System.out.println("Vulkan Instance created.");
 
-            if (enableValidationLayers) { // Assuming this field exists
+            if (appConfig.enableValidationLayers) {
                 setupDebugMessenger(stack);
                 System.out.println("Debug Messenger created.");
             }
@@ -225,45 +255,86 @@ public class VulkanApplication implements VulkanApplicationBase {
     }
 
     public VulkanApplication(ApplicationListener listener, VulkanApplicationConfiguration appConfig) {
-        initializeGlfw(); // Assuming this initializes GLFW
-        setApplicationLogger(new VulkanApplicationLogger()); // Assuming this exists
-        this.appConfig = VulkanApplicationConfiguration.copy(appConfig); // Store a copy
+        initializeGlfw();
+        setApplicationLogger(new VulkanApplicationLogger());
+
+        this.mainListener = listener;
+        this.appConfig = VulkanApplicationConfiguration.copy(appConfig);
 
         if (this.appConfig.title == null) this.appConfig.title = listener.getClass().getSimpleName();
-        Gdx.app = this; // Set static Gdx.app reference
+        Gdx.app = this;
 
         long windowHandle = createGlfwWindow(this.appConfig, 0);
-        this.primaryWindowHandle = windowHandle; // Store primary handle
+        //long primaryHandle = createGlfwWindow(this.appConfig, 0);
+        this.primaryWindowHandle = windowHandle;
 
         initializeVulkanCore(windowHandle);
 
-        if (this.vulkanDevice == null || this.vulkanDevice.getRawDevice() == null || this.vulkanDevice.getRawDevice().address() == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("VulkanDevice was not initialized by initializeVulkanCore!");
-        }
+        if (this.vulkanDevice == null) throw new GdxRuntimeException("VulkanDevice is null after core init!");
+        this.pipelineManager = new VulkanPipelineManager(this.vulkanDevice);
+        this.descriptorManager = new VulkanDescriptorManager(this.vulkanDevice.getRawDevice());
+
+        //if (this.vulkanDevice == null || this.vulkanDevice.getRawDevice() == null || this.vulkanDevice.getRawDevice().address() == VK_NULL_HANDLE) {
+        //     throw new GdxRuntimeException("VulkanDevice was not initialized by initializeVulkanCore!");
+        //}
+
         if (this.vmaAllocator == VK_NULL_HANDLE) {
             throw new GdxRuntimeException("VMA Allocator was not initialized by initializeVulkanCore!");
         }
 
-        if (!this.appConfig.disableAudio) {
-            this.audio = createAudio(this.appConfig); // Assuming this exists
+        if (!appConfig.disableAudio) {
+            try {
+                this.audio = createAudio(appConfig);
+            } catch (Throwable t) {
+                log(TAG, "Couldn't initialize audio, disabling audio", t);
+                this.audio = new MockAudio();
+            }
         } else {
-            this.audio = new MockAudio(); // Assuming MockAudio exists
+            this.audio = new MockAudio();
         }
-        Gdx.audio = (Audio) this.audio; // Cast needed? Assign Gdx.audio
-        this.files = Gdx.files = createFiles(); // Assuming this exists
-        this.net = Gdx.net = new VulkanNet(this.appConfig); // Assuming VulkanNet exists
-        this.clipboard = new VulkanClipboard(); // Assuming VulkanClipboard exists
+        Gdx.audio = audio;
+        this.files = Gdx.files = createFiles();
+        this.net = Gdx.net = new VulkanNet(this.appConfig);
+        this.clipboard = new VulkanClipboard();
 
-        VulkanGraphics graphics = new VulkanGraphics(
+        VulkanGraphics primaryGraphics = new VulkanGraphics(
+                windowHandle,
+                this.appConfig, // Use the app config
+                this,           // Pass application reference
+                this.vulkanDevice,
+                this.vmaAllocator,
+                this.pipelineManager,   // Pass shared manager
+                this.descriptorManager  // Pass shared manager
+        );
+        // ---> End Create Primary Graphics Instance <---
+
+        // ---> Store Primary Graphics Instance in Map <---
+        windowGraphicsMap.put(windowHandle, primaryGraphics);
+        // ---> End Store Primary Graphics Instance <---
+
+        // ---> Set initial Gdx.graphics static field <---
+        Gdx.graphics = primaryGraphics;
+
+        /*VulkanGraphics graphics = new VulkanGraphics(
                 windowHandle,
                 this.appConfig,
                 this.vulkanDevice,
                 this.vmaAllocator
         );
-        Gdx.graphics = graphics;
+        Gdx.graphics = graphics;*/
 
-        VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, this.appConfig, this);
-        Gdx.app.log("VulkanAppInit", "VulkanWindow object created. Hash: " + window.hashCode());
+        //VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, this.appConfig, this);
+        //VulkanWindow window = new VulkanWindow(listener, lifecycleListeners, this.appConfig, this, this.primarySurface);
+
+        VulkanWindow window = new VulkanWindow(
+                listener,
+                lifecycleListeners,
+                this.appConfig, // Or a window-specific config based on appConfig?
+                this,
+                this.primarySurface, // Surface from initializeVulkanCore
+                primaryGraphics      // Pass the graphics instance
+        );
+        Gdx.app.log("VulkanAppInit", "Primary VulkanWindow object created. Hash: " + window.hashCode());
 
         Gdx.app.log("VulkanAppInit", "Calling createInput...");
 
@@ -286,9 +357,34 @@ public class VulkanApplication implements VulkanApplicationBase {
 
         window.setVisible(this.appConfig.initialVisible);
         windows.add(window);
-        this.currentWindow = window; // Set initial current window
 
-        try {
+        currentWindowsSnapshot = new SnapshotArray<>(windows);
+        Gdx.app.log(TAG, "CONSTRUCTOR: Initialized SnapshotArray. snapshot.size = " + currentWindowsSnapshot.size); // Add log
+
+        //this.currentWindow = window; // Set initial current window
+
+        // Initial ApplicationListener calls (moved here from newWindow)
+        /*try {
+            Gdx.app.log(TAG, "Calling primary listener.create()...");
+            listener.create();
+            Gdx.app.log(TAG, "Primary listener.create() completed.");
+
+            final int initialWidth = Gdx.graphics.getWidth();
+            final int initialHeight = Gdx.graphics.getHeight();
+            if (initialWidth > 0 && initialHeight > 0) {
+                Gdx.app.log(TAG, "Calling primary listener.resize() with initial dimensions: " + initialWidth + "x" + initialHeight);
+                listener.resize(initialWidth, initialHeight);
+                Gdx.app.log(TAG, "Initial primary listener.resize() completed.");
+            } else {
+                Gdx.app.error(TAG, "Initial dimensions from Gdx.graphics are invalid (" + initialWidth + "x" + initialHeight + "), skipping initial resize call!");
+            }
+        } catch (Throwable e) {
+            Gdx.app.error(TAG, "Exception occurred during initial ApplicationListener.resize()", e);
+            cleanup();
+            throw new GdxRuntimeException("Exception occurred during initial ApplicationListener.resize()", e);
+        }*/
+
+        /*try {
             Gdx.app.log(TAG, "Calling listener.create()...");
             listener.create(); // Calls VulkanTestChooser.create() -> setInputProcessor()
             Gdx.app.log(TAG, "listener.create() completed.");
@@ -312,8 +408,8 @@ public class VulkanApplication implements VulkanApplicationBase {
             cleanup();
             throw new GdxRuntimeException("Exception occurred during initial ApplicationListener.resize()", e);
         }
-
-        Gdx.app.log(TAG, "Starting main loop...");
+*/
+        Gdx.app.log(TAG, "Starting main loop..............................................................................................");
         runMainLoop();
     }
 
@@ -331,9 +427,16 @@ public class VulkanApplication implements VulkanApplicationBase {
         }
     }
 
-    public void loop() {
+    /*public void loop() {
         Array<VulkanWindow> closedWindows = new Array<>();
         long frameCount = 0;
+
+        if (lastFrameTime == -1) { // Check if first frame
+            lastFrameTime = System.nanoTime();
+        }
+        if (frameCounterStart == 0) { // Check if FPS counter needs init
+            frameCounterStart = System.nanoTime();
+        }
 
         if (windows.size > 0) {
             currentWindow = windows.first();
@@ -348,12 +451,33 @@ public class VulkanApplication implements VulkanApplicationBase {
 
         // Main loop continues as long as the app is running and has windows
         while (running && windows.size > 0) {
-            if (audio != null /* && audio instanceof ActualAudioType */) {
-                // ((ActualAudioType)audio).update(); // Call appropriate update method
+
+            long time = System.nanoTime();
+
+            if (resetDeltaTime) {
+                resetDeltaTime = false;
+                deltaTime = 0;
+            } else {
+                // Calculate delta time in seconds
+                deltaTime = (time - lastFrameTime) / 1000000000.0f;
+            }
+            lastFrameTime = time;
+
+            // FPS calculation
+            if (time - frameCounterStart >= 1000000000) {
+                fps = frames;
+                frames = 0;
+                frameCounterStart = time;
+            }
+            frames++;
+            frameId++;
+
+            if (audio != null) {
+                audio.update();
             }
 
             if (++frameCount % 120 == 0) {
-               Gdx.app.log(TAG,"loop() iteration: " + frameCount);
+                //Gdx.app.log(TAG,"loop() iteration: " + frameCount);
             }
 
             GLFW.glfwPollEvents();
@@ -361,6 +485,7 @@ public class VulkanApplication implements VulkanApplicationBase {
             VulkanInput currentInput = null;
             if (currentWindow != null) {
                 currentInput = currentWindow.getInput();
+                currentWindow.runOnce = true;
             }
 
             if (currentInput != null) {
@@ -441,7 +566,7 @@ public class VulkanApplication implements VulkanApplicationBase {
                         Gdx.app.error(TAG, "Exception occurred during window dispose", t);
                     }
 
-                    windows.removeValue(closedWindow, true); // Use identity comparison
+                    windows.removeValue(closedWindow, true);
 
                     if (currentWindow == closedWindow) {
                         currentWindow = null;
@@ -451,7 +576,7 @@ public class VulkanApplication implements VulkanApplicationBase {
                 if (currentWindow == null && windows.size > 0) {
                     currentWindow = windows.first();
                     if (currentWindow != null) {
-                        currentWindow.makeCurrent(); // Activate its context
+                        currentWindow.makeCurrent();
                     } else {
                         Gdx.app.error(TAG, "Window array has size > 0 but first element is null after closing window!");
                         // This indicates a potential issue with window removal or list management
@@ -472,7 +597,258 @@ public class VulkanApplication implements VulkanApplicationBase {
         } // End while loop
 
         Gdx.app.log(TAG, "loop() finished after " + frameCount + " iterations.");
-    }
+    }*/
+
+    /**
+     * Main application loop using direct, synchronized iteration as a workaround
+     * for the SnapshotArray issue.
+     */
+    public void loop() {
+        // Temporary list to store windows requesting closure during iteration
+        Array<VulkanWindow> closedWindows = new Array<>();
+        long frameCount = 0; // Local frame counter for the loop method duration
+
+        // --- Init timing (only needed on first entry) ---
+        if (lastFrameTime == -1) {
+            lastFrameTime = System.nanoTime();
+        }
+        if (frameCounterStart == 0) {
+            frameCounterStart = System.nanoTime();
+        }
+        // --- End Init timing ---
+
+        // --- Reset initial context ---
+        // Context will be set per-window inside the loop.
+        this.currentWindow = null;
+        Gdx.graphics = null;
+        Gdx.input = null;
+        // --- End Reset initial context ---
+
+
+        // --- Main loop ---
+        while (running && windows.size > 0) { // Loop while running and there are windows left
+            Gdx.app.log(TAG, "LOOP_THREAD: Loop running on thread: " + Thread.currentThread().getName());
+            frameCount++; // Increment local frame counter for logging/debugging
+
+            // --- Timing / FPS Calculation ---
+            long time = System.nanoTime();
+            deltaTime = (time - lastFrameTime) / 1000000000.0f;
+            lastFrameTime = time;
+            if (time - frameCounterStart >= 1000000000) {
+                fps = frames; // Store FPS
+                frames = 0;   // Reset frame counter for next second
+                frameCounterStart = time;
+            }
+            frames++; // Increment frame counter for FPS calculation
+            frameId++; // Increment global frame ID (if used elsewhere)
+            // --- End Timing / FPS ---
+
+            if (audio != null) {
+                audio.update();
+            }
+
+            // Poll OS events (mouse, keyboard, window events)
+            GLFW.glfwPollEvents();
+
+            // --- Process Runnables (posted via Gdx.app.postRunnable) ---
+            synchronized (runnables) {
+                if (!runnables.isEmpty()) { // Use isEmpty() for clarity
+                    // Copy to avoid issues if a runnable posts another runnable
+                    executedRunnables.addAll(runnables);
+                    runnables.clear();
+
+                    for (Runnable runnable : executedRunnables) {
+                        try {
+                            runnable.run();
+                        } catch (Throwable t) {
+                            Gdx.app.error(TAG, "Exception occurred in runnable execution", t);
+                        }
+                    }
+                    executedRunnables.clear(); // Clear after execution
+
+                    // If runnables were processed, assume something might need rendering
+                    synchronized(windows) { // Need sync to safely iterate 'windows' here
+                        for (VulkanWindow w : windows) {
+                            if (w != null) w.requestRendering(); // Request render for all windows
+                        }
+                    }
+                }
+            }
+            // --- End Process Runnables ---
+
+
+            boolean haveWindowsRendered = false; // Reset per frame
+            closedWindows.clear(); // Clear list of windows to close for this frame
+
+            // --- Window Iteration using Direct, Synchronized Iteration ---
+            Gdx.app.log(TAG, "LOOP: === Starting Direct Iteration ===");
+            synchronized (windows) { // Synchronize on the actual list being iterated
+                int currentSize = windows.size; // Get size *inside* sync block before loop
+                Gdx.app.log(TAG, "LOOP: Direct Iteration. Size = " + currentSize);
+
+                for (int i = 0; i < currentSize; i++) { // Iterate up to the size captured
+                    VulkanWindow window = windows.get(i); // Get directly from the list
+                    if (window == null) { // Safety check
+                        Gdx.app.error(TAG, "LOOP: DIRECT Encountered null window in list at index " + i);
+                        continue; // Skip this iteration
+                    }
+                    long currentHandle = window.getWindowHandle();
+                    Gdx.app.log(TAG, "LOOP: DIRECT Processing window iteration i=" + i + ", handle=" + currentHandle + ", hash=" + window.hashCode());
+
+                    // --- Set Context for THIS window ---
+                    VulkanGraphics windowGraphics = windowGraphicsMap.get(currentHandle); // Use handle for lookup
+                    VulkanInput windowInput = window.getInput();
+
+                    if (windowGraphics == null || windowInput == null) {
+                        Gdx.app.error(TAG, "Skipping update for window " + currentHandle + " due to missing Graphics (" + windowGraphics + ") or Input (" + windowInput + ") instance.");
+                        continue; // Skip this window if context is missing
+                    }
+
+                    // Set global references for Gdx.graphics/input
+                    Gdx.graphics = windowGraphics;
+                    Gdx.input = windowInput;
+                    this.currentWindow = window; // Update the application's tracked current window
+                    // --- End Set Context ---
+
+                    // --- Check if Rendering is Needed ---
+                    boolean continuous = windowGraphics.isContinuousRendering();
+                    boolean requested = window.needsRendering(); // Check flag before clearing
+                    window.clearNeedsRendering(); // Consume flag
+                    boolean iconified = window.isIconified();
+                    boolean needsRender = continuous || requested;
+                    Gdx.app.log(TAG, "LOOP: DIRECT Window " + currentHandle + " check: continuous=" + continuous + ", requested=" + requested + ", needsRender=" + needsRender + ", isIconified=" + iconified);
+                    // --- End Check Rendering ---
+
+                    // --- Update and Render Window (if needed) ---
+                    boolean windowRendered = false;
+                    if (needsRender && !iconified) {
+                        Gdx.app.log(TAG, "LOOP: DIRECT >>> Calling update() for window " + currentHandle + " <<<");
+                        synchronized (lifecycleListeners) { // Sync listener execution if needed
+                            try {
+                                windowRendered = window.update(); // Performs the actual render sequence
+                                haveWindowsRendered |= windowRendered; // Track if any window rendered
+                            } catch (Throwable t) {
+                                Gdx.app.error(TAG, "Exception occurred during window update/render for " + currentHandle, t);
+                                // Consider adding window to closedWindows here if update fails critically
+                                // closedWindows.add(window);
+                            }
+                        }
+                        Gdx.app.log(TAG, "LOOP: DIRECT <<< Returned from update() for window " + currentHandle + " >>>");
+                    } else {
+                        Gdx.app.log(TAG, "LOOP: DIRECT --- Skipping update() for window " + currentHandle + " --- (Reason: needsRender=" + needsRender + ", isIconified=" + iconified + ")");
+                    }
+                    // --- End Update/Render Window ---
+
+                    // --- Check if Window Should Close ---
+                    // This check happens after update/render for the frame
+                    if (window.shouldClose()) {
+                        if (!closedWindows.contains(window, true)) { // Avoid adding duplicates
+                            closedWindows.add(window);
+                        }
+                    }
+                    // --- End Check Close ---
+
+                } // --- End For Loop iterating through windows ---
+            } // --- End Synchronized Block for iteration ---
+            Gdx.app.log(TAG, "LOOP: === Finished Direct Iteration ===");
+
+
+            // --- Process Windows Marked for Closure ---
+            // This happens *after* the iteration loop is complete
+            if (!closedWindows.isEmpty()) { // Use isEmpty()
+                Gdx.app.log(TAG, "Processing " + closedWindows.size + " windows marked for closure.");
+                synchronized (windows) { // Synchronize modifications to the main list and map
+                    boolean wasLastWindowClosed = (windows.size == closedWindows.size); // Check if all existing windows are closing
+
+                    for (VulkanWindow closedWindow : closedWindows) {
+                        long closedHandle = closedWindow.getWindowHandle();
+                        Gdx.app.log(TAG, "Closing window with handle: " + closedHandle);
+                        try {
+                            // Remove from main list and map BEFORE disposing
+                            boolean removed = windows.removeValue(closedWindow, true); // Use identity comparison
+                            windowGraphicsMap.remove(closedHandle);
+                            if (!removed) {
+                                Gdx.app.error(TAG, "Attempted to remove window " + closedHandle + " but it wasn't found in 'windows' list during closure.");
+                            }
+
+                            // Now dispose the window's resources
+                            closedWindow.dispose();
+                            Gdx.app.log(TAG, "Disposed window with handle: " + closedHandle);
+
+                        } catch (Throwable t) {
+                            Gdx.app.error(TAG, "Exception occurred during window dispose for handle " + closedHandle, t);
+                        }
+                    } // End for each closed window
+
+                    // Check if the main list is now empty AFTER removals
+                    if (windows.isEmpty() && !lifecycleListeners.isEmpty()) {
+                        Gdx.app.log(TAG, "Last window closed, disposing lifecycle listeners.");
+                        // Dispose global lifecycle listeners
+                        for (int j = lifecycleListeners.size - 1; j >= 0; j--) {
+                            LifecycleListener l = lifecycleListeners.get(j);
+                            try {
+                                l.pause();
+                                l.dispose();
+                            } catch (Throwable t) {
+                                Gdx.app.error(TAG, "Exception during lifecycle listener dispose", t);
+                            }
+                        }
+                        lifecycleListeners.clear();
+                    }
+
+                } // End synchronized block for modification
+
+
+                // --- Reset currentWindow reference if needed ---
+                // Check if the application's tracked currentWindow is still in the main list
+                boolean currentWindowStillValid = false;
+                synchronized(windows){ // Need sync to safely check contains
+                    currentWindowStillValid = windows.contains(this.currentWindow, true);
+                }
+
+                if (!currentWindowStillValid) {
+                    synchronized(windows) { // Need sync to safely access first() / check size
+                        this.currentWindow = !windows.isEmpty() ? windows.first() : null;
+                    }
+                    // Set context for the new current window if one exists
+                    if (this.currentWindow != null) {
+                        VulkanGraphics newCurrentGraphics = windowGraphicsMap.get(this.currentWindow.getWindowHandle());
+                        VulkanInput newCurrentInput = this.currentWindow.getInput();
+                        Gdx.graphics = newCurrentGraphics; // Assign even if null (map lookup could fail)
+                        Gdx.input = newCurrentInput; // Assign even if null
+                        Gdx.app.log(TAG, "Processing closed windows: Reset current window to handle " + this.currentWindow.getWindowHandle()
+                                + " Gdx.graphics=" + (Gdx.graphics == null ? "null" : Gdx.graphics.hashCode())
+                                + " Gdx.input=" + (Gdx.input == null ? "null" : Gdx.input.hashCode()) );
+                    } else {
+                        // No windows left
+                        Gdx.graphics = null;
+                        Gdx.input = null;
+                        Gdx.app.log(TAG, "Processing closed windows: No windows left, context nulled.");
+                    }
+                }
+                // --- End Reset currentWindow ---
+            }
+            // --- End Process Closed Windows ---
+
+
+            // --- Sleep if Idle ---
+            // Only sleep if windows exist but none rendered this frame
+            if (!haveWindowsRendered && !windows.isEmpty()) {
+                try {
+                    // Ensure sleep time is at least 1ms to avoid busy-waiting
+                    Thread.sleep(Math.max(1, 1000 / appConfig.idleFPS));
+                } catch (InterruptedException e) {
+                    // Restore interrupt status if needed, but otherwise ignore
+                    Thread.currentThread().interrupt();
+                }
+            }
+            // --- End Sleep if Idle ---
+
+        } // --- End main while loop ---
+
+        // Log loop exit
+        Gdx.app.log(TAG, "loop() finished. Frame count: " + frameCount);
+    } // --- End loop() method ---
 
     protected void cleanupWindows() {
         synchronized (lifecycleListeners) {
@@ -489,25 +865,47 @@ public class VulkanApplication implements VulkanApplicationBase {
 
     protected void cleanup() {
 
-        // Use System.out/err during cleanup as Gdx.app might become null unexpectedly
-        Gdx.app.log(TAG, " Starting cleanup...");
-
-        // 1. Dispose Listener FIRST (Prevents listener code running during shutdown)
-        if (currentWindow != null && currentWindow.getListener() != null) {
-            try {
-                currentWindow.getListener().pause();
-                currentWindow.getListener().dispose();
-                Gdx.app.log(TAG, "ApplicationListener disposed.");
-            } catch (Throwable t) {
-                System.err.println("[" + TAG + "] ERROR: Exception during listener dispose.");
-                t.printStackTrace();
-            }
+        Gdx.app.log(TAG, "Cleanup check: currentWindow hash=" + (currentWindow == null ? "null" : currentWindow.hashCode()));
+        if (currentWindow != null) {
+            Gdx.app.log(TAG, "Cleanup check: currentWindow.getListener() is null? " + (currentWindow.getListener() == null));
         }
 
-        cleanupWindows(); // Calls dispose() on each VulkanWindow
-        Gdx.app.log(TAG, "Window cleanup finished.");
+        Gdx.app.log(TAG, "Cleanup check: mainListener is null? " + (mainListener == null)); // Log check
+        if (mainListener != null) { // Check the stored field
+            Gdx.app.log(TAG, "Cleanup: Attempting mainListener pause/dispose...");
+            try {
+                Gdx.app.log(TAG, "Cleanup: Calling mainListener.pause()...");
+                mainListener.pause(); // Call pause on the stored listener
+                Gdx.app.log(TAG, "Cleanup: mainListener.pause() finished.");
 
-        if (Gdx.graphics instanceof VulkanGraphics) {
+                Gdx.app.log(TAG, "Cleanup: Calling mainListener.dispose()...");
+                mainListener.dispose(); // Call dispose on the stored listener
+                Gdx.app.log(TAG, "Cleanup: mainListener.dispose() finished.");
+
+                Gdx.app.log(TAG, "ApplicationListener disposed.");
+            } catch (Throwable t) {
+                Gdx.app.error(TAG, "Cleanup: Exception during mainListener pause/dispose!", t);
+            }
+        } else {
+            Gdx.app.log(TAG, "Cleanup: Skipping mainListener pause/dispose - mainListener field was null.");
+        }
+
+        Gdx.app.log(TAG, "Cleanup: Before cleanupWindows()...");
+        cleanupWindows();
+        Gdx.app.log(TAG, "Cleanup: After cleanupWindows()...");
+
+        if (pipelineManager != null) {
+            pipelineManager.dispose();
+            pipelineManager = null;
+            Gdx.app.log(TAG, "PipelineManager disposed.");
+        }
+        if (descriptorManager != null) {
+            descriptorManager.dispose();
+            descriptorManager = null;
+            Gdx.app.log(TAG, "DescriptorManager disposed.");
+        }
+
+        /*if (Gdx.graphics instanceof VulkanGraphics) {
             System.out.println("[" + TAG + "] Disposing VulkanGraphics...");
             try {
                 ((VulkanGraphics) Gdx.graphics).dispose();
@@ -518,9 +916,8 @@ public class VulkanApplication implements VulkanApplicationBase {
             }
         } else if (Gdx.graphics != null) {
             Gdx.app.error(TAG, "WARNING: Gdx.graphics was not VulkanGraphics?");
-        }
+        }*/
 
-        // 4. Dispose Audio (Can happen after graphics)
         if (audio != null) {
             audio.dispose();
             Gdx.app.error(TAG, "Audio disposed.");
@@ -550,23 +947,23 @@ public class VulkanApplication implements VulkanApplicationBase {
             debugCallbackInstance = null;
         }
 
-        if (primarySurface != VK_NULL_HANDLE && vulkanInstance != null) {
+        /*if (primarySurface != VK_NULL_HANDLE && vulkanInstance != null) {
             KHRSurface.vkDestroySurfaceKHR(vulkanInstance.getRawInstance(), primarySurface, null);
             System.out.println("[" + TAG + "] Primary surface destroyed.");
             primarySurface = VK_NULL_HANDLE;
         } else if (primarySurface != VK_NULL_HANDLE) {
             System.err.println("[" + TAG + "] ERROR: Cannot destroy surface - Vulkan instance already null!");
-        }
+        }*/
 
         if (vulkanInstance != null) {
-            vulkanInstance.cleanup(); // Calls vkDestroyInstance
+            vulkanInstance.cleanup();
             System.out.println("[" + TAG + "] Vulkan instance cleaned up.");
             vulkanInstance = null;
         }
 
         if (errorCallback != null) {
             errorCallback.free();
-            errorCallback = null; // Set static field to null
+            errorCallback = null;
             System.out.println("[" + TAG + "] GLFW error callback freed.");
         }
 
@@ -764,7 +1161,7 @@ public class VulkanApplication implements VulkanApplicationBase {
     /**
      * @return The VulkanDevice wrapper (contains logical device, queues, pool).
      */
-    public VulkanDevice getVulkanDevice() { // Renamed from getVkDevice for clarity
+    public VulkanDevice getVulkanDevice() {
         if (vulkanDevice == null) {
             throw new IllegalStateException("Vulkan Logical Device not created.");
         }
@@ -852,7 +1249,46 @@ public class VulkanApplication implements VulkanApplicationBase {
             throw new GdxRuntimeException("Failed to create GLFW window for newWindow");
         }
 
-        VulkanWindow newWindow = new VulkanWindow(listener, lifecycleListeners, config, this);
+        long newSurfaceHandle = VK_NULL_HANDLE;
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            VkInstance instance = this.vulkanInstance.getRawInstance(); // Get instance
+            LongBuffer pSurface = stack.mallocLong(1);
+            int err = GLFWVulkan.glfwCreateWindowSurface(instance, newWindowHandle, null, pSurface);
+            vkCheck(err, "Failed to create window surface for new window");
+            newSurfaceHandle = pSurface.get(0);
+            Gdx.app.log(TAG, "Created surface " + newSurfaceHandle + " for new window " + newWindowHandle);
+        } catch (Exception e) {
+            GLFW.glfwDestroyWindow(newWindowHandle); // Clean up GLFW window if surface fails
+            throw new GdxRuntimeException("Failed to create Vulkan surface for new window", e);
+        }
+
+        VulkanGraphics newGraphicsInstance = new VulkanGraphics(
+                newWindowHandle,    // Use the NEW handle
+                this.appConfig,     // Base config, window config might override specifics later? Review needed.
+                this,               // Pass application reference
+                this.vulkanDevice,
+                this.vmaAllocator,
+                this.pipelineManager,   // Pass SHARED manager
+                this.descriptorManager  // Pass SHARED manager
+        );
+        Gdx.app.log(TAG, "Created new VulkanGraphics instance for window " + newWindowHandle);
+
+        Gdx.app.log(TAG, "CREATE_WINDOW: Added window handle " + newWindowHandle + ". Collection size now: " + windows.size);
+// Also verify it's added to windowGraphicsMap, etc.
+        windowGraphicsMap.put(newWindowHandle, newGraphicsInstance);
+        Gdx.app.log(TAG, "CREATE_WINDOW: Added graphics for handle " + newWindowHandle + " to map. Map size now: " + windowGraphicsMap.size());
+        Gdx.app.log(TAG, "Stored new VulkanGraphics instance in map.");
+
+        VulkanWindow newWindow = new VulkanWindow(
+                listener,
+                lifecycleListeners,
+                config,             // Use the specific config passed to newWindow
+                this,
+                newSurfaceHandle,
+                newGraphicsInstance // Pass the NEW graphics instance
+        );
+        Gdx.app.log(TAG, "New VulkanWindow object created. Hash: " + newWindow.hashCode());
+        //VulkanWindow newWindow = new VulkanWindow(listener, lifecycleListeners, config, this, newSurfaceHandle);
 
         VulkanInput newInput = new DefaultVulkanInput(newWindow); // Create input FOR THIS NEW WINDOW
         newWindow.setInputHandler(newInput); // Associate it using the setter method
@@ -874,16 +1310,48 @@ public class VulkanApplication implements VulkanApplicationBase {
         } catch (Throwable t) {
             Gdx.app.error(TAG, "Failed to create new window's resources", t);
             // Clean up the GLFW window handle if creation failed mid-way
+            if (newSurfaceHandle != VK_NULL_HANDLE && this.vulkanInstance != null) {
+                KHRSurface.vkDestroySurfaceKHR(this.vulkanInstance.getRawInstance(), newSurfaceHandle, null);
+            }
             GLFW.glfwDestroyWindow(newWindowHandle);
-            // Rethrow or handle appropriately
+
             throw new GdxRuntimeException("Failed to create new window's resources", t);
         }
 
         newWindow.setVisible(config.initialVisible);
-
-        synchronized (windows) { // Or use a concurrent collection
+        Gdx.app.log(TAG, "NEW_WINDOW_THREAD: Adding window on thread: " + Thread.currentThread().getName());
+        synchronized (windows) {
+            long newHandle = newWindow.getWindowHandle();
+            Gdx.app.log(TAG, "CREATE_WINDOW: About to add window handle " + newHandle + " to main window collection.");
             windows.add(newWindow);
+            Gdx.app.log(TAG, "CREATE_WINDOW: Added window handle " + newHandle + ". Collection size now: " + windows.size);
+
         }
+
+        /*try {
+            Gdx.app.log(TAG, "Calling listener.create()...");
+            listener.create(); // Calls VulkanTestChooser.create() -> setInputProcessor()
+            Gdx.app.log(TAG, "listener.create() completed.");
+        } catch (Throwable e) {
+            cleanup();
+            throw new GdxRuntimeException("Exception occurred in ApplicationListener.create()", e);
+        }
+
+        try {
+            final int initialWidth = Gdx.graphics.getWidth();
+            final int initialHeight = Gdx.graphics.getHeight();
+            if (initialWidth > 0 && initialHeight > 0) {
+                Gdx.app.log(TAG, "Calling listener.resize() with initial dimensions: " + initialWidth + "x" + initialHeight);
+                listener.resize(initialWidth, initialHeight);
+                Gdx.app.log(TAG, "Initial listener.resize() completed.");
+            } else {
+                Gdx.app.error(TAG, "Initial dimensions from Gdx.graphics are invalid (" + initialWidth + "x" + initialHeight + "), skipping initial resize call!");
+            }
+        } catch (Throwable e) {
+            Gdx.app.error(TAG, "Exception occurred during initial ApplicationListener.resize()", e);
+            cleanup();
+            throw new GdxRuntimeException("Exception occurred during initial ApplicationListener.resize()", e);
+        }*/
 
         Gdx.app.log(TAG, "newWindow finished successfully.");
         return newWindow;
@@ -909,7 +1377,7 @@ public class VulkanApplication implements VulkanApplicationBase {
 
         System.out.println("Vulkan-compatible window created. Window handle: " + window);
 
-        GLFW.glfwSetWindowPos(window, 100, 100); // Set position explicitly
+        GLFW.glfwSetWindowPos(window, 100, 100);
         System.out.println("Window position explicitly set to 100, 100.");
 
         return window;
@@ -927,9 +1395,9 @@ public class VulkanApplication implements VulkanApplicationBase {
         // Add debug utils extension if validation layers are enabled
         if (enableValidationLayers) {
             // Make sure the list is modifiable if needed
-            if (extensions == Collections.EMPTY_LIST) { // Check if the list from helper could be immutable empty
+            if (extensions == Collections.EMPTY_LIST) {
                 extensions = new ArrayList<>();
-            } else if (extensions.getClass() != ArrayList.class) { // Ensure it's a modifiable list type
+            } else if (extensions.getClass() != ArrayList.class) {
                 extensions = new ArrayList<>(extensions);
             }
             extensions.add(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
@@ -948,7 +1416,7 @@ public class VulkanApplication implements VulkanApplicationBase {
     private List<String> getValidationLayers() {
         if (!enableValidationLayers) {
             System.out.println("Validation layers disabled.");
-            return Collections.emptyList(); // Return empty list, not null
+            return Collections.emptyList();
         }
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -1003,7 +1471,7 @@ public class VulkanApplication implements VulkanApplicationBase {
                 @Override
                 public int invoke(int messageSeverity, int messageTypes, long pCallbackData, long pUserData) {
                     VkDebugUtilsMessengerCallbackDataEXT callbackData = VkDebugUtilsMessengerCallbackDataEXT.create(pCallbackData);
-                    // ... your logging logic ...
+
                     String message = "VULKAN DEBUG: " + callbackData.pMessageString();
                     if (Gdx.app != null) Gdx.app.error("VulkanDebug", message);
                     else System.err.println(message);
@@ -1017,24 +1485,19 @@ public class VulkanApplication implements VulkanApplicationBase {
 
         VkDebugUtilsMessengerCreateInfoEXT createInfo = VkDebugUtilsMessengerCreateInfoEXT.calloc(stack)
                 .sType$Default()
-                // ---> ADD or CORRECT these lines <---
                 .messageSeverity( // Specify which message severities to receive
-                        //VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | // Optional: very detailed output
                         VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
                                 VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) // Must be non-zero!
                 .messageType( // Specify which message types to receive
                         VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
                                 VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                                 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT) // Must be non-zero!
-                // ---------------------------------
                 .pfnUserCallback(this.debugCallbackInstance)
                 .pUserData(0);
 
-
-        // ... rest of the method ...
         LongBuffer pDebugMessenger = stack.mallocLong(1);
         int err = EXTDebugUtils.vkCreateDebugUtilsMessengerEXT(vulkanInstance.getRawInstance(), createInfo, null, pDebugMessenger);
-        // ... handle error or success ...
+
         if (err == VK_SUCCESS) {
             this.debugMessenger = pDebugMessenger.get(0);
             if (Gdx.app != null)
@@ -1076,7 +1539,6 @@ public class VulkanApplication implements VulkanApplicationBase {
                 if (properties.deviceType() == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
                     break; // Found a discrete GPU, stop searching
                 }
-                // Keep searching in case a discrete GPU comes later
             }
         }
 
@@ -1161,7 +1623,7 @@ public class VulkanApplication implements VulkanApplicationBase {
     }
 
     public void createVmaAllocator(VulkanInstance vkInstanceWrapper, VulkanDevice vulkanDeviceWrapper) {
-        Gdx.app.log( TAG, "Creating VMA Allocator...");
+        Gdx.app.log(TAG, "Creating VMA Allocator...");
         try (MemoryStack stack = stackPush()) {
             // 1. Set up Vulkan functions for VMA (LWJGL helper)
             VmaVulkanFunctions vulkanFunctions = VmaVulkanFunctions.calloc(stack)
@@ -1185,17 +1647,17 @@ public class VulkanApplication implements VulkanApplicationBase {
             if (this.vmaAllocator == VK_NULL_HANDLE) {
                 throw new GdxRuntimeException("VMA Allocator creation succeeded according to result code, but handle is NULL!");
             }
-            Gdx.app.log( TAG, "VMA Allocator created successfully. Handle: " + this.vmaAllocator);
+            Gdx.app.log(TAG, "VMA Allocator created successfully. Handle: " + this.vmaAllocator);
         }
     }
 
     // Ensure you have a corresponding destroy method called before device/instance destruction
     public void destroyVmaAllocator() {
         if (vmaAllocator != VK_NULL_HANDLE) {
-            Gdx.app.log( TAG, "Destroying VMA Allocator...");
+            Gdx.app.log(TAG, "Destroying VMA Allocator...");
             vmaDestroyAllocator(vmaAllocator);
             vmaAllocator = VK_NULL_HANDLE;
-            Gdx.app.log( TAG, "VMA Allocator destroyed.");
+            Gdx.app.log(TAG, "VMA Allocator destroyed.");
         }
     }
 
@@ -1245,6 +1707,81 @@ public class VulkanApplication implements VulkanApplicationBase {
         return this.currentWindow;
     }
 
+    public Graphics.Monitor getCurrentWindowMonitor() {
+        if (currentWindow == null) {
+            Gdx.app.error(TAG, "Cannot get current window monitor, no current window. Falling back to primary.");
+            return getPrimaryMonitor();
+        }
+        // Implement logic to find monitor based on currentWindow's position/size
+        // This might involve calling getMonitors() and calculating overlap.
+        // Example (needs refinement and Monitor class details):
+        Graphics.Monitor[] monitors = getMonitors();
+        if (monitors.length == 0) return null; // Should not happen if primary exists
+        if (monitors.length == 1) return monitors[0];
+
+        int winX = currentWindow.getPositionX();
+        int winY = currentWindow.getPositionY();
+        int winW = currentWindow.getLogicalWidth(); // Use logical for overlap calc?
+        int winH = currentWindow.getLogicalHeight();
+        int bestOverlap = -1;
+        Graphics.Monitor bestMonitor = monitors[0];
+
+        for (Graphics.Monitor monitor : monitors) {
+            Graphics.DisplayMode mode = getDisplayMode(monitor); // Assumes this works
+            int overlap = Math.max(0, Math.min(winX + winW, monitor.virtualX + mode.width) - Math.max(winX, monitor.virtualX))
+                    * Math.max(0, Math.min(winY + winH, monitor.virtualY + mode.height) - Math.max(winY, monitor.virtualY));
+            if (overlap > bestOverlap) {
+                bestOverlap = overlap;
+                bestMonitor = monitor;
+            }
+        }
+        return bestMonitor;
+    }
+
+    public Cursor newCursor(Pixmap pixmap, int xHotspot, int yHotspot) {
+        if (currentWindow == null) {
+            Gdx.app.error(TAG, "Cannot create cursor, no current window.");
+            return null; // Or throw?
+        }
+        // Assumes VulkanCursor constructor takes the VulkanWindow instance
+        return new VulkanCursor(currentWindow, pixmap, xHotspot, yHotspot);
+    }
+
+    public void setCursor(Cursor cursor) {
+        if (currentWindow == null) {
+            Gdx.app.error(TAG, "Cannot set cursor, no current window.");
+            return;
+        }
+        if (cursor == null) {
+            // Restore default cursor? Or is this handled by VulkanCursor?
+            GLFW.glfwSetCursor(currentWindow.getWindowHandle(), NULL);
+            return;
+        }
+        if (!(cursor instanceof VulkanCursor)) {
+            Gdx.app.error(TAG, "Invalid cursor type provided: " + cursor.getClass().getName());
+            return;
+        }
+        // Option 1: Direct GLFW call
+        // GLFW.glfwSetCursor(currentWindow.getWindowHandle(), ((VulkanCursor) cursor).glfwCursor);
+        // Option 2: Delegate to window
+        currentWindow.setCursorInternal(cursor);
+    }
+
+    public void setSystemCursor(Cursor.SystemCursor systemCursor) {
+        if (currentWindow == null) {
+            Gdx.app.error(TAG, "Cannot set system cursor, no current window.");
+            return;
+        }
+        // Option 1: Direct static call
+        // VulkanCursor.setSystemCursor(currentWindow.getWindowHandle(), systemCursor);
+        // Option 2: Delegate to window
+        currentWindow.setSystemCursorInternal(systemCursor);
+    }
+
+    public Graphics.DisplayMode[] getDisplayModes(Graphics.Monitor monitor) {
+        return VulkanApplicationConfiguration.getDisplayModes(monitor);
+    }
+
     public static class QueueFamilyIndices {
         public Integer graphicsFamily;
         public Integer presentFamily; // Queue family for presenting to the surface
@@ -1259,4 +1796,257 @@ public class VulkanApplication implements VulkanApplicationBase {
         VkSurfaceFormatKHR.Buffer formats;
         IntBuffer presentModes;
     }
+
+    public boolean isFullscreen() {
+        return GLFW.glfwGetWindowMonitor(primaryWindowHandle) != 0;
+    }
+
+    public Graphics.DisplayMode getDisplayMode() {
+        return VulkanApplicationConfiguration.getDisplayMode(getMonitor());
+    }
+
+    public Graphics.DisplayMode getDisplayMode(Graphics.Monitor monitor) {
+        return VulkanApplicationConfiguration.getDisplayMode(monitor);
+    }
+
+    public Graphics.Monitor getPrimaryMonitor() {
+        return VulkanApplicationConfiguration.getPrimaryMonitor();
+    }
+
+    /**
+     * Helper method to convert a GLFW monitor handle to a VulkanMonitor object.
+     * (Could also reside in VulkanApplicationConfiguration).
+     *
+     * @param glfwMonitor Handle to the GLFW monitor.
+     * @return A VulkanMonitor instance.
+     */
+    public static VulkanGraphics.VulkanMonitor toVulkanMonitor(long glfwMonitor) { // Ensure public static
+        if (glfwMonitor == NULL) {
+            throw new GdxRuntimeException("Cannot create VulkanMonitor from NULL GLFW handle.");
+        }
+
+        IntBuffer x = BufferUtils.createIntBuffer(1); // Or use stack allocation if in instance method
+        IntBuffer y = BufferUtils.createIntBuffer(1);
+        GLFW.glfwGetMonitorPos(glfwMonitor, x, y);
+        String name = GLFW.glfwGetMonitorName(glfwMonitor);
+        if (name == null) name = "Unknown";
+        return new VulkanGraphics.VulkanMonitor(glfwMonitor, x.get(0), y.get(0), name);
+    }
+
+    public Graphics.Monitor getMonitor() {
+        // Find monitor the primary window is on
+        Graphics.Monitor[] monitors = getMonitors();
+        if (monitors.length == 0) return getPrimaryMonitor(); // Fallback
+        Graphics.Monitor result = monitors[0];
+
+        if (monitors.length == 1) return result;
+
+        // Get primary window position and size
+        GLFW.glfwGetWindowPos(primaryWindowHandle, tmpBuffer, tmpBuffer2);
+        int windowX = tmpBuffer.get(0);
+        int windowY = tmpBuffer2.get(0);
+        GLFW.glfwGetWindowSize(primaryWindowHandle, tmpBuffer, tmpBuffer2);
+        int windowWidth = tmpBuffer.get(0);
+        int windowHeight = tmpBuffer2.get(0);
+
+        int overlap;
+        int bestOverlap = 0;
+        for (Graphics.Monitor monitor : monitors) {
+            Graphics.DisplayMode mode = getDisplayMode(monitor); // Use helper
+            overlap = Math.max(0, Math.min(windowX + windowWidth, monitor.virtualX + mode.width) - Math.max(windowX, monitor.virtualX))
+                    * Math.max(0, Math.min(windowY + windowHeight, monitor.virtualY + mode.height) - Math.max(windowY, monitor.virtualY));
+            if (bestOverlap < overlap) {
+                bestOverlap = overlap;
+                result = monitor;
+            }
+        }
+        return result;
+    }
+
+    public Graphics.Monitor[] getMonitors() {
+        return VulkanApplicationConfiguration.getMonitors();
+        /*PointerBuffer glfwMonitors = GLFW.glfwGetMonitors();
+        if (glfwMonitors == null) return new Graphics.Monitor[0];
+        Graphics.Monitor[] monitors = new Graphics.Monitor[glfwMonitors.limit()];
+        for (int i = 0; i < glfwMonitors.limit(); i++) {
+            monitors[i] = toVulkanMonitor(glfwMonitors.get(i)); // Use helper
+        }
+        return monitors;*/
+    }
+
+    private void storeCurrentWindowPositionAndDisplayMode() {
+        VulkanWindow primary = getPrimaryWindow();
+        if (primary != null) {
+            // Use the window's getters for current state
+            windowPosXBeforeFullscreen = primary.getPositionX();
+            windowPosYBeforeFullscreen = primary.getPositionY();
+            windowWidthBeforeFullscreen = primary.getLogicalWidth();
+            windowHeightBeforeFullscreen = primary.getLogicalHeight();
+        } else {
+            // Fallback using potentially stale graphics fields
+            windowPosXBeforeFullscreen = 0; // Or get from primaryWindowHandle? Less safe if window moved.
+            windowPosYBeforeFullscreen = 0;
+            windowWidthBeforeFullscreen = logicalWidth;
+            windowHeightBeforeFullscreen = logicalHeight;
+            Gdx.app.error(TAG, "Could not get primary window to store position/size before fullscreen.");
+        }
+        // Get display mode of the monitor the primary window is currently on
+        displayModeBeforeFullscreen = getDisplayMode(getMonitor());
+    }
+
+    public boolean setFullscreenMode(Graphics.DisplayMode displayMode) {
+        VulkanWindow primaryWindow = getPrimaryWindow();
+        if (primaryWindow == null || primaryWindow.getInput() == null) {
+            Gdx.app.error(TAG, "Cannot set fullscreen mode, primary window or its input is null");
+            return false;
+        }
+        primaryWindow.getInput().resetPollingStates(); // Reset input state
+
+        // Ensure displayMode is the correct type
+        if (!(displayMode instanceof VulkanGraphics.VulkanDisplayMode)) {
+            Gdx.app.error(TAG, "Invalid DisplayMode type provided to setFullscreenMode.");
+            return false;
+        }
+        VulkanGraphics.VulkanDisplayMode newMode = (VulkanGraphics.VulkanDisplayMode) displayMode;
+
+        if (isFullscreen()) { // Check based on primary window handle
+            // Already fullscreen, potentially change mode or monitor
+            VulkanGraphics.VulkanDisplayMode currentMode = (VulkanGraphics.VulkanDisplayMode) getDisplayMode(getMonitor()); // Get current mode for primary monitor
+            if (currentMode.monitorHandle == newMode.monitorHandle && currentMode.refreshRate == newMode.refreshRate) {
+                // Same monitor and refresh rate, just change resolution
+                GLFW.glfwSetWindowSize(primaryWindowHandle, newMode.width, newMode.height);
+            } else {
+                // Different monitor or refresh rate, need to use glfwSetWindowMonitor
+                GLFW.glfwSetWindowMonitor(primaryWindowHandle, newMode.monitorHandle, 0, 0, newMode.width, newMode.height, newMode.refreshRate);
+            }
+        } else {
+            // Switching from windowed to fullscreen
+            storeCurrentWindowPositionAndDisplayMode(); // Store state BEFORE changing
+            GLFW.glfwSetWindowMonitor(primaryWindowHandle, newMode.monitorHandle, 0, 0, newMode.width, newMode.height, newMode.refreshRate);
+        }
+
+        updateFramebufferInfo();
+
+        return true;
+    }
+
+    /**
+     * Updates stored size info based on the primary window handle.
+     */
+    void updateFramebufferInfo() {
+        int initialBackBufferWidth;
+        int initialBackBufferHeight;
+        int initialLogicalWidth;
+        int initialLogicalHeight;
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            IntBuffer pWidth = stack.mallocInt(1);
+            IntBuffer pHeight = stack.mallocInt(1);
+
+            // Query initial physical framebuffer size (Backbuffer)
+            GLFW.glfwGetFramebufferSize(this.primaryWindowHandle, pWidth, pHeight);
+            initialBackBufferWidth = pWidth.get(0);
+            initialBackBufferHeight = pHeight.get(0);
+
+            // Reset buffers for next query
+            pWidth.clear();
+            pHeight.clear();
+
+            // Query initial logical window size
+            GLFW.glfwGetWindowSize(this.primaryWindowHandle, pWidth, pHeight);
+            initialLogicalWidth = pWidth.get(0);
+            initialLogicalHeight = pHeight.get(0);
+        } // MemoryStack automatically frees pWidth, pHeight
+
+        // Call the NEW updateFramebufferInfo method with the fetched dimensions
+        updateFramebufferInfo(initialBackBufferWidth, initialBackBufferHeight, initialLogicalWidth, initialLogicalHeight);
+
+    }
+
+    /**
+     * Updates the cached graphics dimensions.
+     * Call this after a resize or mode change when the new dimensions are known.
+     *
+     * @param backBufferWidth The new physical width of the backbuffer.
+     * @param backBufferHeight The new physical height of the backbuffer.
+     * @param logicalWidth The new logical width of the window's client area.
+     * @param logicalHeight The new logical height of the window's client area.
+     */
+    public void updateFramebufferInfo(int backBufferWidth, int backBufferHeight, int logicalWidth, int logicalHeight) {
+        // Log the update attempt with the values *received*
+        Gdx.app.log(TAG, "updateFramebufferInfo called with: BB=" + backBufferWidth + " x " + backBufferHeight + ", Logical=" + logicalWidth + " x " + logicalHeight);
+
+        this.backBufferWidth = backBufferWidth;
+        this.backBufferHeight = backBufferHeight;
+        this.logicalWidth = logicalWidth;
+        this.logicalHeight = logicalHeight;
+
+        if (appConfig != null) {
+            bufferFormat = new Graphics.BufferFormat(appConfig.r, appConfig.g, appConfig.b, appConfig.a, appConfig.depth, appConfig.stencil, appConfig.samples, false);
+        } else {
+            Gdx.app.error(TAG, "Config is null during updateFramebufferInfo, cannot update bufferFormat.");
+        }
+
+        Gdx.app.log(TAG, "Cached dimensions updated: BB=" + this.backBufferWidth + " x " + this.backBufferHeight + ", Logical=" + this.logicalWidth + " x " + this.logicalHeight);
+    }
+
+    public boolean setWindowedMode(int width, int height) {
+        if (currentWindow != null) {
+            return currentWindow.setWindowedModeInternal(width, height);
+        } else {
+            Gdx.app.error(TAG, "Cannot set windowed mode, no current window.");
+            return false;
+        }
+    }
+
+    public void setTitle(String title) {
+        //GLFW.glfwSetWindowTitle(primaryWindowHandle, title);
+        if (currentWindow != null) {
+            currentWindow.setTitleInternal(title);
+        } else {
+            Gdx.app.error(TAG, "Cannot set title, no current window.");
+        }
+    }
+
+    public void setUndecorated(boolean undecorated) {
+        if (currentWindow != null) {
+            currentWindow.setUndecoratedInternal(undecorated);
+        } else {
+            Gdx.app.error(TAG, "Cannot set undecorated, no current window.");
+        }
+    }
+
+    public void setResizable(boolean resizable) {
+        if (currentWindow != null) {
+            currentWindow.setResizableInternal(resizable);
+        } else {
+            Gdx.app.error(TAG, "Cannot set resizable, no current window.");
+        }
+    }
+
+    public void setVSync(boolean vsync) {
+        if (currentWindow != null) {
+            currentWindow.setVSyncInternal(vsync);
+        } else {
+            Gdx.app.error(TAG, "Cannot set VSync, no current window.");
+        }
+    }
+
+    /**
+     * Updates the application's reference to the currently active window.
+     * This is typically called by the main loop before updating/rendering a window,
+     * and potentially by a window during listener initialization if the listener
+     * needs to interact with app-level methods that depend on the current window context.
+     *
+     * @param window The VulkanWindow whose context is now (or is about to be) active.
+     */
+    public void setCurrentWindow(VulkanWindow window) {
+        // Optional: Add logging for debugging context switches if helpful
+        // if (this.currentWindow != window && Gdx.app != null) { // Check Gdx.app for safety during early init/late cleanup
+        //     long newHandle = (window != null) ? window.getWindowHandle() : 0;
+        //     Gdx.app.log(TAG, "setCurrentWindow called. New current window handle: " + newHandle);
+        // }
+        this.currentWindow = window;
+    }
+
 }

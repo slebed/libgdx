@@ -109,7 +109,7 @@ public class VulkanSpriteBatch implements Batch, Disposable {
         }
         this.rawDevice = device.getRawDevice();
 
-        final int FRAMES_IN_FLIGHT_FOR_BATCH = 2; // Use 2 or 3 typically
+        final int FRAMES_IN_FLIGHT_FOR_BATCH = gfx.config.MAX_FRAMES_IN_FLIGHT; // Use 2 or 3 typically
         final int descriptorSetCount = FRAMES_IN_FLIGHT_FOR_BATCH;
 
         this.batchDescriptorSets = new ArrayList<>(descriptorSetCount); // Size list for 1 set
@@ -133,6 +133,7 @@ public class VulkanSpriteBatch implements Batch, Disposable {
         } finally {
             MemoryUtil.memFree(pDataVB);
         }
+        Gdx.app.log(TAG, "Created vertexBuffer handle: " + this.vertexBuffer.bufferHandle + ", Allocation: " + this.vertexBuffer.allocationHandle);
 
         this.indicesCpu = BufferUtils.newShortBuffer(size * INDICES_PER_SPRITE);
         ((Buffer) this.indicesCpu).clear();
@@ -163,8 +164,7 @@ public class VulkanSpriteBatch implements Batch, Disposable {
             }
 
             this.indexBuffer = VulkanResourceUtil.createManagedBuffer(
-                    vmaAllocator, indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                    VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0);
+                    vmaAllocator, indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0);
 
             final long srcHandle = stagingIndexBuffer.bufferHandle;
             final long dstHandle = this.indexBuffer.bufferHandle;
@@ -178,6 +178,7 @@ public class VulkanSpriteBatch implements Batch, Disposable {
         } finally {
             if (stagingIndexBuffer != null) stagingIndexBuffer.dispose();
         }
+        Gdx.app.log(TAG, "Created indexBuffer handle: " + this.indexBuffer.bufferHandle + ", Allocation: " + this.indexBuffer.allocationHandle);
 
         long uboSize = 16 * Float.BYTES;
         this.projMatrixUbo = VulkanResourceUtil.createManagedBuffer(
@@ -201,6 +202,7 @@ public class VulkanSpriteBatch implements Batch, Disposable {
         if (this.batchDescriptorLayout == VK_NULL_HANDLE) {
             throw new GdxRuntimeException("Cannot allocate descriptor sets, layout handle is null.");
         }
+        Gdx.app.log(TAG, "Created projMatrixUbo handle: " + this.projMatrixUbo.bufferHandle + ", Allocation: " + this.projMatrixUbo.allocationHandle);
 
         for (int i = 0; i < descriptorSetCount; i++) {
             // Use the manager's allocation method
@@ -572,56 +574,30 @@ public class VulkanSpriteBatch implements Batch, Disposable {
 
     @Override
     public void draw(Texture texture, float x, float y, float width, float height, int srcX, int srcY, int srcWidth, int srcHeight, boolean flipX, boolean flipY) {
-        Gdx.app.log(TAG, "HERE");
+        Gdx.app.log(TAG, "HERE5");
     }
 
     @Override
     public void draw(Texture texture, float x, float y, int srcX, int srcY, int srcWidth, int srcHeight) {
-        Gdx.app.log(TAG, "HERE");
+        Gdx.app.log(TAG, "HERE4");
     }
 
     @Override
     public void draw(Texture texture, float x, float y, float width, float height, float u, float v, float u2, float v2) {
-        Gdx.app.log(TAG, "HERE");
+        Gdx.app.log(TAG, "HERE3");
     }
 
     @Override
     public void draw(Texture texture, float x, float y) {
-        Gdx.app.log(TAG, "HERE");
+        Gdx.app.log(TAG, "HERE1");
     }
 
     @Override
     public void draw(Texture texture, float x, float y, float width, float height) {
-        Gdx.app.log(TAG, "HERE");
+        float originX = width / 2;
+        float originY = height / 2;
+        draw(texture, x, y, originX, originY, width, height, 1f, 1f, 0f, 0, 0, (int) width, (int) height, false, false);
     }
-
-    /**
-     * Helper method to retrieve the current swapchain RenderPass handle via Gdx.graphics.
-     * Assumes rendering is happening within the main swapchain render pass context.
-     *
-     * @return The VkRenderPass handle.
-     * @throws GdxRuntimeException if Gdx.graphics is not VulkanGraphics or swapchain/renderpass is invalid.
-     */
-    /*private long getCurrentRenderPassHandle() {
-        if (Gdx.graphics instanceof VulkanGraphics) {
-            VulkanGraphics gfx = (VulkanGraphics) Gdx.graphics;
-            // Ensure VulkanGraphics has a getter for the swapchain
-            VulkanSwapchain swapchain = gfx.getSwapchain();
-            if (swapchain != null) {
-                // Ensure VulkanSwapchain has a getter for the render pass
-                long rpHandle = swapchain.getRenderPass();
-                if (rpHandle != VK_NULL_HANDLE) {
-                    return rpHandle;
-                } else {
-                    throw new GdxRuntimeException("VulkanSpriteBatch: Failed to get RenderPass handle from VulkanSwapchain (handle is VK_NULL_HANDLE)");
-                }
-            } else {
-                throw new GdxRuntimeException("VulkanSpriteBatch: Failed to get VulkanSwapchain from VulkanGraphics");
-            }
-        } else {
-            throw new GdxRuntimeException("VulkanSpriteBatch: Gdx.graphics is not an instance of VulkanGraphics");
-        }
-    }*/
 
     @Override
     public void dispose() {
@@ -654,12 +630,18 @@ public class VulkanSpriteBatch implements Batch, Disposable {
         }
 
         if (batchDescriptorLayout != VK_NULL_HANDLE) {
-            Gdx.app.log(TAG, "Destroying batch descriptor set layout: " + batchDescriptorLayout);
-            vkDestroyDescriptorSetLayout(rawDevice, batchDescriptorLayout, null);
             batchDescriptorLayout = VK_NULL_HANDLE;
         }
 
-        batchDescriptorSets.clear(); // Just clear the list of handles
+        if (descriptorManager != null && !batchDescriptorSets.isEmpty()) {
+            Gdx.app.log(TAG, "Freeing " + batchDescriptorSets.size() + " descriptor sets via manager for batch hash: " + this.hashCode());
+            try {
+                descriptorManager.freeSets(batchDescriptorSets); // Call the new method
+            } catch (Exception e) {
+                Gdx.app.error(TAG, "Error calling descriptorManager.freeSets for batch hash: " + this.hashCode(), e);
+            }
+        }
+        batchDescriptorSets.clear(); // Clear list afterwards
 
         Gdx.app.log(TAG, "Disposed.");
     }
@@ -788,7 +770,8 @@ public class VulkanSpriteBatch implements Batch, Disposable {
     }
 
     @Override
-    public void draw(TextureRegion region, float x, float y, float originX, float originY, float width, float height, float scaleX, float scaleY, float rotation, boolean clockwise) { /* TODO */
+    public void draw(TextureRegion region, float x, float y, float originX, float originY, float width, float height, float scaleX, float scaleY, float rotation,
+                     boolean clockwise) { /* TODO */
         throw new UnsupportedOperationException("Not implemented yet.");
     }
 
@@ -903,10 +886,10 @@ public class VulkanSpriteBatch implements Batch, Disposable {
         }
 
         VkCommandBuffer currentCommandBuffer = gfx.getCurrentCommandBuffer();
-        if (currentCommandBuffer == null){
+        if (currentCommandBuffer == null) {
             throw new GdxRuntimeException("Cannot flush() batch, command buffer is null (missing begin?).");
         }
-        if (lastTexture == null){
+        if (lastTexture == null) {
             throw new GdxRuntimeException("Cannot flush() batch, lastTexture is null (must draw at least one sprite first).");
         }
         if (this.vertexBuffer.bufferHandle == VK_NULL_HANDLE || this.indexBuffer.bufferHandle == VK_NULL_HANDLE) {

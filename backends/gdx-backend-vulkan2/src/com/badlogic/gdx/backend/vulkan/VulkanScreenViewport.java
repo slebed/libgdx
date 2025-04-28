@@ -31,10 +31,30 @@ public class VulkanScreenViewport extends ScreenViewport {
         Camera camera = getCamera();
         camera.viewportWidth = getWorldWidth();
         camera.viewportHeight = getWorldHeight();
-        if (centerCamera) camera.position.set(getWorldWidth() / 2f, getWorldHeight() / 2f, 0);
-        camera.update();
+        if (centerCamera) {
+            camera.position.set(getWorldWidth() / 2f, getWorldHeight() / 2f, 0);
+        }
+        camera.update(); // Standard camera update
+        // --- End Revert ---
+
+        // Screen bounds are still needed for unproject calculations
+        setScreenBounds(getScreenX(), getScreenY(), getScreenWidth(), getScreenHeight());
+        /*Camera camera = getCamera();
+        camera.viewportWidth = getWorldWidth();
+        camera.viewportHeight = getWorldHeight();
+        if (centerCamera) {
+            camera.position.set(getWorldWidth() / 2f, getWorldHeight() / 2f, 0);
+        }
+        // Set projection for Y-up world [0,h] mapping to Y-up clip [-1,1]
+        // Use near/far appropriate for your app
+        camera.projection.setToOrtho(0, getWorldWidth(), 0, getWorldHeight(), camera.near, camera.far);
+        // Set view matrix
+        camera.view.setToLookAt(camera.position, camera.position.cpy().add(camera.direction), camera.up);
+        // Combine
+        camera.combined.set(camera.projection).mul(camera.view);
 
         setScreenBounds(getScreenX(), getScreenY(), getScreenWidth(), getScreenHeight());
+*/
     }
 
     @Override
