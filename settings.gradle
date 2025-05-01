@@ -45,7 +45,7 @@ include ":tests:gdx-tests-lwjgl3"
 include ":tests:gdx-tests-vulkan"
 include ":tests:gdx-tests-vulkan-chooser"
 
+include 'tools'
+
 rootProject.name = "libgdx"
-///include ':backends:vulkan'
-//include ':backends:gdx-backend-vulkan2'
 

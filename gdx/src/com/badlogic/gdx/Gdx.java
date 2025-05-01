@@ -41,5 +41,4 @@ public class Gdx {
 	public static GL30 gl30;
 	public static GL31 gl31;
 	public static GL32 gl32;
-	public static VK vk;
 }

@@ -44,6 +44,8 @@ public class ScissorStack {
 	 * @return true if the scissors were pushed. false if the scissor area was zero, in this case the scissors were not pushed and
 	 *         no drawing should occur. */
 	public static boolean pushScissors (Rectangle scissor) {
+		if (Gdx.gl == null) return false;
+
 		fix(scissor);
 
 		if (scissors.size == 0) {
@@ -75,6 +77,8 @@ public class ScissorStack {
 	 * <p>
 	 * Any drawing should be flushed before popping scissors. */
 	public static Rectangle popScissors () {
+		if (scissors.size == 0) return null;
+
 		Rectangle old = scissors.pop();
 		if (scissors.size == 0)
 			Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);

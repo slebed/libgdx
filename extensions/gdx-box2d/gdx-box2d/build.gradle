@@ -14,10 +14,27 @@
  * limitations under the License.
  ******************************************************************************/
 
-apply plugin: "com.badlogicgames.gdx.gdx-jnigen"
+//apply plugin: "com.badlogicgames.gdx.gdx-jnigen"
+apply plugin: "com.badlogicgames.jnigen.jnigen-gradle"
+
 jnigen {
 	sharedLibName = "gdx-box2d"
-	add(Windows, x32)
+	addWindows(x32, x86)
+	addWindows(x64, x86)
+	addLinux(x64, x86)
+	addLinux(x32, ARM)
+	addLinux(x64, ARM)
+	addLinux(x64, RISCV) // Verify RISCV is a valid constant if needed
+	addMac(x64, x86)     // Use addMac
+	addMac(x64, ARM)
+	addAndroid() {
+		cppFlags += " -fexceptions"
+		androidApplicationMk += "APP_STL := c++_static"
+	}
+	addIOS() {
+		cppFlags += " -stdlib=libc++"
+	}
+/*	add(Windows, x32)
 	add(Windows, x64)
 	add(Linux, x64)
 	add(Linux, x32, ARM)
@@ -26,7 +43,7 @@ jnigen {
 	add(MacOsX, x64)
 	add(MacOsX, x64, ARM)
 	add(Android)
-	add(IOS)
+	add(IOS)*/
 
 	robovm {
 		forceLinkClasses "com.badlogic.gdx.physics.box2d.*"

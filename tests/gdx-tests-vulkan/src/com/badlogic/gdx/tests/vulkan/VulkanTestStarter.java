@@ -1,7 +1,5 @@
 package com.badlogic.gdx.tests.vulkan;
 
-import static com.badlogic.gdx.scenes.scene2d.ui.Table.Debug.table;
-
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Gdx;
@@ -13,8 +11,6 @@ import com.badlogic.gdx.assets.loaders.FileHandleResolver;
 import com.badlogic.gdx.assets.loaders.resolvers.InternalFileHandleResolver;
 import com.badlogic.gdx.backend.vulkan.VulkanApplication;
 import com.badlogic.gdx.backend.vulkan.VulkanApplicationConfiguration;
-import com.badlogic.gdx.backend.vulkan.VulkanDevice;
-import com.badlogic.gdx.backend.vulkan.VulkanGraphics;
 import com.badlogic.gdx.backend.vulkan.VulkanScreenViewport;
 
 import com.badlogic.gdx.backend.vulkan.VulkanStage;
@@ -25,12 +21,8 @@ import com.badlogic.gdx.backend.vulkan.VulkanWindow;
 import com.badlogic.gdx.backend.vulkan.VulkanWindowConfiguration;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
-import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
-import com.badlogic.gdx.scenes.scene2d.InputEvent;
-import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
@@ -49,8 +41,8 @@ public class VulkanTestStarter {
         VulkanApplicationConfiguration vkConfig = new VulkanApplicationConfiguration();
         vkConfig.setTitle("Vulkan Test"); // Default title
         vkConfig.setWindowedMode(640, 480);
-vkConfig.enableValidationLayers(true, null);
-        vkConfig.setPresentationMode(VulkanApplicationConfiguration.SwapchainPresentMode.MAILBOX); // Example
+        vkConfig.enableValidationLayers(true, null);
+        vkConfig.setPresentationMode(VulkanApplicationConfiguration.SwapchainPresentMode.MAILBOX);
 
         ApplicationListener listenerToStart = null;
         String testName = options.startupTestName;
@@ -280,9 +272,9 @@ vkConfig.enableValidationLayers(true, null);
             stage.act(Gdx.graphics.getDeltaTime());
             stage.draw();
             cnt++;
-            //if (cnt == 4) {
-            //    launchTest("Scene2dTest");
-            //}
+            if (cnt == 10) {
+                //launchTest("Scene2dTest");
+            }
         }
 
         @Override

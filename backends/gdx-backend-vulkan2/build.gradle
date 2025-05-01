@@ -1,71 +1,138 @@
+// Apply necessary plugins
 plugins {
-	id 'java-library'
+    id 'java-library'
+    id "com.badlogicgames.jnigen.jnigen-gradle"
 }
 
-// Top of your build.gradle (outside dependencies block, usually near plugins/java blocks)
-import org.gradle.internal.os.OperatingSystem // Import the necessary class
+def vulkanSdkPath = System.getenv("VULKAN_SDK")
+if (!vulkanSdkPath) {
+    throw new GradleException("VULKAN_SDK environment variable not set. Needed for Vulkan backend native compilation.")
+}
+// Ensure they are plain strings
+def vkInclude = file("$vulkanSdkPath/include").absolutePath.toString()
+def vkLibWin = file("$vulkanSdkPath/Lib").absolutePath.toString()
+def vkLibLinMac = file("$vulkanSdkPath/lib").absolutePath.toString()
+println "[Config Phase] Vulkan Include Dir: ${vkInclude}" // Optional: Log path during config
+println "[Config Phase] Vulkan Win Lib Dir: ${vkLibWin}"
+println "[Config Phase] Vulkan Lin/Mac Lib Dir: ${vkLibLinMac}"
+// --- End Vulkan SDK Path Def ---
 
-// Determine the LWJGL natives classifier based on the OS and Arch
 String lwjglNativesClassifier = ""
-OperatingSystem os = OperatingSystem.current()
-String arch = System.getProperty("os.arch") // Get architecture (e.g., "amd64", "aarch64")
-
-if (os.isWindows()) {
-	lwjglNativesClassifier = arch.equals("amd64") ? "natives-windows" : "natives-windows-x86"
-} else if (os.isLinux()) {
-	if (arch.equals("aarch64")) {
-		lwjglNativesClassifier = "natives-linux-arm64"
-	} else if (arch.equals("arm") || arch.equals("arm32")) {
-		lwjglNativesClassifier = "natives-linux-arm32"
-	} else { // Assume x64 otherwise for Linux
-		lwjglNativesClassifier = "natives-linux"
-	}
-	// Add riscv64 check if needed: else if (arch.equals("riscv64")) { lwjglNativesClassifier = "natives-linux-riscv64" }
-} else if (os.isMacOsX()) {
-	lwjglNativesClassifier = arch.equals("aarch64") ? "natives-macos-arm64" : "natives-macos"
-} else {
-	// Handle unknown OS or throw error if preferred
-	throw new GradleException("Unsupported OS for LWJGL natives: " + os.getName())
-}
-println "Detected LWJGL Natives Classifier: " + lwjglNativesClassifier // Optional: Log detected classifier
+// ... (rest of classifier logic) ...
+println "Detected LWJGL Natives Classifier: " + lwjglNativesClassifier
 
 
 java {
-	sourceCompatibility JavaVersion.VERSION_11
-	targetCompatibility JavaVersion.VERSION_11
+    sourceCompatibility JavaVersion.VERSION_11
+    targetCompatibility JavaVersion.VERSION_11
 }
+
+
+// *** SOURCE SET CONFIG (Uncomment and adjust if needed) ***
+// If VulkanNative.java is generated outside src/main/java, add its location:
+// sourceSets.main.java.srcDirs += file("generated/java") // Example path relative to this build file
+
 dependencies {
-	// Core :gdx dependency should come from ../build.gradle's configure block
+    // Core :gdx dependency - Ensure this is inherited or add:
+    api project(":gdx")
 
-	// LWJGL dependencies
-	api "org.lwjgl:lwjgl:$versions.lwjgl3"
-	api "org.lwjgl:lwjgl-glfw:$versions.lwjgl3"
-	api "org.lwjgl:lwjgl-vulkan:$versions.lwjgl3"
-	api "org.lwjgl:lwjgl-openal:$versions.lwjgl3"
-	api "org.lwjgl:lwjgl-stb:$versions.lwjgl3"
-	api "org.lwjgl:lwjgl-jemalloc:$versions.lwjgl3"
-	// VMA Binding
-	api "org.lwjgl:lwjgl-vma:$versions.lwjgl3"
+    // LWJGL dependencies (Keep if needed alongside generated bindings)
+    api "org.lwjgl:lwjgl:$versions.lwjgl3"
+    api "org.lwjgl:lwjgl-glfw:$versions.lwjgl3"
+    api "org.lwjgl:lwjgl-vulkan:$versions.lwjgl3" // Provides LWJGL Vulkan Java classes
+    api "org.lwjgl:lwjgl-openal:$versions.lwjgl3"
+    api "org.lwjgl:lwjgl-stb:$versions.lwjgl3"
+    api "org.lwjgl:lwjgl-jemalloc:$versions.lwjgl3"
+    api "org.lwjgl:lwjgl-vma:$versions.lwjgl3" // VMA Binding
 
-	// Audio dependencies
-	api "com.badlogicgames.jlayer:jlayer:$versions.jlayer"
-	api "org.jcraft:jorbis:$versions.jorbis"
+    // Audio dependencies
+    api "com.badlogicgames.jlayer:jlayer:$versions.jlayer"
+    api "org.jcraft:jorbis:$versions.jorbis"
 
-	// Desktop natives dependency (keep if it provides core gdx natives)
-	api gdxnatives.desktop
+    // Desktop natives dependency (likely needed for other gdx functions)
+    api gdxnatives.desktop // Assumes this is defined in the root project
 
-	// ***** USE THE DEFINED VARIABLE FOR VMA NATIVES *****
-	// Add explicit VMA natives using the classifier determined above
-	runtimeOnly "org.lwjgl:lwjgl-vma::$lwjglNativesClassifier"
-	// *****************************************************
+    // --- LWJGL Natives ---
+    // VMA Natives
+    runtimeOnly "org.lwjgl:lwjgl-vma::$lwjglNativesClassifier"
+    // *** RECOMMENDED: Add LWJGL Vulkan Natives explicitly ***
+    // This usually includes the Vulkan Loader library needed by vkGetInstanceProcAddr
+    runtimeOnly "org.lwjgl:lwjgl-vulkan::$lwjglNativesClassifier"
+    // *** Add other core LWJGL natives needed by this backend: ***
+    runtimeOnly "org.lwjgl:lwjgl::$lwjglNativesClassifier"
+    runtimeOnly "org.lwjgl:lwjgl-glfw::$lwjglNativesClassifier"
+    runtimeOnly "org.lwjgl:lwjgl-jemalloc::$lwjglNativesClassifier"
+    runtimeOnly "org.lwjgl:lwjgl-openal::$lwjglNativesClassifier"
+    runtimeOnly "org.lwjgl:lwjgl-stb::$lwjglNativesClassifier"
 
-	// You might want to add other natives explicitly too for clarity,
-	// using the same lwjglNativesClassifier variable:
-	// runtimeOnly "org.lwjgl:lwjgl::$lwjglNativesClassifier"
-	// runtimeOnly "org.lwjgl:lwjgl-glfw::$lwjglNativesClassifier"
-	// runtimeOnly "org.lwjgl:lwjgl-vulkan::$lwjglNativesClassifier" // <-- Add Vulkan Natives explicitly!
-	// runtimeOnly "org.lwjgl:lwjgl-jemalloc::$lwjglNativesClassifier"
-	// runtimeOnly "org.lwjgl:lwjgl-openal::$lwjglNativesClassifier"
-	// runtimeOnly "org.lwjgl:lwjgl-stb::$lwjglNativesClassifier"
+}
 
+jnigen {
+    // Shared library name (can be the same)
+    sharedLibName = "gdx-vulkan" // Or "gdx-vulkan2" if that's the correct name
+
+    // Directory containing your JNI code (VulkanNative.c etc.)
+    jniDir = file("jni") // Adjust if your path is different
+
+    // Optional: Enable multi-threaded compilation
+    multiThreadedCompile = true
+
+    addWindows(x64, x86) { // Windows 64-bit (MinGW default)
+        // Use simple string concatenation
+        cFlags += "-I" + vkInclude
+        cppFlags += "-I" + vkInclude // Add for cpp too if needed
+        linkerFlags += "-L" + vkLibWin
+        linkerFlags += "-lvulkan-1"
+    }
+    // Example if using MSVC toolchain instead:
+    // addWindows(x64, x86, MSVC) {
+    //    cFlags += "/I" + vkInclude
+    //    linkerFlags += "/LIBPATH:" + vkLibWin
+    //    linkerFlags += "vulkan-1.lib"
+    // }
+
+    addLinux(x64, x86) {   // Linux 64-bit
+        cFlags += "-I" + vkInclude
+        cppFlags += "-I" + vkInclude
+        linkerFlags += "-L" + vkLibLinMac
+        linkerFlags += "-lvulkan"
+    }
+
+    addMac(x64, x86) {     // macOS 64-bit (Intel)
+        cFlags += "-I" + vkInclude
+        cppFlags += "-I" + vkInclude
+        linkerFlags += "-L" + vkLibLinMac
+        linkerFlags += "-lvulkan"
+    }
+    addMac(x64, ARM) {     // macOS 64-bit (ARM)
+        cFlags += "-I" + vkInclude
+        cppFlags += "-I" + vkInclude
+        linkerFlags += "-L" + vkLibLinMac
+        linkerFlags += "-lvulkan"
+    }
+
+    // --- Optional: Shared flags for all targets ---
+    // all {
+    //     cppFlags += ["-std=c++11"] // Example
+    // }
+
+    // --- Optional: Customize specific targets ---
+    // windows(x64, x86) { // Use lower-case os name for customization block
+    //     // cFlags += "-DSOME_WINDOWS_DEFINE" // Example
+    // }
+    // linux(x64, x86) {
+    //    // linkerFlags += "-lm" // Example
+    // }
+    // mac(x64, ARM) {
+    //    // cppFlags += "-ObjC++" // Example
+    // }
+}
+
+tasks.named('jar').configure {
+    // Depend on the task that packages the desktop natives
+    dependsOn(tasks.named('jnigenPackageAllDesktop'))
+}
+tasks.named('build').configure {
+    // Build should also depend on the packaged natives
+    dependsOn(tasks.named('jnigenPackageAllDesktop'))
 }

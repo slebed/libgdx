@@ -28,8 +28,7 @@ public class VulkanRenderPassManager {
 	 * @param swapchain The VulkanSwapchain providing render pass, framebuffer, and extent info.
 	 * @param imageIndex The index of the current swapchain image/framebuffer to use.
 	 * @param clearColor The color to clear the attachment with (if null, uses default). */
-	public void beginSwapchainRenderPass (VkCommandBuffer commandBuffer, VulkanSwapchain swapchain, int imageIndex,
-		Color clearColor) {
+	public void beginSwapchainRenderPass (VkCommandBuffer commandBuffer, VulkanSwapchain swapchain, int imageIndex,		Color clearColor) {
 		if (commandBuffer == null) {
 			throw new GdxRuntimeException("CommandBuffer cannot be null for beginSwapchainRenderPass");
 		}

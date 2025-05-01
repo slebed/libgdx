@@ -32,11 +32,15 @@ public class VulkanClipboard implements Clipboard {
 
 	@Override
 	public String getContents () {
-		return GLFW.glfwGetClipboardString(((VulkanGraphics)Gdx.graphics).getWindow().getWindowHandle());
+		long windowHandle = ((VulkanGraphics)Gdx.graphics).getWindowHandle();
+		if (windowHandle == 0) return null; // Handle case where handle might be invalid
+		return GLFW.glfwGetClipboardString(windowHandle);
 	}
 
 	@Override
 	public void setContents (String content) {
-		GLFW.glfwSetClipboardString(((VulkanGraphics)Gdx.graphics).getWindow().getWindowHandle(), content);
+		long windowHandle = ((VulkanGraphics)Gdx.graphics).getWindowHandle();
+		if (windowHandle == 0) return; // Handle case where handle might be invalid
+		GLFW.glfwSetClipboardString(windowHandle, content);
 	}
 }

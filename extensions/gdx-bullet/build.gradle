@@ -33,8 +33,83 @@ dependencies {
 	api project(":gdx")
 }
 
-apply plugin: "com.badlogicgames.gdx.gdx-jnigen"
+//apply plugin: "com.badlogicgames.gdx.gdx-jnigen"
+apply plugin: "com.badlogicgames.jnigen.jnigen-gradle"
+
 jnigen {
+	sharedLibName = "gdx-bullet"
+
+	// *** Configure Annotation Source Directory (Jnigen 3.1.0+) ***
+	// This tells Jnigen where to look for @NativeCodeGenerator annotations
+	//nativeCodeSourceDir = file("src") // Assuming annotations are in src/main/java relative to this project
+
+	// NOTE: jniDir = file("jni") might also be needed if your C/C++ source isn't in src/main/jni
+	// jniDir = file("src/main/jni") // Or wherever your native sources for bullet are
+
+	all {
+		// Header paths should be relative to where the C/C++ sources are compiled from (often build/jnigen/jni)
+		// Or relative to jniDir if explicitly set above.
+		// These might need adjustment based on your actual source structure and jniDir setting.
+		headerDirs = [
+				"../src/bullet/", // Example adjustment assuming jni sources are one level down
+				"../src/custom/",
+				"../src/extras/Serialize/",
+				"../src/extras/"
+		]
+		// Excludes likely refer to paths within the compilation source tree
+		cExcludes = [
+				"bullet/BulletMultiThreaded/GpuSoftBodySolvers/**" // Example adjustment
+		]
+		cppExcludes = [
+				"bullet/BulletMultiThreaded/GpuSoftBodySolvers/**" // Example adjustment
+		]
+
+		cppFlags += " -fno-strict-aliasing"
+		cppFlags += " -fno-rtti"
+		cppFlags += " -DBT_NO_PROFILE"
+		cppFlags += " -DBT_USE_INVERSE_DYNAMICS_WITH_BULLET2"
+	}
+
+	// *** Use NEW Target Definition Syntax ***
+	addWindows(x32, x86)
+	addWindows(x64, x86)
+	addLinux(x64, x86)
+	addLinux(x32, ARM)
+	addLinux(x64, ARM)
+	addLinux(x64, RISCV) // Verify RISCV is a valid constant if needed
+	addMac(x64, x86)     // Use addMac
+	addMac(x64, ARM)
+	addAndroid() {
+		cppFlags += " -fexceptions"
+		androidApplicationMk += "APP_STL := c++_static"
+	}
+	addIOS() {
+		cppFlags += " -stdlib=libc++"
+	}
+
+	// Verify robovm block is still valid/needed for 3.1.0
+	robovm {
+		forceLinkClasses "com.badlogic.gdx.physics.bullet.collision.CollisionJNI", "com.badlogic.gdx.physics.bullet.dynamics.DynamicsJNI",
+				"com.badlogic.gdx.physics.bullet.extras.ExtrasJNI", "com.badlogic.gdx.physics.bullet.linearmath.LinearMathJNI",
+				"com.badlogic.gdx.physics.bullet.softbody.SoftbodyJNI",  "com.badlogic.gdx.physics.bullet.collision.btBroadphaseAabbCallback",
+				"com.badlogic.gdx.physics.bullet.collision.btBroadphaseRayCallback", "com.badlogic.gdx.physics.bullet.collision.btConvexTriangleCallback",
+				"com.badlogic.gdx.physics.bullet.collision.btGhostPairCallback", "com.badlogic.gdx.physics.bullet.collision.btInternalTriangleIndexCallback",
+				"com.badlogic.gdx.physics.bullet.collision.btNodeOverlapCallback", "com.badlogic.gdx.physics.bullet.collision.btOverlapCallback",
+				"com.badlogic.gdx.physics.bullet.collision.btOverlapFilterCallback", "com.badlogic.gdx.physics.bullet.collision.btOverlappingPairCallback",
+				"com.badlogic.gdx.physics.bullet.collision.btTriangleCallback", "com.badlogic.gdx.physics.bullet.collision.btTriangleConvexcastCallback",
+				"com.badlogic.gdx.physics.bullet.collision.btTriangleRaycastCallback", "com.badlogic.gdx.physics.bullet.collision.ContactCache",
+				"com.badlogic.gdx.physics.bullet.collision.ContactListener", "com.badlogic.gdx.physics.bullet.collision.CustomCollisionDispatcher",
+				"com.badlogic.gdx.physics.bullet.collision.LocalRayResult", "com.badlogic.gdx.physics.bullet.collision.LocalShapeInfo",
+				"com.badlogic.gdx.physics.bullet.collision.RayResultCallback", "com.badlogic.gdx.physics.bullet.collision.ClosestRayResultCallback",
+				"com.badlogic.gdx.physics.bullet.collision.AllHitsRayResultCallback", "com.badlogic.gdx.physics.bullet.collision.ConvexResultCallback",
+				"com.badlogic.gdx.physics.bullet.collision.LocalConvexResult", "com.badlogic.gdx.physics.bullet.collision.ContactResultCallback",
+				"com.badlogic.gdx.physics.bullet.dynamics.InternalTickCallback",  "com.badlogic.gdx.physics.bullet.extras.btBulletWorldImporter",
+				"com.badlogic.gdx.physics.bullet.linearmath.btIDebugDraw", "com.badlogic.gdx.physics.bullet.linearmath.btMotionState",
+				"com.badlogic.gdx.physics.bullet.DebugDrawer"
+	}
+}
+
+/*jnigen {
 	sharedLibName = "gdx-bullet"
 	nativeCodeGenerator {
 		sourceDir = "src"
@@ -102,4 +177,4 @@ jnigen {
 				"com.badlogic.gdx.physics.bullet.linearmath.btIDebugDraw", "com.badlogic.gdx.physics.bullet.linearmath.btMotionState",
 				"com.badlogic.gdx.physics.bullet.DebugDrawer"
 	}
-}
+}*/

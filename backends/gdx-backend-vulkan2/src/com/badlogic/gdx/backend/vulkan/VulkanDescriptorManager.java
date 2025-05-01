@@ -8,17 +8,22 @@ import java.util.*;
 import static org.lwjgl.vulkan.VK10.*;
 import static org.lwjgl.system.MemoryStack.*;
 
+import com.badlogic.gdx.Gdx;
+
 public class VulkanDescriptorManager {
 
+    private static final String TAG = "VulkanDescriptorManager";
     private static final int MAX_SETS_PER_POOL = 1000;
     private static final int MAX_UBOS_PER_POOL = 1000;
     private static final int MAX_SAMPLERS_PER_POOL = 1000;
 
     private final VkDevice device;
     private long descriptorPool;
+    private final List<List<Long>> setsToFree;
 
     // Cache layouts to avoid recreating identical ones
     private final Map<String, Long> layoutCache = new HashMap<>();
+
     // Define keys for common layouts
     public static final String LAYOUT_KEY_SPRITEBATCH = "SpriteBatch_UBO0_Sampler1";
     public static final String LAYOUT_KEY_SINGLE_SAMPLER = "SingleSampler0"; // Keep if needed elsewhere
@@ -26,10 +31,16 @@ public class VulkanDescriptorManager {
     public VulkanDescriptorManager(VkDevice device) {
         this.device = Objects.requireNonNull(device);
         createPool();
-        // Layouts are now created on demand via getOrCreate methods
-    }
 
-    // --- Layout Creation/Retrieval ---
+        VulkanApplication app = (VulkanApplication)Gdx.app;
+
+        int capacity = app.getAppConfig().MAX_FRAMES_IN_FLIGHT;
+        this.setsToFree = new ArrayList<>(capacity);
+
+        for (int i = 0; i < capacity; i++) {
+            setsToFree.add(new ArrayList<>());
+        }
+    }
 
     public long getOrCreateSpriteBatchLayout() {
         return layoutCache.computeIfAbsent(LAYOUT_KEY_SPRITEBATCH, k -> createSpriteBatchLayout());
@@ -39,9 +50,6 @@ public class VulkanDescriptorManager {
     public long getOrCreateSingleSamplerLayout() {
         return layoutCache.computeIfAbsent(LAYOUT_KEY_SINGLE_SAMPLER, k -> createSingleSamplerLayout());
     }
-
-    // You could add a more generic method if needed:
-    // public synchronized long getOrCreateLayout(String key, VkDescriptorSetLayoutBinding.Buffer bindings) { ... }
 
     private long createSpriteBatchLayout() {
         try (MemoryStack stack = stackPush()) {
@@ -66,7 +74,6 @@ public class VulkanDescriptorManager {
             VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack);
             layoutInfo.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
             layoutInfo.pBindings(bindings);
-            // layoutInfo.flags(...) // Optional flags
 
             LongBuffer pLayout = stack.mallocLong(1);
             int result = vkCreateDescriptorSetLayout(device, layoutInfo, null, pLayout);
@@ -103,8 +110,6 @@ public class VulkanDescriptorManager {
             return pLayout.get(0);
         }
     }
-
-    // --- Pool and Allocation ---
 
     private void createPool() {
         try (MemoryStack stack = stackPush()) {
@@ -151,8 +156,6 @@ public class VulkanDescriptorManager {
         }
     }
 
-    // --- Update Helpers ---
-
     /**
      * Static helper to update a Combined Image Sampler descriptor.
      */
@@ -179,7 +182,6 @@ public class VulkanDescriptorManager {
             descriptorWrite.pTexelBufferView(null);
 
             vkUpdateDescriptorSets(device, descriptorWrite, null);
-            //System.out.println("Updated Sampler Set: " + set + " Binding: " + binding + " Texture: " + texture.getId()); // Debug logging
         }
     }
 
@@ -204,16 +206,15 @@ public class VulkanDescriptorManager {
         }
         if (range <= 0) {
             System.err.println("WARN: Attempting to update UBO binding " + binding + " with zero or negative range ("+range+").");
-            // This might be valid if allowed by spec/extensions, but often indicates an error.
-            // Decide whether to return or proceed based on your engine's logic.
-            // return;
         }
+
+        Gdx.app.log(TAG, "updateUniformBuffer: Updating Set " + set + " (0x" + Long.toHexString(set) + "), Binding " + binding + ", Buf " + bufferHandle + ", Range " + range); // Log details
 
         try (MemoryStack stack = stackPush()) {
             VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack);
-            bufferInfo.buffer(bufferHandle);    // Handle from your VulkanUniformBuffer
-            bufferInfo.offset(offset);          // Offset from your VulkanUniformBuffer
-            bufferInfo.range(range);            // Range/Size from your VulkanUniformBuffer
+            bufferInfo.buffer(bufferHandle);
+            bufferInfo.offset(offset);
+            bufferInfo.range(range);
 
             VkWriteDescriptorSet.Buffer descriptorWrite = VkWriteDescriptorSet.calloc(1, stack);
             descriptorWrite.sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
@@ -226,8 +227,10 @@ public class VulkanDescriptorManager {
             descriptorWrite.pImageInfo(null);
             descriptorWrite.pTexelBufferView(null);
 
+            Gdx.app.log(TAG, " --> Calling vkUpdateDescriptorSets for Set " + set);
             vkUpdateDescriptorSets(device, descriptorWrite, null);
-            //System.out.println("Updated UBO Set: " + set + " Binding: " + binding + " Buffer: " + bufferHandle); // Debug logging
+            Gdx.app.log(TAG, " <-- Returned from vkUpdateDescriptorSets for Set " + set);
+
         }
     }
 
@@ -235,38 +238,80 @@ public class VulkanDescriptorManager {
         if (setHandles == null || setHandles.isEmpty() || this.descriptorPool == VK_NULL_HANDLE) {
             return;
         }
-        try (MemoryStack stack = stackPush()) {
-            LongBuffer pSets = stack.mallocLong(setHandles.size());
-            for (int i = 0; i < setHandles.size(); i++) {
-                pSets.put(i, setHandles.get(i)); // Use indexed put
-            }
-            // No flip needed if using indexed put correctly
+        VulkanGraphics gfx = (VulkanGraphics) Gdx.graphics;
+        int currentFrameIndex = gfx.getCurrentFrameIndex(); // Get frame index (example)
+        List<Long> frameQueue = setsToFree.get(currentFrameIndex); // Use .get()
+        synchronized (frameQueue) {
+            frameQueue.addAll(setHandles);
+        }
+        System.out.println("VulkanDescriptorManager: Queued " + setHandles.size() + " sets for freeing (associated with frame " + currentFrameIndex + ")");
+    }
 
-            // Requires VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT on pool
-            int result = vkFreeDescriptorSets(device, descriptorPool, pSets);
-            if (result != VK_SUCCESS) {
-                System.err.println("VulkanDescriptorManager WARN: vkFreeDescriptorSets failed with result: " + result);
-            } else {
-                // Optional: Log success
-                System.out.println("VulkanDescriptorManager: Freed " + setHandles.size() + " descriptor sets.");
+    public void cleanupCompletedFrameSets(int frameIndex) {
+        //Gdx.app.log(TAG, "cleanupCompletedFrameSets: Cleaning up completed frame " + frameIndex + " sets");
+        VulkanApplication app = (VulkanApplication)Gdx.app;
+        int queueIndex = frameIndex % app.getAppConfig().MAX_FRAMES_IN_FLIGHT;
+        List<Long> handlesToActuallyFree;
+        List<Long> frameQueue = setsToFree.get(queueIndex); // Use .get()
+
+        synchronized (frameQueue) {
+            if (frameQueue.isEmpty()) {
+                return;
             }
-        } catch (Exception e) {
-            System.err.println("VulkanDescriptorManager ERROR: Exception during vkFreeDescriptorSets: " + e.getMessage());
-            e.printStackTrace(); // Log stack trace for unexpected errors
+            handlesToActuallyFree = new ArrayList<>(frameQueue);
+            frameQueue.clear();
+        }
+
+        if (!handlesToActuallyFree.isEmpty() && this.descriptorPool != VK_NULL_HANDLE) {
+            Gdx.app.log(TAG, "cleanupCompletedFrameSets: Actually freeing " + handlesToActuallyFree.size() + " sets from completed frame " + frameIndex);
+            try (MemoryStack stack = stackPush()) {
+                LongBuffer pSets = stack.mallocLong(handlesToActuallyFree.size());
+                for (int i = 0; i < handlesToActuallyFree.size(); i++) {
+                    pSets.put(i, handlesToActuallyFree.get(i));
+                }
+
+                // Requires VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT on pool
+                int result = vkFreeDescriptorSets(device, descriptorPool, pSets);
+                if (result != VK_SUCCESS) {
+                    System.err.println("VulkanDescriptorManager WARN: vkFreeDescriptorSets failed for completed frame " + frameIndex + " with result: " + result);
+                } else {
+                    System.out.println("VulkanDescriptorManager: Actually freed " + handlesToActuallyFree.size() + " descriptor sets from completed frame " + frameIndex);
+                }
+            } catch (Exception e) {
+                System.err.println("VulkanDescriptorManager ERROR: Exception during deferred vkFreeDescriptorSets: " + e.getMessage());
+                e.printStackTrace();
+            }
         }
     }
 
     public void dispose() {
-        // Destroy all cached layouts
+        Gdx.app.log(TAG, "Disposing descriptor manager..."); // Add log
+
+        Gdx.app.log(TAG, "Cleaning up cached descriptor set layouts (" + layoutCache.size() + ")...");
         for (long layoutHandle : layoutCache.values()) {
-            vkDestroyDescriptorSetLayout(device, layoutHandle, null);
+            if (layoutHandle != VK_NULL_HANDLE) {
+                Gdx.app.log(TAG, "Destroying layout: " + layoutHandle); // Optional detailed log
+                vkDestroyDescriptorSetLayout(device, layoutHandle, null); // <<< Use 'device' here
+            }
         }
         layoutCache.clear();
+        Gdx.app.log(TAG, "Descriptor set layout cache cleared.");
 
-        // Destroy the pool (implicitly frees all sets allocated from it)
+
+        // Destroy the pool (implicitly frees all sets allocated from it) - This is CORRECT
         if (descriptorPool != VK_NULL_HANDLE) {
-            vkDestroyDescriptorPool(device, descriptorPool, null);
+            Gdx.app.log(TAG, "Destroying descriptor pool: " + descriptorPool);
+            vkDestroyDescriptorPool(device, descriptorPool, null); // <<< Use 'device' here
             descriptorPool = VK_NULL_HANDLE;
         }
+
+        // Clear the tracking lists (whether array or List<List>)
+        if (setsToFree != null) { // Add null check
+            // Adapt based on your implementation
+            setsToFree.clear();
+            // setsToFree = null; // Optional: allow GC
+        }
+
+        Gdx.app.log(TAG, "Descriptor manager disposed.");
     }
 }

@@ -335,6 +335,15 @@ public class VulkanSpriteBatch implements Batch, Disposable {
         //        + ", ImgView=" + texture.getImageViewHandle()
         //        + ", Sampler=" + texture.getSamplerHandle());
 
+
+        //Gdx.app.log(TAG, "--> updateTextureDescriptor: Updating Set " + descriptorSet + " (0x" + Long.toHexString(descriptorSet) + ") Binding 1 for Tex View " + texture.getImageViewHandle()); // Log before
+        try {
+            VulkanDescriptorManager.updateCombinedImageSampler(rawDevice, descriptorSet, 1, texture);
+           // Gdx.app.log(TAG, "<-- updateTextureDescriptor: Returned from update for Set " + descriptorSet);
+        } catch (Exception e) {
+            Gdx.app.error(TAG, "Exception during updateTextureDescriptor for Set " + descriptorSet, e);
+        }
+
         //Gdx.app.log(TAG, "Updating Texture descriptor for set " + descriptorSet + " with TexView: " + texture.getImageViewHandle() + " and Sampler: " + texture.getSamplerHandle());
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack)
@@ -633,7 +642,7 @@ public class VulkanSpriteBatch implements Batch, Disposable {
             batchDescriptorLayout = VK_NULL_HANDLE;
         }
 
-        if (descriptorManager != null && !batchDescriptorSets.isEmpty()) {
+        /*if (descriptorManager != null && !batchDescriptorSets.isEmpty()) {
             Gdx.app.log(TAG, "Freeing " + batchDescriptorSets.size() + " descriptor sets via manager for batch hash: " + this.hashCode());
             try {
                 descriptorManager.freeSets(batchDescriptorSets); // Call the new method
@@ -641,7 +650,7 @@ public class VulkanSpriteBatch implements Batch, Disposable {
                 Gdx.app.error(TAG, "Error calling descriptorManager.freeSets for batch hash: " + this.hashCode(), e);
             }
         }
-        batchDescriptorSets.clear(); // Clear list afterwards
+        batchDescriptorSets.clear(); // Clear list afterwards*/
 
         Gdx.app.log(TAG, "Disposed.");
     }
@@ -855,7 +864,7 @@ public class VulkanSpriteBatch implements Batch, Disposable {
         }
         // If idx > 0 but spriteCount is 0, log warning but proceed based on idx
         if (vertexBufferIdx > 0 && currentSpriteCount == 0) {
-            Gdx.app.log(TAG, "Warning: Flushing with vertexBufferIdx > 0 but spriteCount == 0. Recalculating sprites.");
+            //Gdx.app.log(TAG, "Warning: Flushing with vertexBufferIdx > 0 but spriteCount == 0. Recalculating sprites.");
             // Need valid vertexFloats and VERTICES_PER_SPRITE here
             if (vertexFloats <= 0 || VERTICES_PER_SPRITE <= 0) throw new IllegalStateException("Vertex structure constants invalid in flush.");
             int verticesToDraw = vertexBufferIdx / vertexFloats;
@@ -928,7 +937,12 @@ public class VulkanSpriteBatch implements Batch, Disposable {
         }
 
         if (!pipelineAndSetBoundThisBatch) {
-            long pipelineToUse = pipelineManager.getOrCreateSpriteBatchPipeline(this.batchDescriptorLayout, currentRenderPassHandle);
+            //Gdx.app.log(TAG, "Flush: Preparing to bind pipeline. CmdBuf=0x" + Long.toHexString(currentCommandBuffer.address())
+            //        + ", RenderPass=" + currentRenderPassHandle + " (0x" + Long.toHexString(currentRenderPassHandle)
+            //        + "), PipelineLayout=" + this.batchPipelineLayout + " (0x" + Long.toHexString(this.batchPipelineLayout)
+            //        + "), DescSet=" + currentFrameSet + " (0x" + Long.toHexString(currentFrameSet) + ")");
+
+            long pipelineToUse = pipelineManager.getOrCreateSpriteBatchPipeline(this.batchPipelineLayout, currentRenderPassHandle);
             if (pipelineToUse == VK_NULL_HANDLE) {
                 throw new GdxRuntimeException("Could not get/create sprite batch pipeline in flush.");
             }
@@ -941,6 +955,7 @@ public class VulkanSpriteBatch implements Batch, Disposable {
                 vkCmdBindDescriptorSets(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, this.batchPipelineLayout, 0, pSet, null);
             }
             pipelineAndSetBoundThisBatch = true;
+            //Gdx.app.log(TAG, "Flush: Obtained pipelineToUse=" + pipelineToUse + " (0x" + Long.toHexString(pipelineToUse) + ")");
         }
 
         try (MemoryStack stack = MemoryStack.stackPush()) {

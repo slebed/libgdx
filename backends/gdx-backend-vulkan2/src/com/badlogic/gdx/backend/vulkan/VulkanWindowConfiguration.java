@@ -33,6 +33,8 @@ public class VulkanWindowConfiguration {
 	boolean windowDecorated = true;
 	boolean windowMaximized = false;
 	VulkanGraphics.VulkanMonitor maximizedMonitor;
+	VulkanApplicationConfiguration.SwapchainPresentMode presentMode = VulkanApplicationConfiguration.SwapchainPresentMode.FIFO;
+
 	boolean autoIconify = true;
 	FileType windowIconFileType;
 	String[] windowIconPaths;
@@ -41,7 +43,6 @@ public class VulkanWindowConfiguration {
 	String title;
 	Color initialBackgroundColor = Color.BLACK;
 	boolean initialVisible = true;
-	boolean vSyncEnabled = true;
 
 	void setWindowConfiguration (VulkanWindowConfiguration config) {
 		windowX = config.windowX;
@@ -64,7 +65,7 @@ public class VulkanWindowConfiguration {
 		title = config.title;
 		initialBackgroundColor = config.initialBackgroundColor;
 		initialVisible = config.initialVisible;
-		vSyncEnabled = config.vSyncEnabled;
+		this.presentMode = config.presentMode;
 	}
 
 	/** @param visibility whether the window will be visible on creation. (default true) */
@@ -159,11 +160,11 @@ public class VulkanWindowConfiguration {
 		initialBackgroundColor = color;
 	}
 
-	/** Sets whether to use vsync. This setting can be changed anytime at runtime via {@link Graphics#setVSync(boolean)}.
-	 *
-	 * For multi-window applications, only one (the main) window should enable vsync. Otherwise, every window will wait for the
-	 * vertical blank on swap individually, effectively cutting the frame rate to (refreshRate / numberOfWindows). */
-	public void useVsync (boolean vsync) {
-		this.vSyncEnabled = vsync;
+	public VulkanApplicationConfiguration.SwapchainPresentMode getPresentMode(){
+		return presentMode;
+	}
+
+	public void setPresentMode(VulkanApplicationConfiguration.SwapchainPresentMode swapchainPresentMode) {
+		this.presentMode = swapchainPresentMode;
 	}
 }

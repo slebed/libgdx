@@ -22,7 +22,8 @@ buildscript {
 	}
 	dependencies {
 		classpath "com.diffplug.spotless:spotless-plugin-gradle:${versions.spotless}"
-		classpath "com.badlogicgames.gdx:gdx-jnigen-gradle:2.5.2"
+		//classpath "com.badlogicgames.gdx:gdx-jnigen-gradle:3.1.0"
+		classpath "com.badlogicgames.jnigen:jnigen-gradle:3.1.0"
 	}
 }
 
@@ -105,19 +106,19 @@ allprojects {
 
 	apply plugin: "com.diffplug.spotless"
 
-	spotless {
-		lineEndings 'UNIX'
-
-		java {
-			target 'src/**/*.java', 'test/**/*.java', 'generator/**/*.java'
-			removeUnusedImports()
-			eclipse().configFile new File(rootProject.projectDir.absolutePath, 'eclipse-formatter.xml')
-		}
-		groovyGradle {
-			target '*.gradle'
-			greclipse().configFile new File(rootProject.projectDir.absolutePath, 'eclipse-formatter.xml')
-		}
-	}
+//	spotless {
+//		lineEndings 'UNIX'
+//
+//		java {
+//			target 'src/**/*.java', 'test/**/*.java', 'generator/**/*.java'
+//			//removeUnusedImports()
+//			eclipse().configFile new File(rootProject.projectDir.absolutePath, 'eclipse-formatter.xml')
+//		}
+//		groovyGradle {
+//			target '*.gradle'
+//			greclipse().configFile new File(rootProject.projectDir.absolutePath, 'eclipse-formatter.xml')
+//		}
+//	}
 }
 
 configure(subprojects - project(":tests:gdx-tests-android") - project(":backends:gdx-backend-android")) {

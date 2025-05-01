@@ -44,7 +44,6 @@ public class VkMemoryUtil {
 
 	/** Safely destroys a Vulkan object if it's not already destroyed.
 	 *
-	 * @param handle The Vulkan handle to destroy.
 	 * @param device The Vulkan device associated with the object. */
 	// public static void safeDestroy(long handle, org.lwjgl.vulkan.VulkanDevice device) {
 	// if (handle != VK_NULL_HANDLE) {

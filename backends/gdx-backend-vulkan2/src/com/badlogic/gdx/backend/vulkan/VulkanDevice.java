@@ -21,6 +21,7 @@ import static org.lwjgl.vulkan.VK10.vkGetDeviceQueue;
 import static org.lwjgl.vulkan.VK10.vkQueueSubmit;
 import static org.lwjgl.vulkan.VK10.vkQueueWaitIdle;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
@@ -34,23 +35,31 @@ import java.nio.LongBuffer;
 import java.util.function.Consumer;
 
 public class VulkanDevice implements VkResource, Disposable {
-
+private static String TAG = "VulkanDevice";
 	private final VkDeviceHandle deviceHandle;
 	private final VkQueue graphicsQueue;
 	private final VkPhysicalDevice physicalDevice;
-	private final int queueFamilyIndex;
+	private final int graphicsQueueFamilyIndex; // Renamed for clarity
+	private final int presentQueueFamilyIndex;
 	private long graphicsCommandPool = VK_NULL_HANDLE;
-	// private final long commandPool;
+	private VkQueue presentQueue;
 
-	private VulkanDevice (VkDeviceHandle deviceHandle, VkQueue graphicsQueue, VkPhysicalDevice physicalDevice,
-		long graphicsCommandPoolHandle, int queueFamilyIndex) {
+	private VulkanDevice (VkDeviceHandle deviceHandle,
+						  VkQueue graphicsQueue,
+						  VkQueue presentQueue, // Added
+						  VkPhysicalDevice physicalDevice,
+						  long graphicsCommandPoolHandle,
+						  int graphicsQueueFamilyIndex, // Renamed param
+						  int presentQueueFamilyIndex) { // Added
 		this.deviceHandle = deviceHandle;
 		this.graphicsQueue = graphicsQueue;
+		this.presentQueue = presentQueue; // Store present queue
 		this.physicalDevice = physicalDevice;
-		this.graphicsCommandPool = graphicsCommandPoolHandle; // <<< --- Assign the handle passed from Builder
-		this.queueFamilyIndex = queueFamilyIndex;
-
-		System.out.println("VulkanDevice created. Graphics Command Pool Handle: " + this.graphicsCommandPool); // Log stored handle
+		this.graphicsCommandPool = graphicsCommandPoolHandle;
+		this.graphicsQueueFamilyIndex = graphicsQueueFamilyIndex; // Store graphics index
+		this.presentQueueFamilyIndex = presentQueueFamilyIndex; // Store present index
+Gdx.app.log(TAG, "presentQueue: " + presentQueue);
+		System.out.println("VulkanDevice created. Graphics Pool: " + this.graphicsCommandPool);
 	}
 
 	public long getHandle () {
@@ -63,6 +72,18 @@ public class VulkanDevice implements VkResource, Disposable {
 
 	public VkQueue getGraphicsQueue () {
 		return graphicsQueue;
+	}
+
+	/**
+	 * Gets the VkQueue handle used for presentation operations.
+	 * @return The VkQueue used for presentation.
+	 */
+	public VkQueue getPresentQueue() {
+		if (presentQueue == null) {
+			// Or throw an exception if it should always be valid after creation
+			Gdx.app.error("VulkanDevice", "getPresentQueue() called but presentQueue is null!");
+		}
+		return presentQueue;
 	}
 
 	public VkPhysicalDevice getPhysicalDevice () {
@@ -89,12 +110,10 @@ public class VulkanDevice implements VkResource, Disposable {
 		System.out.println("VulkanDevice cleanup finished.");
 	}
 
-	public int getQueueFamilyIndex () {
-		return this.queueFamilyIndex;
-	}
-
 	public static class Builder {
 		private VkPhysicalDevice physicalDevice;
+		private int graphicsQueueFamilyIndex; // Renamed field
+		private int presentQueueFamilyIndex;  // Added field
 		private int queueFamilyIndex;
 
 		public Builder setPhysicalDevice (VkPhysicalDevice physicalDevice) {
@@ -107,45 +126,80 @@ public class VulkanDevice implements VkResource, Disposable {
 			return this;
 		}
 
+		public Builder setGraphicsQueueFamilyIndex (int index) {
+			this.graphicsQueueFamilyIndex = index;
+			return this;
+		}
+
+		// Added setter
+		public Builder setPresentQueueFamilyIndex (int index) {
+			this.presentQueueFamilyIndex = index;
+			return this;
+		}
+
+
 		public VulkanDevice build () {
 			try (MemoryStack stack = stackPush()) {
 				FloatBuffer queuePriorities = stack.floats(1.0f);
+				VkDeviceQueueCreateInfo.Buffer queueCreateInfos;
+				boolean separatePresentQueue = graphicsQueueFamilyIndex != presentQueueFamilyIndex;
 
-				VkDeviceQueueCreateInfo.Buffer queueCreateInfo = VkDeviceQueueCreateInfo.calloc(1, stack).sType$Default() // Use
-																																								// sType$Default()
-																																								// for
-																																								// convenience
-					.queueFamilyIndex(queueFamilyIndex).pQueuePriorities(queuePriorities);
+				if (separatePresentQueue) {
+					queueCreateInfos = VkDeviceQueueCreateInfo.calloc(2, stack);
+					// Graphics Queue Info
+					queueCreateInfos.get(0).sType$Default()
+							.queueFamilyIndex(graphicsQueueFamilyIndex)
+							.pQueuePriorities(queuePriorities);
+					// Present Queue Info
+					queueCreateInfos.get(1).sType$Default()
+							.queueFamilyIndex(presentQueueFamilyIndex)
+							.pQueuePriorities(queuePriorities);
+				} else {
+					queueCreateInfos = VkDeviceQueueCreateInfo.calloc(1, stack);
+					// Single Queue Info (for both graphics and present)
+					queueCreateInfos.get(0).sType$Default()
+							.queueFamilyIndex(graphicsQueueFamilyIndex)
+							.pQueuePriorities(queuePriorities);
+				}
+				// --- End Queue Info Setup ---
 
-				// Define required device extensions (swapchain is essential)
+
 				PointerBuffer requiredExtensions = stack.mallocPointer(1);
 				requiredExtensions.put(0, stack.UTF8(VK_KHR_SWAPCHAIN_EXTENSION_NAME));
-				// Add other required extensions here if needed later
 
-				VkDeviceCreateInfo createInfo = VkDeviceCreateInfo.calloc(stack).sType$Default().pQueueCreateInfos(queueCreateInfo)
-					.ppEnabledExtensionNames(requiredExtensions) // Pass the buffer
-					.pEnabledFeatures(null); // Enable features later if needed
+				VkDeviceCreateInfo createInfo = VkDeviceCreateInfo.calloc(stack).sType$Default()
+						.pQueueCreateInfos(queueCreateInfos) // Pass potentially multiple infos
+						.ppEnabledExtensionNames(requiredExtensions)
+						.pEnabledFeatures(null);
 
 				PointerBuffer pDevice = stack.mallocPointer(1);
 				vkCheck(vkCreateDevice(physicalDevice, createInfo, null, pDevice), "Failed to create logical device");
-				// Use your inner class or LWJGL's VulkanDevice directly
 				VkDeviceHandle device = new VkDeviceHandle(pDevice.get(0), physicalDevice, createInfo);
 
-				PointerBuffer pQueue = stack.mallocPointer(1);
-				vkGetDeviceQueue(device, queueFamilyIndex, 0, pQueue); // Queue index 0 within the family
-				VkQueue graphicsQueue = new VkQueue(pQueue.get(0), device);
+				// --- Get Queue Handles ---
+				PointerBuffer pGraphicsQueue = stack.mallocPointer(1);
+				vkGetDeviceQueue(device, graphicsQueueFamilyIndex, 0, pGraphicsQueue);
+				VkQueue graphicsQueue = new VkQueue(pGraphicsQueue.get(0), device);
 
-				// --- Create Command Pool Correctly HERE ---
+				PointerBuffer pPresentQueue = stack.mallocPointer(1);
+				vkGetDeviceQueue(device, presentQueueFamilyIndex, 0, pPresentQueue); // Get present queue handle
+				VkQueue presentQueue = new VkQueue(pPresentQueue.get(0), device); // Create wrapper
+				Gdx.app.log(TAG, " pPresentQueue.get(0) = " +  pPresentQueue.get(0));
+				// --- End Get Queue Handles ---
+
+				// --- Create Command Pool (using graphics queue index) ---
 				VkCommandPoolCreateInfo poolInfo = VkCommandPoolCreateInfo.calloc(stack).sType$Default()
-					.queueFamilyIndex(queueFamilyIndex).flags(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT); // Or maybe TRANSIENT?
+						.queueFamilyIndex(graphicsQueueFamilyIndex) // Use graphics index
+						.flags(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 
 				LongBuffer pCommandPool = stack.mallocLong(1);
 				vkCheck(vkCreateCommandPool(device, poolInfo, null, pCommandPool), "Failed to create command pool");
-				long commandPoolHandle = pCommandPool.get(0); // Get the handle
-				// -----------------------------------------
+				long commandPoolHandle = pCommandPool.get(0);
+				// --- End Command Pool ---
 
-				// Pass the created handle to the constructor
-				return new VulkanDevice(device, graphicsQueue, physicalDevice, commandPoolHandle, this.queueFamilyIndex);
+				// Pass BOTH queues and indices to the constructor
+				return new VulkanDevice(device, graphicsQueue, presentQueue, physicalDevice,
+						commandPoolHandle, this.graphicsQueueFamilyIndex, this.presentQueueFamilyIndex);
 			}
 		}
 	}
@@ -270,8 +324,7 @@ public class VulkanDevice implements VkResource, Disposable {
 				.level(VK_COMMAND_BUFFER_LEVEL_PRIMARY).commandPool(graphicsCommandPool).commandBufferCount(1);
 
 			PointerBuffer pCommandBuffer = stack.mallocPointer(1);
-			vkCheck(vkAllocateCommandBuffers(deviceHandle, allocInfo, pCommandBuffer),
-				"Failed to allocate single time command buffer");
+			vkCheck(vkAllocateCommandBuffers(deviceHandle, allocInfo, pCommandBuffer),				"Failed to allocate single time command buffer");
 			long commandBufferHandle = pCommandBuffer.get(0);
 			commandBuffer = new VkCommandBuffer(commandBufferHandle, deviceHandle); // Create wrapper
 
@@ -293,6 +346,8 @@ public class VulkanDevice implements VkResource, Disposable {
 			// 5. Submit Command Buffer
 			VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack).sType$Default()
 				.pCommandBuffers(stack.pointers(commandBuffer.address())); // Submit the handle
+
+			System.out.println("VulkanDevice\t"+ "Submitting single time command buffer");
 
 			// Submit to the graphics queue, no fence needed as we wait for idle
 			vkCheck(vkQueueSubmit(graphicsQueue, submitInfo, VK_NULL_HANDLE), "Failed to submit single time command buffer");

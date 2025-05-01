@@ -2,7 +2,7 @@
 package com.badlogic.gdx.backend.vulkan; // Or your preferred utility package
 
 import static org.lwjgl.vulkan.EXTDebugReport.*;
-// If using Debug Utils
+
 import static org.lwjgl.vulkan.KHRDisplaySwapchain.VK_ERROR_INCOMPATIBLE_DISPLAY_KHR;
 import static org.lwjgl.vulkan.KHRSurface.*;
 import static org.lwjgl.vulkan.KHRSwapchain.*;
@@ -13,7 +13,9 @@ import static org.lwjgl.vulkan.KHRVideoQueue.VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_S
 import static org.lwjgl.vulkan.KHRVideoQueue.VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR;
 import static org.lwjgl.vulkan.KHRVideoQueue.VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR;
 import static org.lwjgl.vulkan.VK10.*;
-import static org.lwjgl.vulkan.VK11.*; // Include VK11 results if needed
+import static org.lwjgl.vulkan.VK11.*;
+
+import org.lwjgl.vulkan.KHRSurface;
 // Add imports for other extension results if you use them (VK12, VK13, vendor specific etc.)
 
 /** Utility class to decode Vulkan VkResult codes into human-readable strings. */
@@ -87,12 +89,6 @@ public class VkResultDecoder {
 		// --- Debug/Validation Errors ---
 		case VK_ERROR_VALIDATION_FAILED_EXT:
 			return "VK_ERROR_VALIDATION_FAILED_EXT"; // Common with validation layers
-		// case VK_ERROR_DEBUG_REPORT_CALLBACK_REF_EXT: return "VK_ERROR_DEBUG_REPORT_CALLBACK_REF_EXT"; // Deprecated
-
-		// --- External Memory Errors (Example) ---
-		// case VK_ERROR_INVALID_EXTERNAL_HANDLE_KHR: return "VK_ERROR_INVALID_EXTERNAL_HANDLE_KHR"; // Promoted to VK11 core
-
-		// --- Video Errors (Example, if using) ---
 		case VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR:
 			return "VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR";
 		case VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR:
@@ -109,6 +105,22 @@ public class VkResultDecoder {
 		// --- Unknown/Other ---
 		default:
 			return "UNKNOWN_VK_RESULT_CODE (" + vkResultCode + ")";
+		}
+	}
+
+	public static String decodePresentMode(int presentMode) {
+		switch (presentMode) {
+			case KHRSurface.VK_PRESENT_MODE_IMMEDIATE_KHR:
+				return "IMMEDIATE_KHR (" + presentMode + ")";
+			case KHRSurface.VK_PRESENT_MODE_MAILBOX_KHR:
+				return "MAILBOX_KHR (" + presentMode + ")";
+			case KHRSurface.VK_PRESENT_MODE_FIFO_KHR:
+				return "FIFO_KHR (" + presentMode + ")"; // VSync
+			case KHRSurface.VK_PRESENT_MODE_FIFO_RELAXED_KHR:
+				return "FIFO_RELAXED_KHR (" + presentMode + ")";
+			// Add cases for other modes like SHARED_DEMAND_REFRESH / SHARED_CONTINUOUS_REFRESH if needed
+			default:
+				return "Unknown Present Mode (" + presentMode + ")";
 		}
 	}
 

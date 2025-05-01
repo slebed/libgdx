@@ -8,10 +8,11 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.utils.Disposable;
 
 public class VulkanBuffer implements Disposable {
+	private static final String TAG = "VulkanBuffer";
 	public final long bufferHandle;
-	public final long allocationHandle; // VmaAllocation handle
+	public final long allocationHandle;
 	public final long size;
-	private final long allocatorHandle; // Reference to the VMA allocator
+	private final long allocatorHandle;
 
 	public VulkanBuffer (long bufferHandle, long allocationHandle, long size, long allocatorHandle) {
 		this.bufferHandle = bufferHandle;
@@ -24,9 +25,8 @@ public class VulkanBuffer implements Disposable {
 	public void dispose () {
 		// Use VMA to destroy buffer AND free allocation
 		if (allocatorHandle != VK_NULL_HANDLE && bufferHandle != VK_NULL_HANDLE && allocationHandle != VK_NULL_HANDLE) {
-			Gdx.app.log("VulkanBuffer", "Disposing VMA Buffer: " + bufferHandle + " Alloc: " + allocationHandle); // Add Log
+			Gdx.app.log(TAG, "Disposing VMA Buffer: " + bufferHandle + " Alloc: " + allocationHandle);
 			vmaDestroyBuffer(allocatorHandle, bufferHandle, allocationHandle);
 		}
-		// Avoid double-free by nulling handles? Or rely on caller not to call dispose twice.
 	}
 }

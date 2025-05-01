@@ -485,23 +485,23 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
         if (vulkanDevice != null && vulkanDevice.getRawDevice() != null) {
             Gdx.app.log(TAG, "Waiting for device idle before graphics cleanup...");
-            try {
+            /*try {
                 vkDeviceWaitIdle(vulkanDevice.getRawDevice());
                 Gdx.app.log(TAG, "Device idle. Proceeding with graphics cleanup...");
             } catch (Exception e) {
                 Gdx.app.error(TAG, "Error waiting for device idle during graphics dispose", e);
-            }
+            }*/
         }
 
         // Dispose shared managers FIRST
-        if (pipelineManager != null) {
+        /*if (pipelineManager != null) {
             pipelineManager.dispose();
             pipelineManager = null;
         }
         if (descriptorManager != null) {
             descriptorManager.dispose();
             descriptorManager = null;
-        }
+        }*/
 
         // Clear context state
         this.currentRecordingCommandBuffer = null;
