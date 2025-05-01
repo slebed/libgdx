@@ -408,7 +408,7 @@ public class VulkanApplication implements VulkanApplicationBase {
             throw new GdxRuntimeException("Exception occurred during initial ApplicationListener.resize()", e);
         }
 */
-        Gdx.app.log(TAG, "Starting main loop..............................................................................................");
+       //Gdx.app.log(TAG, "Starting main loop..............................................................................................");
         runMainLoop();
     }
 
@@ -680,10 +680,10 @@ public class VulkanApplication implements VulkanApplicationBase {
             closedWindows.clear(); // Clear list of windows to close for this frame
 
             // --- Window Iteration using Direct, Synchronized Iteration ---
-            Gdx.app.log(TAG, "LOOP: === Starting Direct Iteration ===");
+           //Gdx.app.log(TAG, "LOOP: === Starting Direct Iteration ===");
             synchronized (windows) { // Synchronize on the actual list being iterated
                 int currentSize = windows.size; // Get size *inside* sync block before loop
-                Gdx.app.log(TAG, "LOOP: Direct Iteration. Size = " + currentSize);
+               //Gdx.app.log(TAG, "LOOP: Direct Iteration. Size = " + currentSize);
 
                 for (int i = 0; i < currentSize; i++) { // Iterate up to the size captured
                     VulkanWindow window = windows.get(i); // Get directly from the list
@@ -715,7 +715,7 @@ public class VulkanApplication implements VulkanApplicationBase {
                     window.clearNeedsRendering(); // Consume flag
                     boolean iconified = window.isIconified();
                     boolean needsRender = continuous || requested;
-                    Gdx.app.log(TAG, "LOOP: DIRECT Window " + currentHandle + " check: continuous=" + continuous + ", requested=" + requested + ", needsRender=" + needsRender + ", isIconified=" + iconified);
+                   //Gdx.app.log(TAG, "LOOP: DIRECT Window " + currentHandle + " check: continuous=" + continuous + ", requested=" + requested + ", needsRender=" + needsRender + ", isIconified=" + iconified);
                     // --- End Check Rendering ---
 
                     // --- Update and Render Window (if needed) ---
@@ -732,9 +732,9 @@ public class VulkanApplication implements VulkanApplicationBase {
                                 // closedWindows.add(window);
                             }
                         }
-                        Gdx.app.log(TAG, "LOOP: DIRECT <<< Returned from update() for window " + currentHandle + " >>>");
+                       //Gdx.app.log(TAG, "LOOP: DIRECT <<< Returned from update() for window " + currentHandle + " >>>");
                     } else {
-                        Gdx.app.log(TAG, "LOOP: DIRECT --- Skipping update() for window " + currentHandle + " --- (Reason: needsRender=" + needsRender + ", isIconified=" + iconified + ")");
+                       //Gdx.app.log(TAG, "LOOP: DIRECT --- Skipping update() for window " + currentHandle + " --- (Reason: needsRender=" + needsRender + ", isIconified=" + iconified + ")");
                     }
                     // --- End Update/Render Window ---
 
@@ -749,7 +749,7 @@ public class VulkanApplication implements VulkanApplicationBase {
 
                 } // --- End For Loop iterating through windows ---
             } // --- End Synchronized Block for iteration ---
-            Gdx.app.log(TAG, "LOOP: === Finished Direct Iteration ===");
+           //Gdx.app.log(TAG, "LOOP: === Finished Direct Iteration ===");
 
 
             // --- Process Windows Marked for Closure ---
