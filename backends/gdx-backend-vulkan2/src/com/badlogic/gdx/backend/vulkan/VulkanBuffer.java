@@ -27,6 +27,8 @@ public class VulkanBuffer implements Disposable {
 		if (allocatorHandle != VK_NULL_HANDLE && bufferHandle != VK_NULL_HANDLE && allocationHandle != VK_NULL_HANDLE) {
 			Gdx.app.log(TAG, "Disposing VMA Buffer: " + bufferHandle + " Alloc: " + allocationHandle);
 			vmaDestroyBuffer(allocatorHandle, bufferHandle, allocationHandle);
+		}else{
+			Gdx.app.log(TAG, "Skipping disposal of VMA Buffer: " + bufferHandle + " Alloc: " + allocationHandle);
 		}
 	}
 }

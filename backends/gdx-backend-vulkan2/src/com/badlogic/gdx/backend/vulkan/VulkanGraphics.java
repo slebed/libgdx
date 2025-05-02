@@ -20,6 +20,8 @@ import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.vulkan.VK10.*;
 
 import java.nio.IntBuffer;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.badlogic.gdx.AbstractGraphics;
 import com.badlogic.gdx.Gdx;
@@ -73,43 +75,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     private final IntBuffer tmpBuffer = BufferUtils.createIntBuffer(1);
     private final IntBuffer tmpBuffer2 = BufferUtils.createIntBuffer(1);
 
-    /*public VulkanGraphics(long primaryWindowHandle, VulkanApplicationConfiguration config, VulkanDevice device, long vmaAllocatorHandle) {
-        this.primaryWindowHandle = primaryWindowHandle; // Store handle of the first window
-        this.config = config;
-        this.app = (VulkanApplication) Gdx.app; // Get app reference
-        this.vulkanDevice = device;
-        this.vmaAllocator = vmaAllocatorHandle;
-
-        if (this.vulkanDevice == null || this.vmaAllocator == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("VulkanDevice or VMA Allocator handle cannot be null for VulkanGraphics");
-        }
-
-        this.pipelineManager = new VulkanPipelineManager(this.vulkanDevice);
-        this.descriptorManager = new VulkanDescriptorManager(this.vulkanDevice.getRawDevice());
-
-        int initialBackBufferWidth;
-        int initialBackBufferHeight;
-        int initialLogicalWidth;
-        int initialLogicalHeight;
-
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            IntBuffer pWidth = stack.mallocInt(1);
-            IntBuffer pHeight = stack.mallocInt(1);
-
-            GLFW.glfwGetFramebufferSize(this.primaryWindowHandle, pWidth, pHeight);
-            initialBackBufferWidth = pWidth.get(0);
-            initialBackBufferHeight = pHeight.get(0);
-
-            pWidth.clear();
-            pHeight.clear();
-
-            GLFW.glfwGetWindowSize(this.primaryWindowHandle, pWidth, pHeight);
-            initialLogicalWidth = pWidth.get(0);
-            initialLogicalHeight = pHeight.get(0);
-        } // MemoryStack automatically frees pWidth, pHeight
-
-        updateFramebufferInfo(initialBackBufferWidth, initialBackBufferHeight, initialLogicalWidth, initialLogicalHeight);
-    }*/
+    private final List<VulkanFrameResourcePreparer> frameResourcePreparers = new CopyOnWriteArrayList<>(); // Use thread-safe list if needed, or ArrayList if access is synchronized
 
     public VulkanGraphics(long windowHandle, VulkanApplicationConfiguration config, VulkanApplication app, VulkanDevice device, long vmaAllocatorHandle, VulkanPipelineManager pipelineManager, VulkanDescriptorManager descriptorManager) {
         this.windowHandle = windowHandle; // Store handle of the first window
@@ -485,23 +451,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
         if (vulkanDevice != null && vulkanDevice.getRawDevice() != null) {
             Gdx.app.log(TAG, "Waiting for device idle before graphics cleanup...");
-            /*try {
-                vkDeviceWaitIdle(vulkanDevice.getRawDevice());
-                Gdx.app.log(TAG, "Device idle. Proceeding with graphics cleanup...");
-            } catch (Exception e) {
-                Gdx.app.error(TAG, "Error waiting for device idle during graphics dispose", e);
-            }*/
         }
-
-        // Dispose shared managers FIRST
-        /*if (pipelineManager != null) {
-            pipelineManager.dispose();
-            pipelineManager = null;
-        }
-        if (descriptorManager != null) {
-            descriptorManager.dispose();
-            descriptorManager = null;
-        }*/
 
         // Clear context state
         this.currentRecordingCommandBuffer = null;
@@ -568,6 +518,32 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
         public long getMonitorHandle() {
             return monitorHandle;
+        }
+    }
+
+    // Method for renderers/users to register
+    public void registerFrameResourcePreparer(VulkanFrameResourcePreparer preparer) {
+        if (preparer != null && !frameResourcePreparers.contains(preparer)) {
+            frameResourcePreparers.add(preparer);
+        }
+    }
+
+    // Method for renderers/users to unregister (e.g., on dispose)
+    public void unregisterFrameResourcePreparer(VulkanFrameResourcePreparer preparer) {
+        if (preparer != null) {
+            frameResourcePreparers.remove(preparer);
+        }
+    }
+
+    // Method called internally at the right time in the frame loop
+    void prepareAllFrameResources(int frameIndex) {
+        for (VulkanFrameResourcePreparer preparer : frameResourcePreparers) {
+            try {
+                preparer.prepareResourcesForFrame(frameIndex);
+            } catch (Exception e) {
+                Gdx.app.error("VulkanGraphics", "Exception during prepareResourcesForFrame for " + preparer.getClass().getSimpleName(), e);
+                // Decide how to handle errors - continue? rethrow?
+            }
         }
     }
 

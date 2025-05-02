@@ -160,10 +160,26 @@ public class VulkanDescriptorManager {
      * Static helper to update a Combined Image Sampler descriptor.
      */
     public static void updateCombinedImageSampler(VkDevice device, long set, int binding, VulkanTexture texture) {
-        if (texture == null || texture.getImageViewHandle() == VK_NULL_HANDLE || texture.getSamplerHandle() == VK_NULL_HANDLE) {
+        long imageViewHandle = (texture != null) ? texture.getImageViewHandle() : VK_NULL_HANDLE;
+        long samplerHandle = (texture != null) ? texture.getSamplerHandle() : VK_NULL_HANDLE;
+
+        // Log the attempt with all relevant details
+        Gdx.app.log(TAG, "updateCombinedImageSampler: Called for Set=" + set + " (0x" + Long.toHexString(set) + "), Binding=" + binding
+                + ", Texture Hash=" + (texture != null ? texture.hashCode() : "NULL")
+                + ", ImageView=" + imageViewHandle + " (0x" + Long.toHexString(imageViewHandle) + ")" // Log ImageView handle
+                + ", Sampler=" + samplerHandle + " (0x" + Long.toHexString(samplerHandle) + ")");     // Log Sampler handle
+
+        // Check for invalid handles BEFORE proceeding to Vulkan calls
+        if (imageViewHandle == VK_NULL_HANDLE || samplerHandle == VK_NULL_HANDLE) {
+            Gdx.app.error(TAG, "  --> ABORTING UPDATE: Invalid texture, ImageView, or Sampler handle provided!");
+            return; // Avoid trying to update with invalid handles
+        }
+
+        if (texture.getImageViewHandle() == VK_NULL_HANDLE || texture.getSamplerHandle() == VK_NULL_HANDLE) {
             System.err.println("WARN: Attempting to update sampler binding " + binding + " with invalid texture.");
             return; // Avoid crash, but log this!
         }
+
         try (MemoryStack stack = stackPush()) {
             VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack);
             imageInfo.imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -181,7 +197,9 @@ public class VulkanDescriptorManager {
             descriptorWrite.pBufferInfo(null);
             descriptorWrite.pTexelBufferView(null);
 
+            Gdx.app.log(TAG, "  --> Calling vkUpdateDescriptorSets for Set=" + set + ", Binding=" + binding);
             vkUpdateDescriptorSets(device, descriptorWrite, null);
+            Gdx.app.log(TAG, "  <-- Returned from vkUpdateDescriptorSets for Set=" + set);
         }
     }
 

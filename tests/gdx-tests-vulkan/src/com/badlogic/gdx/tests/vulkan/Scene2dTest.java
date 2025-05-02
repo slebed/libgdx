@@ -16,12 +16,12 @@
 
 package com.badlogic.gdx.tests.vulkan;
 
-import com.badlogic.gdx.Application;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.assets.AssetManager;
 import com.badlogic.gdx.assets.loaders.FileHandleResolver;
 import com.badlogic.gdx.assets.loaders.resolvers.InternalFileHandleResolver;
 import com.badlogic.gdx.backend.vulkan.VulkanApplication;
+import com.badlogic.gdx.backend.vulkan.VulkanDevice;
 import com.badlogic.gdx.backend.vulkan.VulkanScreenViewport;
 import com.badlogic.gdx.backend.vulkan.VulkanStage;
 import com.badlogic.gdx.backend.vulkan.VulkanTexture;
@@ -31,18 +31,23 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 
+import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.ImageButton;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
+import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.tests.utils.GdxTest;
 import com.badlogic.gdx.utils.viewport.Viewport;
 
+import org.lwjgl.vulkan.VK10;
+
 public class Scene2dTest extends GdxTest {
     private static final String TAG = "Scene2dTest";
+    private AssetManager assetManager;
     private VulkanStage testStage;
-    private boolean firstResize = true;
+    private VulkanTexture badlogicTexture;
     private int cnt;
 
     @Override
@@ -53,7 +58,7 @@ public class Scene2dTest extends GdxTest {
             FileHandleResolver resolver = new InternalFileHandleResolver();
 
             Gdx.app.log(TAG, "Creating AssetManager...");
-            AssetManager assetManager = new AssetManager(resolver);
+            assetManager = new AssetManager(resolver);
             assetManager.setLoader(VulkanTexture.class, new VulkanTextureLoader(resolver));
             assetManager.setLoader(TextureAtlas.class, new VulkanTextureAtlasLoader(resolver));
 
@@ -71,7 +76,7 @@ public class Scene2dTest extends GdxTest {
             Gdx.app.log(TAG, "Attempting to create VulkanStage...");
             Viewport viewport = new VulkanScreenViewport(); // Consider using a simpler ScreenViewport first?
             testStage = new VulkanStage(viewport);
-            Gdx.app.log(TAG, "VulkanStage CREATED. Hash: " + (testStage != null ? testStage.hashCode() : "null"));
+            Gdx.app.log(TAG, "VulkanStage CREATED. Hash: " + testStage.hashCode());
 
             Gdx.app.log(TAG, "Setting InputProcessor...");
             Gdx.input.setInputProcessor(testStage);
@@ -84,11 +89,17 @@ public class Scene2dTest extends GdxTest {
             TextButton textButton = new TextButton("Click Me", skin); // Requires skin
             textButton.setPosition(50, 50);
             textButton.setSize(150, 50);
-            // ... add listeners ...
+            textButton.addListener(new ChangeListener() {
+                @Override
+                public void changed(ChangeEvent event, Actor actor) {
+                   Gdx.app.log(TAG,"TextButton clicked!");
+                }
+            });
             Gdx.app.log(TAG, "TextButton CREATED.");
 
             Gdx.app.log(TAG, "Attempting to create ImageButton texture...");
-            TextureRegionDrawable buttonDrawable = new TextureRegionDrawable(new VulkanTexture(Gdx.files.internal("data/badlogic.jpg"))); // Check file exists!
+            badlogicTexture = new VulkanTexture(Gdx.files.internal("data/badlogic.jpg"));
+            TextureRegionDrawable buttonDrawable = new TextureRegionDrawable(badlogicTexture); // Check file exists!
             Gdx.app.log(TAG, "ImageButton texture CREATED.");
             Gdx.app.log(TAG, "Creating ImageButton...");
             ImageButton imageButton = new ImageButton(buttonDrawable);
@@ -137,9 +148,8 @@ public class Scene2dTest extends GdxTest {
 
         cnt++;
         if (cnt == 10) {
-            //System.exit(0);
-            //VulkanApplication app = (VulkanApplication) Gdx.app;
-            //app.getCurrentWindow().closeWindow();
+            VulkanApplication app = (VulkanApplication) Gdx.app;
+            app.getCurrentWindow().closeWindow();
         }
     }
 
@@ -187,9 +197,46 @@ public class Scene2dTest extends GdxTest {
 
     @Override
     public void dispose() {
-        if (testStage != null) {
-            Gdx.app.log(TAG, "dispose() called. Hash: " + this.hashCode());
-            testStage.dispose();
+        Gdx.app.log(TAG, "dispose() method ENTERED.");
+
+        // --->>> ADD THIS SYNCHRONIZATION <<<---
+        if (Gdx.app instanceof VulkanApplication) { // Ensure we have access to the device
+            VulkanApplication app = (VulkanApplication) Gdx.app;
+            VulkanDevice device = app.getVulkanDevice(); // Use getter
+            if (device != null && device.getRawDevice() != null) {
+                Gdx.app.log(TAG, "Waiting for device idle before test disposal...");
+                VK10.vkDeviceWaitIdle(device.getRawDevice()); // Wait for GPU
+                Gdx.app.log(TAG, "Device idle.");
+            } else {
+                Gdx.app.error(TAG, "Cannot vkDeviceWaitIdle, device is null!");
+            }
         }
+        // --->>> END ADDED SYNCHRONIZATION <<<---
+
+
+        // Existing dispose logic (with added logging/fixes from above)
+        if (testStage != null) {
+            Gdx.app.log(TAG, "Disposing VulkanStage (Hash: " + this.hashCode() + ")"); // Combine logs
+            testStage.dispose();
+            testStage = null; // Good practice
+            Gdx.app.log(TAG, "VulkanStage disposed.");
+        } else {
+            Gdx.app.log(TAG, "testStage was NULL, skipping dispose.");
+        }
+
+        if (badlogicTexture != null) {
+            Gdx.app.log(TAG, "Disposing badlogicTexture...");
+            badlogicTexture.dispose();
+            badlogicTexture = null;
+            Gdx.app.log(TAG, "badlogicTexture disposed.");
+        }
+
+        if (assetManager != null) {
+            Gdx.app.log(TAG, "Disposing AssetManager...");
+            assetManager.dispose();
+            assetManager = null;
+            Gdx.app.log(TAG, "AssetManager disposed.");
+        }
+        Gdx.app.log(TAG, "dispose() method EXITED.");
     }
 }

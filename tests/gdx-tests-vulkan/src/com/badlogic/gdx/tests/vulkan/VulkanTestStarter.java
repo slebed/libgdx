@@ -1,5 +1,7 @@
 package com.badlogic.gdx.tests.vulkan;
 
+import static org.lwjgl.vulkan.VK10.vkDeviceWaitIdle;
+
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.Gdx;
@@ -81,7 +83,8 @@ public class VulkanTestStarter {
             }
             // Otherwise, fall back to showing the list
         }
-        new VulkanApplication(new VulkanTestChooser(), vkConfig);
+        //new VulkanApplication(new VulkanTestChooser(), vkConfig);
+        new VulkanApplication(new Scene2dTest(), vkConfig);
     }
 
     static class VulkanTestChooser extends ApplicationAdapter {
@@ -273,7 +276,11 @@ public class VulkanTestStarter {
             stage.draw();
             cnt++;
             if (cnt == 10) {
-                //launchTest("Scene2dTest");
+                launchTest("Scene2dTest");
+            }
+            if (cnt>30){
+                VulkanApplication app = (VulkanApplication) Gdx.app;
+                app.getCurrentWindow().closeWindow();
             }
         }
 
@@ -318,6 +325,8 @@ public class VulkanTestStarter {
 
         @Override
         public void dispose() {
+            VulkanApplication app = (VulkanApplication) Gdx.app;
+            vkDeviceWaitIdle(app.getVulkanDevice().getRawDevice());
             Gdx.app.log(TAG, "dispose() called. Hash: " + this.hashCode());
             Gdx.app.log(TAG, "Disposing...");
             if (assetManager != null) {

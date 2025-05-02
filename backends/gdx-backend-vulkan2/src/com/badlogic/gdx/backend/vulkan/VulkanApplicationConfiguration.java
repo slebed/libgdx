@@ -59,7 +59,7 @@ public class VulkanApplicationConfiguration extends VulkanWindowConfiguration {
     int audioDeviceBufferSize = 512;
     int audioDeviceBufferCount = 9;
 
-    int MAX_FRAMES_IN_FLIGHT = 1;
+    int MAX_FRAMES_IN_FLIGHT = 2;
 
     int r = 8, g = 8, b = 8, a = 8;
     int depth = 16, stencil = 0;

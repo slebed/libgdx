@@ -231,7 +231,6 @@ public class VulkanWindow implements Disposable {
                 }
             });
         }
-
     };
 
     private final GLFWWindowCloseCallback closeCallback = new GLFWWindowCloseCallback() {
@@ -240,6 +239,7 @@ public class VulkanWindow implements Disposable {
             postRunnable(new Runnable() {
                 @Override
                 public void run() {
+                    Gdx.app.log(TAG, "Closing window "+hashCode());
                     if (windowListener != null) {
                         if (!windowListener.closeRequested()) {
                             GLFW.glfwSetWindowShouldClose(windowHandle, false);
@@ -825,7 +825,6 @@ public class VulkanWindow implements Disposable {
         }
 
         try {
-            // ADDED: Log entry into pre-render checks
             //Gdx.app.log(TAG, "[" + this.hashCode() + "] Pre-Render Checks Starting for frame " + currentFrame + "...");
 
             // Existing resource check
@@ -847,10 +846,9 @@ public class VulkanWindow implements Disposable {
                         + ", GfxQ: " + application.getVulkanDevice().getGraphicsQueue());
                 return false;
             }
-            // ADDED: Log after resource check passed
+
             //Gdx.app.log(TAG, "[" + this.hashCode() + "] Resource check passed.");
 
-            // ADDED: Log before accessing sync objects
             //Gdx.app.log(TAG, "[" + this.hashCode() + "] Accessing sync objects: currentFrame=" + currentFrame            +", maxFramesInFlight=" + maxFramesInFlight                    + ", fenceListSize=" + (inFlightFences != null ? inFlightFences.size() : "NULL") // Size check);
 
             // Check index validity BEFORE accessing
@@ -863,11 +861,9 @@ public class VulkanWindow implements Disposable {
             // Existing access (now we know index is likely valid if we get here)
             long fence = inFlightFences.get(currentFrame);
 
-            // ADDED: Log after successfully getting fence handle reference (doesn't mean it's waited on yet)
             //Gdx.app.log(TAG, "[" + this.hashCode() + "] Got fence handle reference for frame " + currentFrame + ": " + fence);
 
         } catch (Throwable t) {
-            // ADDED: Catch and log any hidden Java exception here
             Gdx.app.error(TAG, "[" + this.hashCode() + "] !!! EXCEPTION during pre-render checks !!!", t);
             // Consider if you should return false or re-throw depending on desired behavior
             return false; // Exit update loop gracefully if checks fail
@@ -898,7 +894,7 @@ public class VulkanWindow implements Disposable {
             vkCheck(vkWaitForFences(device, fence, true, Long.MAX_VALUE), "vkWaitForFences failed");
             long waitEnd = System.nanoTime();
             //Gdx.app.log(TAG, "[" + this.hashCode() + "] Fence signaled. Wait time: " + ((waitEnd - waitStart) / 1000000.0) + " ms");
-
+            this.vulkanGraphics.prepareAllFrameResources(currentFrame);
 
             // ---> Step 1.5: <<< CLEANUP COMPLETED FRAME DESCRIPTOR SETS >>> <--- ADDED HERE
             VulkanDescriptorManager descriptorManager = this.vulkanGraphics.getDescriptorManager();
@@ -906,6 +902,7 @@ public class VulkanWindow implements Disposable {
                 // Clean up descriptor sets that were queued for freeing during the frame
                 // index whose fence we just waited on.
                 descriptorManager.cleanupCompletedFrameSets(currentFrame);
+
             } else {
                 // Log an error if the manager is unexpectedly null
                 Gdx.app.error(TAG, "[" + this.hashCode() + "] Descriptor Manager is null, cannot clean up sets!");
@@ -1025,6 +1022,9 @@ public class VulkanWindow implements Disposable {
             clearValues.get(0).color().float32(stack.floats(config.initialBackgroundColor.r, config.initialBackgroundColor.g, config.initialBackgroundColor.b, config.initialBackgroundColor.a));
             renderPassInfo.pClearValues(clearValues);
             vkCmdBeginRenderPass(commandBuffer, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+            Gdx.app.log(TAG, "[" + this.hashCode() + "] vkCmdBeginRenderPass: Started RenderPass " + this.renderPass
+                    + " (0x" + Long.toHexString(this.renderPass) + ")"
+                    + " on CmdBuffer 0x" + Long.toHexString(commandBuffer.address()));
 
             // Set dynamic states
             VkViewport.Buffer vkViewport = VkViewport.calloc(1, stack)

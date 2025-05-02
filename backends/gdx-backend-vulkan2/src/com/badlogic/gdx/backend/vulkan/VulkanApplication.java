@@ -426,178 +426,6 @@ public class VulkanApplication implements VulkanApplicationBase {
         }
     }
 
-    /*public void loop() {
-        Array<VulkanWindow> closedWindows = new Array<>();
-        long frameCount = 0;
-
-        if (lastFrameTime == -1) { // Check if first frame
-            lastFrameTime = System.nanoTime();
-        }
-        if (frameCounterStart == 0) { // Check if FPS counter needs init
-            frameCounterStart = System.nanoTime();
-        }
-
-        if (windows.size > 0) {
-            currentWindow = windows.first();
-            if (currentWindow != null) {
-                // Ensure context is active for initial operations if needed
-                currentWindow.makeCurrent();
-            } else {
-                Gdx.app.error(TAG, "Window array has size > 0 but first element is null!");
-                // Handle this error state appropriately
-            }
-        }
-
-        // Main loop continues as long as the app is running and has windows
-        while (running && windows.size > 0) {
-
-            long time = System.nanoTime();
-
-            if (resetDeltaTime) {
-                resetDeltaTime = false;
-                deltaTime = 0;
-            } else {
-                // Calculate delta time in seconds
-                deltaTime = (time - lastFrameTime) / 1000000000.0f;
-            }
-            lastFrameTime = time;
-
-            // FPS calculation
-            if (time - frameCounterStart >= 1000000000) {
-                fps = frames;
-                frames = 0;
-                frameCounterStart = time;
-            }
-            frames++;
-            frameId++;
-
-            if (audio != null) {
-                audio.update();
-            }
-
-            if (++frameCount % 120 == 0) {
-                ////Gdx.app.log(TAG,"loop() iteration: " + frameCount);
-            }
-
-            GLFW.glfwPollEvents();
-
-            VulkanInput currentInput = null;
-            if (currentWindow != null) {
-                currentInput = currentWindow.getInput();
-                currentWindow.runOnce = true;
-            }
-
-            if (currentInput != null) {
-                InputProcessor loopProc = currentInput.getInputProcessor();
-                currentInput.update();
-                currentInput.prepareNext();
-            } else {
-                // Log if input couldn't be processed (e.g., no current window)
-                ////Gdx.app.log("VulkanAppLoop", "currentInput is NULL (currentWindow=" + currentWindow + "), skipping input processing.");
-            }
-
-            boolean shouldRequestRendering;
-            synchronized (runnables) {
-                shouldRequestRendering = runnables.size > 0;
-                if (shouldRequestRendering) {
-                    executedRunnables.clear();
-                    executedRunnables.addAll(runnables);
-                    runnables.clear();
-                }
-            }
-            if (shouldRequestRendering) {
-                for (Runnable runnable : executedRunnables) {
-                    try {
-                        runnable.run();
-                    } catch (Throwable t) {
-                        Gdx.app.error(TAG, "Exception occurred in runnable execution", t);
-                    }
-                }
-
-                for (VulkanWindow window : windows) {
-                    if (!window.getGraphics().isContinuousRendering()) window.requestRendering();
-                }
-            }
-
-            boolean haveWindowsRendered = false;
-            closedWindows.clear();
-            int targetFramerate = -2; // Use -2 to indicate not yet set this frame
-
-            for (VulkanWindow window : windows) {
-                if (currentWindow != window) {
-                    window.makeCurrent();
-                    currentWindow = window;
-                }
-
-                if (targetFramerate == -2) targetFramerate = appConfig.foregroundFPS;//window.getConfig().foregroundFPS;
-
-                synchronized (lifecycleListeners) {
-                    try {
-                        haveWindowsRendered |= window.update();
-                    } catch (Throwable t) {
-                        Gdx.app.error(TAG, "Exception occurred during window update/render", t);
-                    }
-                }
-
-                if (window.shouldClose()) {
-                    closedWindows.add(window);
-                }
-            }
-
-            if (closedWindows.size > 0) {
-                for (VulkanWindow closedWindow : closedWindows) {
-                    if (windows.size == 1) {
-                        for (int i = lifecycleListeners.size - 1; i >= 0; i--) {
-                            LifecycleListener l = lifecycleListeners.get(i);
-                            try {
-                                l.pause();
-                                l.dispose();
-                            } catch (Throwable t) {
-                                Gdx.app.error(TAG, "Exception occurred during lifecycle listener pause/dispose", t);
-                            }
-                        }
-                        lifecycleListeners.clear();
-                    }
-
-                    try {
-                        closedWindow.dispose();
-                    } catch (Throwable t) {
-                        Gdx.app.error(TAG, "Exception occurred during window dispose", t);
-                    }
-
-                    windows.removeValue(closedWindow, true);
-
-                    if (currentWindow == closedWindow) {
-                        currentWindow = null;
-                    }
-                }
-
-                if (currentWindow == null && windows.size > 0) {
-                    currentWindow = windows.first();
-                    if (currentWindow != null) {
-                        currentWindow.makeCurrent();
-                    } else {
-                        Gdx.app.error(TAG, "Window array has size > 0 but first element is null after closing window!");
-                        // This indicates a potential issue with window removal or list management
-                    }
-                }
-            }
-
-            if (!haveWindowsRendered) {
-                try {
-                    Thread.sleep(1000 / appConfig.idleFPS);
-                } catch (InterruptedException e) {
-                    // ignore
-                }
-            } else if (targetFramerate > 0) {
-                // Optional: Implement frame limiting if needed
-                // sync.sync(targetFramerate); // Example using hypothetical Sync class
-            }
-        } // End while loop
-
-        //Gdx.app.log(TAG, "loop() finished after " + frameCount + " iterations.");
-    }*/
-
     /**
      * Main application loop using direct, synchronized iteration as a workaround
      * for the SnapshotArray issue.
@@ -763,6 +591,18 @@ public class VulkanApplication implements VulkanApplicationBase {
                         long closedHandle = closedWindow.getWindowHandle();
                         //Gdx.app.log(TAG, "Closing window with handle: " + closedHandle);
                         try {
+                            ApplicationListener listener = closedWindow.getListener();
+                            if (listener != null) {
+                                Gdx.app.log(TAG, "Calling listener.dispose() for closing window: " + closedHandle);
+                                try {
+                                    listener.dispose();
+                                } catch (Throwable t_listener) {
+                                    Gdx.app.error(TAG, "Exception during listener dispose for closing window: " + closedHandle, t_listener);
+                                }
+                                Gdx.app.log(TAG, "listener.dispose() finished for window: " + closedHandle);
+                            } else {
+                                Gdx.app.log(TAG, "Window " + closedHandle + " had null listener, skipping listener dispose.");
+                            }
                             // Remove from main list and map BEFORE disposing
                             boolean removed = windows.removeValue(closedWindow, true); // Use identity comparison
                             windowGraphicsMap.remove(closedHandle);
@@ -854,20 +694,49 @@ public class VulkanApplication implements VulkanApplicationBase {
                 lifecycleListener.dispose();
             }
         }
-        for (VulkanWindow window : windows) {
-            window.dispose();
-        }
-        windows.clear();
+        Gdx.app.log(TAG, "cleanupWindows: Disposing listeners for remaining windows (count=" + windows.size + ")...");
+        synchronized (windows) { // Ensure thread safety iterating/modifying
+            // Create a copy to iterate over if modification happens during listener dispose
+            // Although ideally listener dispose shouldn't modify the main windows list here.
+            Array<VulkanWindow> windowsToClean = new Array<>(windows);
+
+            for (VulkanWindow window : windowsToClean) { // Iterate over copy
+                ApplicationListener listener = window.getListener();
+                if (listener != null) {
+                    Gdx.app.log(TAG, "cleanupWindows: Calling listener.dispose() for remaining window: " + window.getWindowHandle());
+                    try {
+                        listener.dispose();
+                    } catch (Throwable t_listener) {
+                        Gdx.app.error(TAG, "cleanupWindows: Exception during listener dispose for window: " + window.getWindowHandle(), t_listener);
+                    }
+                } else {
+                    Gdx.app.log(TAG, "cleanupWindows: Window " + window.getWindowHandle() + " had null listener.");
+                }
+            }
+            // --->>> ADD THIS SECTION END <<<---
+
+            // Now dispose the VulkanWindow objects (Original loop)
+            Gdx.app.log(TAG, "cleanupWindows: Disposing VulkanWindow objects for remaining windows...");
+            for (VulkanWindow window : windowsToClean) { // Iterate over copy again
+                try {
+                    window.dispose(); // Dispose VulkanWindow resources
+                } catch (Throwable t_window) {
+                    Gdx.app.error(TAG, "cleanupWindows: Exception during VulkanWindow dispose for window: " + window.getWindowHandle(), t_window);
+                }
+            }
+            windows.clear(); // Clear original list after all disposed
+        } // End synchronized block
+        Gdx.app.log(TAG, "cleanupWindows: Finished.");
     }
 
     protected void cleanup() {
 
-        //Gdx.app.log(TAG, "Cleanup check: currentWindow hash=" + (currentWindow == null ? "null" : currentWindow.hashCode()));
+        Gdx.app.log(TAG, "Cleanup check: currentWindow hash=" + (currentWindow == null ? "null" : currentWindow.hashCode()));
         if (currentWindow != null) {
-            //Gdx.app.log(TAG, "Cleanup check: currentWindow.getListener() is null? " + (currentWindow.getListener() == null));
+            Gdx.app.log(TAG, "Cleanup check: currentWindow.getListener() is null? " + (currentWindow.getListener() == null));
         }
 
-        //Gdx.app.log(TAG, "Cleanup check: mainListener is null? " + (mainListener == null)); // Log check
+        Gdx.app.log(TAG, "Cleanup check: mainListener is null? " + (mainListener == null)); // Log check
         if (mainListener != null) { // Check the stored field
             //Gdx.app.log(TAG, "Cleanup: Attempting mainListener pause/dispose...");
             try {
@@ -875,9 +744,9 @@ public class VulkanApplication implements VulkanApplicationBase {
                 mainListener.pause(); // Call pause on the stored listener
                 //Gdx.app.log(TAG, "Cleanup: mainListener.pause() finished.");
 
-                //Gdx.app.log(TAG, "Cleanup: Calling mainListener.dispose()...");
+                Gdx.app.log(TAG, "Cleanup: Calling mainListener.dispose()...");
                 mainListener.dispose(); // Call dispose on the stored listener
-                //Gdx.app.log(TAG, "Cleanup: mainListener.dispose() finished.");
+                Gdx.app.log(TAG, "Cleanup: mainListener.dispose() finished.");
 
                 //Gdx.app.log(TAG, "ApplicationListener disposed.");
             } catch (Throwable t) {
@@ -887,38 +756,31 @@ public class VulkanApplication implements VulkanApplicationBase {
             //Gdx.app.log(TAG, "Cleanup: Skipping mainListener pause/dispose - mainListener field was null.");
         }
 
-        //Gdx.app.log(TAG, "Cleanup: Before cleanupWindows()...");
+        Gdx.app.log(TAG, "Cleanup: Before cleanupWindows()...");
         cleanupWindows();
-        //Gdx.app.log(TAG, "Cleanup: After cleanupWindows()...");
-
-        if (pipelineManager != null) {
-            pipelineManager.dispose();
-            pipelineManager = null;
-            //Gdx.app.log(TAG, "PipelineManager disposed.");
-        }
-        if (descriptorManager != null) {
-            descriptorManager.dispose();
-            descriptorManager = null;
-            //Gdx.app.log(TAG, "DescriptorManager disposed.");
-        }
-
-        /*if (Gdx.graphics instanceof VulkanGraphics) {
-            System.out.println("[" + TAG + "] Disposing VulkanGraphics...");
-            try {
-                ((VulkanGraphics) Gdx.graphics).dispose();
-                //Gdx.app.log(TAG, "VulkanGraphics disposed.");
-            } catch (Throwable t) {
-                //Gdx.app.log(TAG, "ERROR: Exception during graphics dispose.");
-                t.printStackTrace();
-            }
-        } else if (Gdx.graphics != null) {
-            Gdx.app.error(TAG, "WARNING: Gdx.graphics was not VulkanGraphics?");
-        }*/
+        Gdx.app.log(TAG, "Cleanup: After cleanupWindows()...");
 
         if (audio != null) {
             audio.dispose();
             Gdx.app.error(TAG, "Audio disposed.");
             audio = null;
+        }
+
+        if (vulkanDevice != null && vulkanDevice.getRawDevice() != null) {
+            Gdx.app.log(TAG, "Cleanup: Waiting for device idle before destroying managers and device...");
+            VK10.vkDeviceWaitIdle(vulkanDevice.getRawDevice()); // Ensure all submitted commands are finished
+            Gdx.app.log(TAG, "Cleanup: Device idle.");
+        }
+
+        if (pipelineManager != null) {
+            pipelineManager.dispose();
+            pipelineManager = null;
+            Gdx.app.log(TAG, "PipelineManager disposed.");
+        }
+        if (descriptorManager != null) {
+            descriptorManager.dispose();
+            descriptorManager = null;
+            Gdx.app.log(TAG, "DescriptorManager disposed.");
         }
 
         destroyVmaAllocator();
@@ -943,14 +805,6 @@ public class VulkanApplication implements VulkanApplicationBase {
             System.out.println("[" + TAG + "] Debug callback freed.");
             debugCallbackInstance = null;
         }
-
-        /*if (primarySurface != VK_NULL_HANDLE && vulkanInstance != null) {
-            KHRSurface.vkDestroySurfaceKHR(vulkanInstance.getRawInstance(), primarySurface, null);
-            System.out.println("[" + TAG + "] Primary surface destroyed.");
-            primarySurface = VK_NULL_HANDLE;
-        } else if (primarySurface != VK_NULL_HANDLE) {
-            System.err.println("[" + TAG + "] ERROR: Cannot destroy surface - Vulkan instance already null!");
-        }*/
 
         if (vulkanInstance != null) {
             vulkanInstance.cleanup();
