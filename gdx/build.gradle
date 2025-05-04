@@ -97,25 +97,14 @@ test {
 
 processResources.duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
-//apply plugin: "com.badlogicgames.gdx.gdx-jnigen"
-apply plugin: "com.badlogicgames.jnigen.jnigen-gradle"
-
+apply plugin: "com.badlogicgames.gdx.gdx-jnigen"
 jnigen {
 	sharedLibName = "gdx"
 	temporaryDir = "../target/native"
 	all {
 		cppExcludes = ["iosgl/**"]
 	}
-	addWindows(x64, x86)
-	addWindows(x32, x86)
-	addLinux(x64, x86)
-	addLinux(x32, ARM) // Ensure targets match standard gdx
-	addLinux(x64, ARM)
-	addMac(x64, x86)
-	addMac(x64, ARM)
-	addAndroid() // Add all default Android ABIs
-	addIOS()     // Add all default iOS targets
-	/*add(Windows, x32)
+	add(Windows, x32)
 	add(Windows, x64)
 	add(Linux, x64)
 	add(Linux, x32, ARM)
@@ -133,5 +122,5 @@ jnigen {
 	}
 	robovm {
 		extraXCFramework("libs/ObjectAL.xcframework")
-	}*/
+	}
 }

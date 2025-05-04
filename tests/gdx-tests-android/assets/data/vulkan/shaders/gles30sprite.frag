@@ -13,4 +13,5 @@ layout(binding = 1) uniform sampler2D u_texture;
 void main() {
     // Sample texture and multiply by interpolated vertex color
     outColor = v_color * texture(u_texture, v_texCoords);
+    //outColor = vec4(1.0, 0.0, 0.0, 1.0);
 }

@@ -83,8 +83,8 @@ public class VulkanTestStarter {
             }
             // Otherwise, fall back to showing the list
         }
-        //new VulkanApplication(new VulkanTestChooser(), vkConfig);
-        new VulkanApplication(new Scene2dTest(), vkConfig);
+        new VulkanApplication(new VulkanTestChooser(), vkConfig);
+        //new VulkanApplication(new Scene2dTest(), vkConfig);
     }
 
     static class VulkanTestChooser extends ApplicationAdapter {
@@ -179,7 +179,7 @@ public class VulkanTestStarter {
             stage.addActor(container);
             container.setFillParent(true);
             container.add(label).pad(10).row();
-//stage.setDebugAll(true);
+            //stage.setDebugAll(true);
             Table table = new Table();
 
             //ScrollPane scroll = new ScrollPane(table, skin);
@@ -235,22 +235,13 @@ public class VulkanTestStarter {
         private void launchTest(String testName) {
             ApplicationListener test = GdxVulkanTests.newTest(testName);
 
-            // 1. Create the configuration for the new test window
             VulkanWindowConfiguration winConfig = new VulkanWindowConfiguration();
 
-            // 2. Set standard window properties
-            winConfig.setTitle(testName + " (Vulkan Test)"); // Add tag for clarity
-            winConfig.setWindowedMode(800, 600); // Or desired size
+            winConfig.setTitle(testName + " (Vulkan Test)");
+            winConfig.setWindowedMode(800, 600);
 
-            // 3. (Optional but good) Copy defaults from App config if needed,
-            //    but be careful not to overwrite the presentMode you set below.
-            //    If you copy *after* setting presentMode, make sure the copy logic
-            //    doesn't reset it. If you copy *before*, it's simpler.
-            // Example: winConfig.setFromApplicationConfiguration(((VulkanApplication)Gdx.app).getAppConfig());
-
-            // 4. Set relative position (as you already do)
             VulkanApplication app = (VulkanApplication) Gdx.app;
-            VulkanWindow primaryWin = app.getCurrentWindow(); // Use getCurrentWindow or getPrimaryWindow
+            VulkanWindow primaryWin = app.getCurrentWindow();
             if (primaryWin != null) {
                 int currentX = primaryWin.getPositionX();
                 int currentY = primaryWin.getPositionY();
@@ -260,12 +251,9 @@ public class VulkanTestStarter {
                 Gdx.app.error("VulkanTestChooser", "Could not get primary/current window reference to position new window.");
             }
 
-            // ---> 5. SET THE DESIRED PRESENT MODE HERE <---
             winConfig.setPresentMode(VulkanApplicationConfiguration.SwapchainPresentMode.FIFO);
             Gdx.app.log("VulkanTestChooser", "Setting present mode for '" + testName + "' to: " + winConfig.getPresentMode());
-            // ---------------------------------------------
 
-            // 6. Launch the new window with the specific config
             app.newWindow(new GdxTestWrapper(test, options.logGLErrors), winConfig);
             System.out.println("Started test: " + testName + " with Present Mode: " + winConfig.getPresentMode());
         }
@@ -274,14 +262,14 @@ public class VulkanTestStarter {
         public void render() {
             stage.act(Gdx.graphics.getDeltaTime());
             stage.draw();
-            cnt++;
+            /*cnt++;
             if (cnt == 10) {
                 launchTest("Scene2dTest");
             }
             if (cnt>30){
                 VulkanApplication app = (VulkanApplication) Gdx.app;
                 app.getCurrentWindow().closeWindow();
-            }
+            }*/
         }
 
         @Override

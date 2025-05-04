@@ -164,10 +164,10 @@ public class VulkanDescriptorManager {
         long samplerHandle = (texture != null) ? texture.getSamplerHandle() : VK_NULL_HANDLE;
 
         // Log the attempt with all relevant details
-        Gdx.app.log(TAG, "updateCombinedImageSampler: Called for Set=" + set + " (0x" + Long.toHexString(set) + "), Binding=" + binding
+        /*Gdx.app.log(TAG, "updateCombinedImageSampler: Called for Set=" + set + " (0x" + Long.toHexString(set) + "), Binding=" + binding
                 + ", Texture Hash=" + (texture != null ? texture.hashCode() : "NULL")
                 + ", ImageView=" + imageViewHandle + " (0x" + Long.toHexString(imageViewHandle) + ")" // Log ImageView handle
-                + ", Sampler=" + samplerHandle + " (0x" + Long.toHexString(samplerHandle) + ")");     // Log Sampler handle
+                + ", Sampler=" + samplerHandle + " (0x" + Long.toHexString(samplerHandle) + ")");     // Log Sampler handle*/
 
         // Check for invalid handles BEFORE proceeding to Vulkan calls
         if (imageViewHandle == VK_NULL_HANDLE || samplerHandle == VK_NULL_HANDLE) {
@@ -197,9 +197,9 @@ public class VulkanDescriptorManager {
             descriptorWrite.pBufferInfo(null);
             descriptorWrite.pTexelBufferView(null);
 
-            Gdx.app.log(TAG, "  --> Calling vkUpdateDescriptorSets for Set=" + set + ", Binding=" + binding);
+            //Gdx.app.log(TAG, "  --> Calling vkUpdateDescriptorSets for Set=" + set + ", Binding=" + binding);
             vkUpdateDescriptorSets(device, descriptorWrite, null);
-            Gdx.app.log(TAG, "  <-- Returned from vkUpdateDescriptorSets for Set=" + set);
+            //Gdx.app.log(TAG, "  <-- Returned from vkUpdateDescriptorSets for Set=" + set);
         }
     }
 
@@ -245,10 +245,9 @@ public class VulkanDescriptorManager {
             descriptorWrite.pImageInfo(null);
             descriptorWrite.pTexelBufferView(null);
 
-            Gdx.app.log(TAG, " --> Calling vkUpdateDescriptorSets for Set " + set);
+            //Gdx.app.log(TAG, " --> Calling vkUpdateDescriptorSets for Set " + set);
             vkUpdateDescriptorSets(device, descriptorWrite, null);
-            Gdx.app.log(TAG, " <-- Returned from vkUpdateDescriptorSets for Set " + set);
-
+            //Gdx.app.log(TAG, " <-- Returned from vkUpdateDescriptorSets for Set " + set);
         }
     }
 

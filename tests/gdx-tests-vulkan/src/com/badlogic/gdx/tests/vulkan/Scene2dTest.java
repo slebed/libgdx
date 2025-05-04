@@ -146,11 +146,11 @@ public class Scene2dTest extends GdxTest {
 
         testStage.draw();
 
-        cnt++;
+        /*cnt++;
         if (cnt == 10) {
             VulkanApplication app = (VulkanApplication) Gdx.app;
             app.getCurrentWindow().closeWindow();
-        }
+        }*/
     }
 
 
