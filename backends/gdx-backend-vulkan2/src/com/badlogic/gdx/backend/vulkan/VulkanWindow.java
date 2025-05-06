@@ -153,7 +153,6 @@ public class VulkanWindow implements Disposable {
     private final GLFWWindowFocusCallback focusCallback = new GLFWWindowFocusCallback() {
         @Override
         public void invoke(long windowHandle, final boolean focused) {
-            //Gdx.app.log(TAG, "Window " + this.hashCode() + " Focus changed");
             postRunnable(new Runnable() {
                 @Override
                 public void run() {
@@ -286,8 +285,6 @@ public class VulkanWindow implements Disposable {
         @Override
         public void invoke(long windowHandle, int width, int height) {
             if (windowHandle == VulkanWindow.this.windowHandle) {
-                //System.out.println("_____________________");
-                //Gdx.app.log(TAG, "[" + VulkanWindow.this.hashCode() + "] Framebuffer resize callback invoked: " + width + "x" + height);
                 VulkanWindow.this.framebufferResized = true;
             }
         }
@@ -307,11 +304,9 @@ public class VulkanWindow implements Disposable {
         if (this.surface == VK_NULL_HANDLE) {
             throw new GdxRuntimeException("VulkanWindow created with VK_NULL_HANDLE surface!");
         }
-        //Gdx.app.log(TAG, "[" + this.hashCode() + "] Constructor finished. Initial listenerInitialized=" + this.listenerInitialized + ", listener=" + this.listener);
     }
 
     void create(long windowHandle) {
-        //Gdx.app.log(TAG, "[" + this.hashCode() + "] create() called for handle: " + windowHandle);
         if (windowHandle == 0) {
             Gdx.app.error(TAG, "create() called with invalid window handle!");
             throw new GdxRuntimeException("Cannot create VulkanWindow with invalid handle.");
@@ -329,13 +324,10 @@ public class VulkanWindow implements Disposable {
 
         // Register input callbacks via the input handler (must be set BEFORE create is called)
         if (this.input != null) {
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Calling windowHandleChanged on input handler hash: " + this.input.hashCode());
             try {
                 this.input.windowHandleChanged(this.windowHandle);
-                //Gdx.app.log(TAG, "[" + this.hashCode() + "] Finished calling windowHandleChanged for handle " + this.windowHandle);
             } catch (Throwable t) {
                 Gdx.app.error(TAG, "[" + this.hashCode() + "] Error calling windowHandleChanged!", t);
-                // Decide if this is fatal
             }
         } else {
             // This should NOT happen if VulkanApplication order is correct
@@ -745,12 +737,6 @@ public class VulkanWindow implements Disposable {
         return tmpBuffer2.get(0);
     }
 
-    /*void windowHandleChanged(long windowHandle) {
-        this.windowHandle = windowHandle;
-        input.windowHandleChanged(windowHandle);
-    }
-*/
-
     /**
      * Performs a single update step, processing input, runnables, and rendering a frame if needed.
      * This version delegates core Vulkan frame lifecycle management to VulkanGraphics.
@@ -769,16 +755,7 @@ public class VulkanWindow implements Disposable {
         if (!listenerInitialized && listener != null) {
             ensureListenerCreatedAndResized(); // Call helper method
         }
-        //Gdx.app.log(TAG, "VulkanWindow update() called.");
-        // 1. Initialize Listener if not already done
-        // Ensures listener.create() and initial listener.resize() are called once.
-//        if (!listenerInitialized) {
-//            initializeListener();
-//        }
 
-        // 2. Process Input for this window
-        // Drains the GLFW event queue via VulkanApplication.loop -> glfwPollEvents()
-        // This update call drains the internal InputEventQueue to the listener.
         if (!iconified && this.input != null) {
             this.input.update();      // Process events (touchDown, keyTyped etc.)
             this.input.prepareNext(); // Reset polling states (isKeyPressed etc.)
@@ -846,10 +823,6 @@ public class VulkanWindow implements Disposable {
                         + ", GfxQ: " + application.getVulkanDevice().getGraphicsQueue());
                 return false;
             }
-
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Resource check passed.");
-
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Accessing sync objects: currentFrame=" + currentFrame            +", maxFramesInFlight=" + maxFramesInFlight                    + ", fenceListSize=" + (inFlightFences != null ? inFlightFences.size() : "NULL") // Size check);
 
             // Check index validity BEFORE accessing
             if (currentFrame < 0 || currentFrame >= maxFramesInFlight || currentFrame >= inFlightFences.size()) {
@@ -1022,9 +995,9 @@ public class VulkanWindow implements Disposable {
             clearValues.get(0).color().float32(stack.floats(config.initialBackgroundColor.r, config.initialBackgroundColor.g, config.initialBackgroundColor.b, config.initialBackgroundColor.a));
             renderPassInfo.pClearValues(clearValues);
             vkCmdBeginRenderPass(commandBuffer, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-            Gdx.app.log(TAG, "[" + this.hashCode() + "] vkCmdBeginRenderPass: Started RenderPass " + this.renderPass
+            /*Gdx.app.log(TAG, "[" + this.hashCode() + "] vkCmdBeginRenderPass: Started RenderPass " + this.renderPass
                     + " (0x" + Long.toHexString(this.renderPass) + ")"
-                    + " on CmdBuffer 0x" + Long.toHexString(commandBuffer.address()));
+                    + " on CmdBuffer 0x" + Long.toHexString(commandBuffer.address()));*/
 
             // Set dynamic states
             VkViewport.Buffer vkViewport = VkViewport.calloc(1, stack)
@@ -1128,29 +1101,15 @@ public class VulkanWindow implements Disposable {
     }
 
     private void ensureListenerCreatedAndResized() {
-        // Log entry point and current state values
-        //Gdx.app.log(TAG, "[" + this.hashCode() + "] ensureListenerCreatedAndResized() ENTERED. listenerInitialized=" + this.listenerInitialized + ", listenerIsNull=" + (this.listener == null));
 
         // Check if initialization is needed and possible
         if (!listenerInitialized && listener != null) {
-            // Condition passed, log that we are proceeding
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Condition PASSED (!listenerInitialized && listener != null), proceeding with create/resize...");
 
             try {
-                // --- Set Context BEFORE calling listener ---
-                // Ensures Gdx.graphics/input point to this window's instances
-                // during listener create()/resize().
-                //Gdx.app.log(TAG, "[" + this.hashCode() + "] Setting Gdx.graphics/input context before listener calls...");
-                //Gdx.graphics = this.vulkanGraphics; // Use the instance field for graphics
-                //Gdx.input = this.input;             // Use the instance field for input
                 application.setCurrentWindow(this); // Inform application of the current window context
-                // --- End Set Context ---
 
                 listener.create();
-                //Gdx.app.log(TAG, "[" + this.hashCode() + "] listener.create() completed.");
 
-                // Initial resize call
-                // Get dimensions from the now correctly set Gdx.graphics
                 int width = Gdx.graphics.getWidth();
                 int height = Gdx.graphics.getHeight();
 
@@ -1166,11 +1125,6 @@ public class VulkanWindow implements Disposable {
 
             } catch (Throwable t) {
                 Gdx.app.error(TAG, "[" + this.hashCode() + "] !!! EXCEPTION during listener.create() or initial listener.resize() !!!", t);
-                // If create/resize fails critically, rethrowing is often best
-                // as the application state might be inconsistent. Avoid setting
-                // listenerInitialized = true in this case if you want it to potentially retry.
-                // For now, we will proceed to the finally block which sets it true.
-                // Consider adding specific error handling if needed.
                 throw new GdxRuntimeException("Listener create/resize failed for window " + windowHandle, t); // Rethrow
             } finally {
                 // Crucially, mark the listener as initialized AFTER the try block attempts create/resize,
@@ -1247,9 +1201,6 @@ public class VulkanWindow implements Disposable {
                 }
                 //Gdx.app.log(TAG, "[" + this.hashCode() + "] Framebuffers recreated (" + this.framebuffers.size() + ")");
             }
-
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Swapchain recreation process finished.");
-
         } catch (Exception e) {
             Gdx.app.error(TAG, "[" + this.hashCode() + "] CRITICAL: Failed to recreate swapchain!", e);
             throw new GdxRuntimeException("Swapchain recreation failed", e);
@@ -1277,21 +1228,6 @@ public class VulkanWindow implements Disposable {
     boolean isListenerInitialized() {
         return listenerInitialized;
     }
-
-    /*void initializeListener() { // Package-private or private
-        if (!listenerInitialized) {
-           //Gdx.app.log(TAG, "[" + this.hashCode() + "] Initializing listener... " + listener.getClass().getName());
-            try {
-
-                listenerInitialized = true; // Mark as initialized
-               //Gdx.app.log(TAG, "[" + this.hashCode() + "] Listener initialized.");
-            } catch (Throwable t) {
-                Gdx.app.error(TAG, "[" + this.hashCode() + "] Exception during listener initialization!", t);
-                // Optionally close window or rethrow
-                throw new GdxRuntimeException("Listener initialization failed for window " + windowHandle, t);
-            }
-        }
-    }*/
 
     void makeCurrent() {
         if (this.input != null) {

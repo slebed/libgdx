@@ -32,12 +32,12 @@ import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 
 import com.badlogic.gdx.scenes.scene2d.Actor;
-import com.badlogic.gdx.scenes.scene2d.ui.ImageButton;
+import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
+import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
-import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.tests.utils.GdxTest;
 import com.badlogic.gdx.utils.viewport.Viewport;
 
@@ -48,7 +48,6 @@ public class Scene2dTest extends GdxTest {
     private AssetManager assetManager;
     private VulkanStage testStage;
     private VulkanTexture badlogicTexture;
-    private int cnt;
 
     @Override
     public void create() {
@@ -65,57 +64,69 @@ public class Scene2dTest extends GdxTest {
             String skinPath = "data/uiskin.json";
             Skin skin = null; // Initialize to null
 
-            Gdx.app.log(TAG, "Queueing skin for loading: " + skinPath);
+            //Gdx.app.log(TAG, "Queueing skin for loading: " + skinPath);
             assetManager.load(skinPath, Skin.class);
-            Gdx.app.log(TAG, "Calling assetManager.finishLoading()...");
+            //Gdx.app.log(TAG, "Calling assetManager.finishLoading()...");
             assetManager.finishLoading(); // Block
-            Gdx.app.log(TAG, "assetManager.finishLoading() completed.");
+            //Gdx.app.log(TAG, "assetManager.finishLoading() completed.");
             skin = assetManager.get(skinPath, Skin.class);
-            Gdx.app.log(TAG, "Skin retrieved from AssetManager. Skin is null? " + (skin == null));
+            //Gdx.app.log(TAG, "Skin retrieved from AssetManager. Skin is null? " + (skin == null));
 
-            Gdx.app.log(TAG, "Attempting to create VulkanStage...");
+            //Gdx.app.log(TAG, "Attempting to create VulkanStage...");
             Viewport viewport = new VulkanScreenViewport(); // Consider using a simpler ScreenViewport first?
             testStage = new VulkanStage(viewport);
-            Gdx.app.log(TAG, "VulkanStage CREATED. Hash: " + testStage.hashCode());
+            //Gdx.app.log(TAG, "VulkanStage CREATED. Hash: " + testStage.hashCode());
 
-            Gdx.app.log(TAG, "Setting InputProcessor...");
+            //Gdx.app.log(TAG, "Setting InputProcessor...");
             Gdx.input.setInputProcessor(testStage);
-            Gdx.app.log(TAG, "InputProcessor SET.");
+            //Gdx.app.log(TAG, "InputProcessor SET.");
 
-            Gdx.app.log(TAG, "Creating Table...");
+            //Gdx.app.log(TAG, "Creating Table...");
             Table testTable = new Table();
-
-            Gdx.app.log(TAG, "Creating TextButton...");
+            testTable.setFillParent(true);
+            //Gdx.app.log(TAG, "Creating TextButton...");
             TextButton textButton = new TextButton("Click Me", skin); // Requires skin
-            textButton.setPosition(50, 50);
-            textButton.setSize(150, 50);
+            //textButton.setPosition(50, 50);
+            //textButton.setSize(150, 50);
             textButton.addListener(new ChangeListener() {
                 @Override
                 public void changed(ChangeEvent event, Actor actor) {
-                   Gdx.app.log(TAG,"TextButton clicked!");
+                    Gdx.app.log(TAG, "TextButton clicked!");
                 }
             });
-            Gdx.app.log(TAG, "TextButton CREATED.");
+            //Gdx.app.log(TAG, "TextButton CREATED.");
 
-            Gdx.app.log(TAG, "Attempting to create ImageButton texture...");
-            badlogicTexture = new VulkanTexture(Gdx.files.internal("data/badlogic.jpg"));
-            TextureRegionDrawable buttonDrawable = new TextureRegionDrawable(badlogicTexture); // Check file exists!
-            Gdx.app.log(TAG, "ImageButton texture CREATED.");
-            Gdx.app.log(TAG, "Creating ImageButton...");
-            ImageButton imageButton = new ImageButton(buttonDrawable);
-            Gdx.app.log(TAG, "ImageButton CREATED.");
+            //Gdx.app.log(TAG, "Attempting to create ImageButton texture...");
+            //badlogicTexture = new VulkanTexture(Gdx.files.internal("data/badlogic.jpg"));
+            //TextureRegionDrawable buttonDrawable = new TextureRegionDrawable(badlogicTexture); // Check file exists!
+            //Gdx.app.log(TAG, "ImageButton texture CREATED.");
+            //Gdx.app.log(TAG, "Creating ImageButton...");
+            //ImageButton imageButton = new ImageButton(buttonDrawable);
+            //Gdx.app.log(TAG, "ImageButton CREATED.");
 
-            Gdx.app.log(TAG, "Adding actors to stage...");
-            testStage.addActor(textButton);
-            // testStage.addActor(imageButton); // Still commented out
-            Gdx.app.log(TAG, "Actors added.");
+            CheckBox checkBox = new CheckBox("Checkbox", skin);
+            testTable.add(checkBox).pad(8).row();
+
+            SelectBox<String> selectBox = new SelectBox<>(skin);
+            selectBox.setItems("Item 1", "Item 2", "Item 3");
+            testTable.add(selectBox).pad(8).row();
+
+            //Gdx.app.log(TAG, "Adding actors to stage...");
+            testTable.add(textButton).pad(8);
+            //testTable.add(imageButton); // Still commented out
+            //Gdx.app.log(TAG, "Actors added.");
+
+            testTable.pack();
+
+            testStage.addActor(testTable);
+
 
         } catch (Throwable t) {
             Gdx.app.error(TAG, "EXCEPTION occurred during create()!", t);
             // Make sure to re-throw or handle appropriately if needed,
             // but logging it is key.
         }
-        Gdx.app.log(TAG, "create() method EXITED. testStage is null? " + (testStage == null));
+        //Gdx.app.log(TAG, "create() method EXITED. testStage is null? " + (testStage == null));
 
     }
 
@@ -185,7 +196,7 @@ public class Scene2dTest extends GdxTest {
 
             } catch (Exception e) {
                 System.err.println("    ERROR during viewport.update: " + e.getMessage());
-                e.printStackTrace(); // Print stack trace for more detail
+                //e.printStackTrace(); // Print stack trace for more detail
             }
         } else {
             System.out.println("    Stage or Viewport is NULL during resize!");
@@ -199,10 +210,8 @@ public class Scene2dTest extends GdxTest {
     public void dispose() {
         Gdx.app.log(TAG, "dispose() method ENTERED.");
 
-        // --->>> ADD THIS SYNCHRONIZATION <<<---
-        if (Gdx.app instanceof VulkanApplication) { // Ensure we have access to the device
-            VulkanApplication app = (VulkanApplication) Gdx.app;
-            VulkanDevice device = app.getVulkanDevice(); // Use getter
+        if (Gdx.app instanceof VulkanApplication app) {
+            VulkanDevice device = app.getVulkanDevice();
             if (device != null && device.getRawDevice() != null) {
                 Gdx.app.log(TAG, "Waiting for device idle before test disposal...");
                 VK10.vkDeviceWaitIdle(device.getRawDevice()); // Wait for GPU
@@ -211,14 +220,11 @@ public class Scene2dTest extends GdxTest {
                 Gdx.app.error(TAG, "Cannot vkDeviceWaitIdle, device is null!");
             }
         }
-        // --->>> END ADDED SYNCHRONIZATION <<<---
 
-
-        // Existing dispose logic (with added logging/fixes from above)
         if (testStage != null) {
-            Gdx.app.log(TAG, "Disposing VulkanStage (Hash: " + this.hashCode() + ")"); // Combine logs
+            Gdx.app.log(TAG, "Disposing VulkanStage (Hash: " + this.hashCode() + ")");
             testStage.dispose();
-            testStage = null; // Good practice
+            testStage = null;
             Gdx.app.log(TAG, "VulkanStage disposed.");
         } else {
             Gdx.app.log(TAG, "testStage was NULL, skipping dispose.");

@@ -67,13 +67,13 @@ public class VulkanPipelineManager implements Disposable {
         this.shaderModuleCache = new HashMap<>();
 
         createPipelineCache();
-        Gdx.app.log(TAG, "Initialized.");
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Initialized.");
     }
 
     /** Destroys the currently managed graphics pipeline and pipeline layout. Safe to call even if handles are VK_NULL_HANDLE. */
     public void cleanupLayoutAndPipeline() {
         if (graphicsPipeline != VK_NULL_HANDLE) {
-            Gdx.app.log(TAG, "Destroying graphics pipeline: " + graphicsPipeline);
+            VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Destroying graphics pipeline: " + graphicsPipeline);
             vkDestroyPipeline(rawDevice, graphicsPipeline, null);
             graphicsPipeline = VK_NULL_HANDLE; // Reset the handle
         }
@@ -83,47 +83,47 @@ public class VulkanPipelineManager implements Disposable {
      * Vulkan pipeline cache (if created). */
     @Override
     public void dispose() {
-        Gdx.app.log(TAG, "Disposing pipeline manager...");
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Disposing pipeline manager...");
         cleanupLayoutAndPipeline(); // Clean the default graphicsPipeline
 
         // Clean up cached shader modules
-        Gdx.app.log(TAG, "Cleaning up cached shader modules (" + shaderModuleCache.size() + ")...");
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Cleaning up cached shader modules (" + shaderModuleCache.size() + ")...");
         for (Map.Entry<String, Long> entry : shaderModuleCache.entrySet()) {
             long moduleHandle = entry.getValue();
             if (moduleHandle != VK_NULL_HANDLE) {
-                Gdx.app.log(TAG, "Destroying shader module: " + moduleHandle + " (" + entry.getKey() + ")");
+                VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Destroying shader module: " + moduleHandle + " (" + entry.getKey() + ")");
                 vkDestroyShaderModule(rawDevice, moduleHandle, null);
             }
         }
         shaderModuleCache.clear(); // Clear map AFTER destroying contents
-        Gdx.app.log(TAG, "Shader module cache cleared.");
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Shader module cache cleared.");
 
         // Clean up cached pipeline layouts
-        Gdx.app.log(TAG, "Cleaning up cached pipeline layouts (" + pipelineLayoutCache.size() + ")...");
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Cleaning up cached pipeline layouts (" + pipelineLayoutCache.size() + ")...");
         for (long layoutHandle : pipelineLayoutCache.values()) { // Iterate through the handles
             if (layoutHandle != VK_NULL_HANDLE) {
-                Gdx.app.log(TAG, "Destroying cached pipeline layout: " + layoutHandle);
+                VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Destroying cached pipeline layout: " + layoutHandle);
                 vkDestroyPipelineLayout(rawDevice, layoutHandle, null); // Destroy the layout
             }
         }
 
         pipelineLayoutCache.clear(); // Clear map AFTER destroying contents
-        Gdx.app.log(TAG, "Pipeline layout cache cleared.");
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Pipeline layout cache cleared.");
 
-        Gdx.app.log(TAG, "Cleaning up cached SpriteBatch pipelines (" + spriteBatchPipelineCache.size() + ")...");
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Cleaning up cached SpriteBatch pipelines (" + spriteBatchPipelineCache.size() + ")...");
         for (long pipelineHandle : spriteBatchPipelineCache.values()) {
             if (pipelineHandle != VK_NULL_HANDLE) {
-                Gdx.app.log(TAG, "Destroying cached SpriteBatch pipeline: " + pipelineHandle);
+                VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Destroying cached SpriteBatch pipeline: " + pipelineHandle);
                 vkDestroyPipeline(rawDevice, pipelineHandle, null);
             }
         }
         spriteBatchPipelineCache.clear();
-        Gdx.app.log(TAG, "SpriteBatch pipeline cache cleared.");
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"SpriteBatch pipeline cache cleared.");
 
         // Optional: Destroy VkPipelineCache
         destroyPipelineCache();
 
-        Gdx.app.log(TAG, "Pipeline manager disposed.");
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Pipeline manager disposed.");
     }
 
     /** Loads or retrieves a cached shader module.
@@ -143,12 +143,12 @@ public class VulkanPipelineManager implements Disposable {
                 return cachedHandle;
             }
 
-            Gdx.app.log(TAG, "Loading shader module from: " + pathKey);
+            VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Loading shader module from: " + pathKey);
             try {
                 ByteBuffer shaderCode = readFileToByteBuffer(shaderFile); // Use helper
                 long moduleHandle = createShaderModuleInternal(shaderCode); // Use helper
                 shaderModuleCache.put(pathKey, moduleHandle); // Store in cache
-                Gdx.app.log(TAG, "Shader module loaded and cached: " + moduleHandle + " [" + pathKey + "]");
+                VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Shader module loaded and cached: " + moduleHandle + " [" + pathKey + "]");
                 return moduleHandle;
             } catch (Exception e) {
                 throw new GdxRuntimeException("Failed to load shader module: " + pathKey, e);
@@ -232,7 +232,7 @@ public class VulkanPipelineManager implements Disposable {
     }
 
     private void createPipelineCache() {
-        Gdx.app.log(TAG, "Creating Vulkan pipeline cache...");
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Creating Vulkan pipeline cache...");
         try (MemoryStack stack = stackPush()) {
             VkPipelineCacheCreateInfo cacheInfo = VkPipelineCacheCreateInfo.calloc(stack).sType$Default();
             // TODO: Implement loading cache data from file for faster startup
@@ -240,7 +240,7 @@ public class VulkanPipelineManager implements Disposable {
             int result = vkCreatePipelineCache(rawDevice, cacheInfo, null, pCache);
             if (result == VK_SUCCESS) {
                 this.vkPipelineCacheHandle = pCache.get(0);
-                Gdx.app.log(TAG, "Pipeline cache created: " + this.vkPipelineCacheHandle);
+                VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Pipeline cache created: " + this.vkPipelineCacheHandle);
             } else {
                 Gdx.app.error(TAG, "Failed to create pipeline cache, result: " + VkResultDecoder.decode(result));
                 this.vkPipelineCacheHandle = VK_NULL_HANDLE;
@@ -253,7 +253,7 @@ public class VulkanPipelineManager implements Disposable {
 
     private void destroyPipelineCache() {
         if (vkPipelineCacheHandle != VK_NULL_HANDLE) {
-            Gdx.app.log(TAG, "Destroying Vulkan pipeline cache: " + vkPipelineCacheHandle);
+            VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Destroying Vulkan pipeline cache: " + vkPipelineCacheHandle);
             // TODO: Implement saving cache data to file
             // vkGetPipelineCacheData(...)
             vkDestroyPipelineCache(rawDevice, vkPipelineCacheHandle, null);
@@ -278,7 +278,7 @@ public class VulkanPipelineManager implements Disposable {
         }
 
         // Not in cache, create it
-        Gdx.app.log(TAG, "Creating new PipelineLayout for DescriptorSetLayout: " + descriptorSetLayoutHandle);
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Creating new PipelineLayout for DescriptorSetLayout: " + descriptorSetLayoutHandle);
         try (MemoryStack stack = stackPush()) {
             VkPipelineLayoutCreateInfo pipelineLayoutInfo = VkPipelineLayoutCreateInfo.calloc(stack).sType$Default()
                     .pSetLayouts(stack.longs(descriptorSetLayoutHandle)); // Use provided layout
@@ -290,7 +290,7 @@ public class VulkanPipelineManager implements Disposable {
 
             // Store in cache
             pipelineLayoutCache.put(descriptorSetLayoutHandle, newPipelineLayoutHandle);
-            Gdx.app.log(TAG, "Created and cached PipelineLayout: " + newPipelineLayoutHandle);
+            VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Created and cached PipelineLayout: " + newPipelineLayoutHandle);
             return newPipelineLayoutHandle;
 
         } catch (Exception e) {
@@ -319,7 +319,7 @@ public class VulkanPipelineManager implements Disposable {
             return cachedPipeline;
         }
 
-        Gdx.app.log(TAG, "getOrCreateSpriteBatchPipeline() Creating NEW SpriteBatch graphics pipeline for Layout=" + batchPipelineLayoutHandle + ", RP=" + renderPassHandle);
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"getOrCreateSpriteBatchPipeline() Creating NEW SpriteBatch graphics pipeline for Layout=" + batchPipelineLayoutHandle + ", RP=" + renderPassHandle);
 
         // --- Load Shaders (Can still use shader cache) ---
         FileHandle vertShaderFile = Gdx.files.internal("data/vulkan/shaders/spritebatch.vert.spv");
@@ -333,25 +333,51 @@ public class VulkanPipelineManager implements Disposable {
             // --- Configure Pipeline States (Vertex Input, Blending etc.) ---
             VkPipelineShaderStageCreateInfo.Buffer shaderStages = createShaderStages(stack, vertModuleHandle, fragModuleHandle);
 
-            // Define vertex input specific to VulkanSpriteBatch
-            final int POSITION_COMPONENTS_TEST = 2;
-            final int COLOR_COMPONENTS_TEST = 4; // CHANGED from 1
-            final int TEXCOORD_COMPONENTS_TEST = 2;
-            final int TOTAL_COMPONENTS_TEST = POSITION_COMPONENTS_TEST + COLOR_COMPONENTS_TEST + TEXCOORD_COMPONENTS_TEST; // 2 + 4 + 2 = 8
-
+            // Binding 0: Describes the overall vertex buffer layout
             VkVertexInputBindingDescription.Buffer bindingDescription = VkVertexInputBindingDescription.calloc(1, stack)
                     .binding(0)
-                    .stride(VulkanSpriteBatch.COMPONENTS_PER_VERTEX * Float.BYTES) // Should use 5 * 4 = 20 bytes
+                    // Use the size calculated from the updated BATCH_ATTRIBUTES
+                    .stride(VulkanSpriteBatch.BATCH_ATTRIBUTES.vertexSize) // Should be 24 bytes (6 floats * 4 bytes/float)
                     .inputRate(VK_VERTEX_INPUT_RATE_VERTEX);
 
-            VkVertexInputAttributeDescription.Buffer attributeDescriptions = VkVertexInputAttributeDescription.calloc(3, stack);
-            // Location 0: Position (vec2) - Offset 0
-            attributeDescriptions.get(0).binding(0).location(0).format(VK_FORMAT_R32G32_SFLOAT).offset(0);
-            // Location 1: Color (Packed Float) - Offset 8
-            attributeDescriptions.get(1).binding(0).location(1).format(VK_FORMAT_R32_SFLOAT).offset(VulkanSpriteBatch.POSITION_COMPONENTS * Float.BYTES); // Offset 8
-            // Location 2: TexCoord (vec2) - Offset 12 (after pos + packed color)
-            attributeDescriptions.get(2).binding(0).location(2).format(VK_FORMAT_R32G32_SFLOAT).offset((VulkanSpriteBatch.POSITION_COMPONENTS + VulkanSpriteBatch.COLOR_COMPONENTS) * Float.BYTES); // Offset 12 (2*4 + 1*4)
+            // Attribute Descriptions: Define each attribute within the binding
+            VkVertexInputAttributeDescription.Buffer attributeDescriptions = VkVertexInputAttributeDescription.calloc(4, stack); // Allocate space for 4 attributes
 
+            int currentOffset = 0;
+
+            // Location 0: Position (vec2)
+            attributeDescriptions.get(0)
+                    .binding(0)
+                    .location(0)
+                    .format(VK_FORMAT_R32G32_SFLOAT) // 2 floats
+                    .offset(currentOffset);
+            currentOffset += VulkanSpriteBatch.POSITION_COMPONENTS * Float.BYTES; // offset = 0, next = 8
+
+            // Location 1: Color (Packed Float)
+            attributeDescriptions.get(1)
+                    .binding(0)
+                    .location(1)
+                    .format(VK_FORMAT_R32_SFLOAT) // 1 float (shader unpacks)
+                    .offset(currentOffset);
+            currentOffset += VulkanSpriteBatch.COLOR_COMPONENTS * Float.BYTES; // offset = 8, next = 12
+
+            // Location 2: TexCoord (vec2)
+            attributeDescriptions.get(2)
+                    .binding(0)
+                    .location(2)
+                    .format(VK_FORMAT_R32G32_SFLOAT) // 2 floats
+                    .offset(currentOffset);
+            currentOffset += VulkanSpriteBatch.TEXCOORD_COMPONENTS * Float.BYTES; // offset = 12, next = 20
+
+            // Location 3: TexIndex (float) - NEW
+            attributeDescriptions.get(3)
+                    .binding(0)
+                    .location(3)
+                    .format(VK_FORMAT_R32_SFLOAT) // 1 float (representing the int index)
+                    .offset(currentOffset);
+            // currentOffset += VulkanSpriteBatch.TEXINDEX_COMPONENTS * Float.BYTES; // offset = 20, next = 24 (matches stride)
+
+            // Create the state info struct
             VkPipelineVertexInputStateCreateInfo vertexInputInfo = VkPipelineVertexInputStateCreateInfo.calloc(stack)
                     .sType$Default()
                     .pVertexBindingDescriptions(bindingDescription)
@@ -398,13 +424,13 @@ public class VulkanPipelineManager implements Disposable {
                     .basePipelineIndex(-1);
 
             LongBuffer pGraphicsPipeline = stack.mallocLong(1);
-            Gdx.app.log(TAG, "Using layout handle " + pipelineLayoutHandle + " in VkGraphicsPipelineCreateInfo.");
+            VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Using layout handle " + pipelineLayoutHandle + " in VkGraphicsPipelineCreateInfo.");
             vkCheck(vkCreateGraphicsPipelines(rawDevice, this.vkPipelineCacheHandle, pipelineInfo, null, pGraphicsPipeline), "Failed to create SpriteBatch graphics pipeline");
 
             long newPipelineHandle = pGraphicsPipeline.get(0);
 
             spriteBatchPipelineCache.put(key, newPipelineHandle);
-            Gdx.app.log(TAG, "SpriteBatch graphics pipeline created and cached successfully: " + newPipelineHandle + " for Key(Layout=" + key.layout + ", RP=" + key.renderPass + ")");
+            VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"SpriteBatch graphics pipeline created and cached successfully: " + newPipelineHandle + " for Key(Layout=" + key.layout + ", RP=" + key.renderPass + ")");
 
             return newPipelineHandle;
 

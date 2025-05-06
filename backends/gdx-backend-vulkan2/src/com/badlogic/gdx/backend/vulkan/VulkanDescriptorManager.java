@@ -1,12 +1,18 @@
 package com.badlogic.gdx.backend.vulkan;
 
+import static com.badlogic.gdx.backend.vulkan.VkMemoryUtil.vkCheck;
+
 import org.lwjgl.system.*;
 import org.lwjgl.vulkan.*;
 
+import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.util.*;
+
 import static org.lwjgl.vulkan.VK10.*;
 import static org.lwjgl.system.MemoryStack.*;
+import static org.lwjgl.vulkan.VK12.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
+import static org.lwjgl.vulkan.VK12.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
 
 import com.badlogic.gdx.Gdx;
 
@@ -28,11 +34,13 @@ public class VulkanDescriptorManager {
     public static final String LAYOUT_KEY_SPRITEBATCH = "SpriteBatch_UBO0_Sampler1";
     public static final String LAYOUT_KEY_SINGLE_SAMPLER = "SingleSampler0"; // Keep if needed elsewhere
 
+    private static final int MAX_SPRITEBATCH_TEXTURES = VulkanSpriteBatch.MAX_BATCH_TEXTURES;
+
     public VulkanDescriptorManager(VkDevice device) {
         this.device = Objects.requireNonNull(device);
         createPool();
 
-        VulkanApplication app = (VulkanApplication)Gdx.app;
+        VulkanApplication app = (VulkanApplication) Gdx.app;
 
         int capacity = app.getAppConfig().MAX_FRAMES_IN_FLIGHT;
         this.setsToFree = new ArrayList<>(capacity);
@@ -52,6 +60,57 @@ public class VulkanDescriptorManager {
     }
 
     private long createSpriteBatchLayout() {
+        Gdx.app.log(TAG, "Creating SpriteBatch Descriptor Set Layout (with Indexing for " + MAX_SPRITEBATCH_TEXTURES + " textures)...");
+        try (MemoryStack stack = stackPush()) {
+            VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(2, stack);
+
+            // Binding 0: Uniform Buffer (Vertex Shader) - NO CHANGE
+            VkDescriptorSetLayoutBinding uboBinding = bindings.get(0);
+            uboBinding.binding(0);
+            uboBinding.descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+            uboBinding.descriptorCount(1);
+            uboBinding.stageFlags(VK_SHADER_STAGE_VERTEX_BIT);
+            uboBinding.pImmutableSamplers(null);
+
+            // --- Binding 1: Combined Image Sampler Array (Fragment Shader) --- MODIFIED ---
+            VkDescriptorSetLayoutBinding samplerBinding = bindings.get(1);
+            samplerBinding.binding(1);
+            samplerBinding.descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            samplerBinding.descriptorCount(MAX_SPRITEBATCH_TEXTURES); // Use array size
+            samplerBinding.stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
+            samplerBinding.pImmutableSamplers(null);
+
+            // --- Flags for Descriptor Indexing (Specifically for Binding 1) --- NEW ---
+            IntBuffer bindingFlags = stack.mallocInt(2); // One flag entry per binding
+            bindingFlags.put(0, 0); // Binding 0 (UBO) has no special flags
+            // Set flags for Binding 1 (Sampler Array)
+            bindingFlags.put(1, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT // Allows unused slots
+                    // | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT // Optional: If you want to update after binding (adds complexity)
+                    // | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT // Optional: If the last binding's count can vary (not needed here)
+            );
+            bindingFlags.flip();
+
+            VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo = VkDescriptorSetLayoutBindingFlagsCreateInfo.calloc(stack);
+            flagsInfo.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO);
+            flagsInfo.pBindingFlags(bindingFlags);
+            // --- End New Flags ---
+
+            VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack);
+            layoutInfo.sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO);
+            layoutInfo.pBindings(bindings);
+            layoutInfo.pNext(flagsInfo.address()); // Chain the flags struct
+            // Optional: If using UpdateAfterBind, might need VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT in layoutInfo.flags()
+
+            LongBuffer pLayout = stack.mallocLong(1);
+            vkCheck(vkCreateDescriptorSetLayout(device, layoutInfo, null, pLayout), "Failed to create SpriteBatch descriptor set layout (with Indexing)");
+
+            long layoutHandle = pLayout.get(0);
+            Gdx.app.log(TAG, "Created Indexed SpriteBatch Descriptor Set Layout: " + layoutHandle);
+            return layoutHandle;
+        }
+    }
+
+    /*private long createSpriteBatchLayout() {
         try (MemoryStack stack = stackPush()) {
             VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(2, stack);
 
@@ -83,7 +142,7 @@ public class VulkanDescriptorManager {
             System.out.println("Created SpriteBatch Descriptor Set Layout: " + pLayout.get(0));
             return pLayout.get(0);
         }
-    }
+    }*/
 
     private long createSingleSamplerLayout() {
         try (MemoryStack stack = stackPush()) {
@@ -157,17 +216,71 @@ public class VulkanDescriptorManager {
     }
 
     /**
+     * Static helper to update a Combined Image Sampler descriptor at a specific array element.
+     *
+     * @param device        The Vulkan logical device.
+     * @param set           The descriptor set handle.
+     * @param binding       The binding number within the set.
+     * @param arrayElement  The index within the descriptor array at the specified binding.
+     * @param texture       The texture to bind.
+     */
+    public static void updateCombinedImageSampler(VkDevice device, long set, int binding, int arrayElement, VulkanTexture texture) {
+        long imageViewHandle = (texture != null) ? texture.getImageViewHandle() : VK_NULL_HANDLE;
+        long samplerHandle = (texture != null) ? texture.getSamplerHandle() : VK_NULL_HANDLE;
+
+        // Log the attempt with all relevant details including arrayElement
+    /* Gdx.app.log(TAG, "updateCombinedImageSampler: Called for Set=" + set + " (0x" + Long.toHexString(set) + "), Binding=" + binding
+            + ", ArrayElement=" + arrayElement // NEW log detail
+            + ", Texture Hash=" + (texture != null ? texture.hashCode() : "NULL")
+            + ", ImageView=" + imageViewHandle + " (0x" + Long.toHexString(imageViewHandle) + ")"
+            + ", Sampler=" + samplerHandle + " (0x" + Long.toHexString(samplerHandle) + ")"); */
+
+        // Check for invalid handles BEFORE proceeding to Vulkan calls
+        if (imageViewHandle == VK_NULL_HANDLE || samplerHandle == VK_NULL_HANDLE) {
+            Gdx.app.error(TAG, "  --> ABORTING UPDATE: Invalid texture, ImageView, or Sampler handle provided for array element " + arrayElement + "!");
+            // You might want default texture here, but null descriptor is safer with PARTIALLY_BOUND
+            // For now, just skip the update for this element.
+            return;
+        }
+
+        try (MemoryStack stack = stackPush()) {
+            VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack);
+            imageInfo.imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            imageInfo.imageView(imageViewHandle);
+            imageInfo.sampler(samplerHandle);
+
+            VkWriteDescriptorSet.Buffer descriptorWrite = VkWriteDescriptorSet.calloc(1, stack);
+            descriptorWrite.sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+            descriptorWrite.dstSet(set);
+            descriptorWrite.dstBinding(binding);
+            descriptorWrite.dstArrayElement(arrayElement); // Use the provided array element index
+            descriptorWrite.descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+            descriptorWrite.descriptorCount(1); // We are updating one element at a time here
+            descriptorWrite.pImageInfo(imageInfo);
+            descriptorWrite.pBufferInfo(null);
+            descriptorWrite.pTexelBufferView(null);
+
+            // ... (logging before/after vkUpdateDescriptorSets) ...
+            vkUpdateDescriptorSets(device, descriptorWrite, null);
+        }
+    }
+
+    public static void updateCombinedImageSampler(VkDevice device, long set, int binding, VulkanTexture texture) {
+        updateCombinedImageSampler(device, set, binding, 0, texture); // Defaults to array element 0
+    }
+
+    /**
      * Static helper to update a Combined Image Sampler descriptor.
      */
-    public static void updateCombinedImageSampler(VkDevice device, long set, int binding, VulkanTexture texture) {
+    /*public static void updateCombinedImageSampler(VkDevice device, long set, int binding, VulkanTexture texture) {
         long imageViewHandle = (texture != null) ? texture.getImageViewHandle() : VK_NULL_HANDLE;
         long samplerHandle = (texture != null) ? texture.getSamplerHandle() : VK_NULL_HANDLE;
 
         // Log the attempt with all relevant details
-        /*Gdx.app.log(TAG, "updateCombinedImageSampler: Called for Set=" + set + " (0x" + Long.toHexString(set) + "), Binding=" + binding
+        *//*Gdx.app.log(TAG, "updateCombinedImageSampler: Called for Set=" + set + " (0x" + Long.toHexString(set) + "), Binding=" + binding
                 + ", Texture Hash=" + (texture != null ? texture.hashCode() : "NULL")
                 + ", ImageView=" + imageViewHandle + " (0x" + Long.toHexString(imageViewHandle) + ")" // Log ImageView handle
-                + ", Sampler=" + samplerHandle + " (0x" + Long.toHexString(samplerHandle) + ")");     // Log Sampler handle*/
+                + ", Sampler=" + samplerHandle + " (0x" + Long.toHexString(samplerHandle) + ")");     // Log Sampler handle*//*
 
         // Check for invalid handles BEFORE proceeding to Vulkan calls
         if (imageViewHandle == VK_NULL_HANDLE || samplerHandle == VK_NULL_HANDLE) {
@@ -201,7 +314,7 @@ public class VulkanDescriptorManager {
             vkUpdateDescriptorSets(device, descriptorWrite, null);
             //Gdx.app.log(TAG, "  <-- Returned from vkUpdateDescriptorSets for Set=" + set);
         }
-    }
+    }*/
 
     /**
      * Static helper to update a Uniform Buffer descriptor. (NEW)
@@ -223,7 +336,7 @@ public class VulkanDescriptorManager {
             return; // Avoid crash
         }
         if (range <= 0) {
-            System.err.println("WARN: Attempting to update UBO binding " + binding + " with zero or negative range ("+range+").");
+            System.err.println("WARN: Attempting to update UBO binding " + binding + " with zero or negative range (" + range + ").");
         }
 
         Gdx.app.log(TAG, "updateUniformBuffer: Updating Set " + set + " (0x" + Long.toHexString(set) + "), Binding " + binding + ", Buf " + bufferHandle + ", Range " + range); // Log details
@@ -266,7 +379,7 @@ public class VulkanDescriptorManager {
 
     public void cleanupCompletedFrameSets(int frameIndex) {
         //Gdx.app.log(TAG, "cleanupCompletedFrameSets: Cleaning up completed frame " + frameIndex + " sets");
-        VulkanApplication app = (VulkanApplication)Gdx.app;
+        VulkanApplication app = (VulkanApplication) Gdx.app;
         int queueIndex = frameIndex % app.getAppConfig().MAX_FRAMES_IN_FLIGHT;
         List<Long> handlesToActuallyFree;
         List<Long> frameQueue = setsToFree.get(queueIndex); // Use .get()

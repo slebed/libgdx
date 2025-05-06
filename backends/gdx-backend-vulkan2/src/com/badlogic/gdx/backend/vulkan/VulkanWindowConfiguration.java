@@ -24,6 +24,15 @@ import com.badlogic.gdx.Graphics.DisplayMode;
 import com.badlogic.gdx.graphics.Color;
 
 public class VulkanWindowConfiguration {
+
+	VulkanGraphics.VulkanMonitor maximizedMonitor;
+	VulkanApplicationConfiguration.SwapchainPresentMode presentMode = VulkanApplicationConfiguration.SwapchainPresentMode.FIFO;
+	VulkanWindowListener windowListener;
+	VulkanGraphics.VulkanDisplayMode fullscreenMode;
+	FileType windowIconFileType;
+	String[] windowIconPaths;
+	String title;
+	Color initialBackgroundColor = Color.BLACK;
 	int windowX = -1;
 	int windowY = -1;
 	int windowWidth = 640;
@@ -32,16 +41,7 @@ public class VulkanWindowConfiguration {
 	boolean windowResizable = true;
 	boolean windowDecorated = true;
 	boolean windowMaximized = false;
-	VulkanGraphics.VulkanMonitor maximizedMonitor;
-	VulkanApplicationConfiguration.SwapchainPresentMode presentMode = VulkanApplicationConfiguration.SwapchainPresentMode.FIFO;
-
 	boolean autoIconify = true;
-	FileType windowIconFileType;
-	String[] windowIconPaths;
-	VulkanWindowListener windowListener;
-	VulkanGraphics.VulkanDisplayMode fullscreenMode;
-	String title;
-	Color initialBackgroundColor = Color.BLACK;
 	boolean initialVisible = true;
 
 	void setWindowConfiguration (VulkanWindowConfiguration config) {

@@ -3,6 +3,7 @@ package com.badlogic.gdx.backend.vulkan; // Example package
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
@@ -10,12 +11,14 @@ import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram; // Needed for constants
+import com.badlogic.gdx.math.Affine2;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.NumberUtils;
+import com.badlogic.gdx.utils.ObjectMap;
 
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
@@ -39,9 +42,9 @@ import static org.lwjgl.vulkan.VK10.*;
 
 public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Disposable {
 
+    public static final int MAX_BATCH_TEXTURES = 16;
     private final String TAG = "VulkanSpriteBatch";
 
-    private final VulkanDevice device;
     private final VkDevice rawDevice;
     private final long vmaAllocator;
     private final VulkanPipelineManager pipelineManager;
@@ -56,10 +59,9 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
 
     private ByteBuffer mappedVertexByteBuffer;
     private FloatBuffer vertices;
-    private final ShortBuffer indicesCpu;
 
-    private final int vertexSize;
-    private final int vertexFloats;
+    private final int vertexFloats; // Total float components per vertex (now 6)
+    private final int vertexSizeInBytes; // Size of one vertex in bytes
 
     private final int frameCount; // Store MAX_FRAMES_IN_FLIGHT
     private final long[] batchDescriptorSets; // Array for descriptor sets per frame
@@ -71,7 +73,6 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
     private final Matrix4 projectionMatrix = new Matrix4();
     private final Matrix4 transformMatrix = new Matrix4(); // Usually identity for SpriteBatch
 
-
     private VulkanTexture defaultTexture;
     private VulkanTexture lastTexture = null;
     private float invTexWidth = 0, invTexHeight = 0;
@@ -80,39 +81,55 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
     private int spriteCount = 0;
     private int vertexBufferIdx = 0;
 
-    private final float[] affineVertices = new float[VERTICES_PER_SPRITE * COMPONENTS_PER_VERTEX]; // 4 * 5 = 20 floats
-
-    public static final VertexAttributes BATCH_ATTRIBUTES = new VertexAttributes(
-            new VertexAttribute(VertexAttributes.Usage.Position, 2, ShaderProgram.POSITION_ATTRIBUTE),
-            new VertexAttribute(VertexAttributes.Usage.ColorPacked, 4, ShaderProgram.COLOR_ATTRIBUTE), // Stored as 1 float, needs GL_UNSIGNED_BYTE type? Check shader. Let's use GL_FLOAT for the packed float initially.
-            new VertexAttribute(VertexAttributes.Usage.TextureCoordinates, 2, ShaderProgram.TEXCOORD_ATTRIBUTE + "0")
-    );
     public static final int POSITION_COMPONENTS = 2;
     public static final int COLOR_COMPONENTS = 1; // Packed into one float
     public static final int TEXCOORD_COMPONENTS = 2;
-    public static final int COMPONENTS_PER_VERTEX = POSITION_COMPONENTS + COLOR_COMPONENTS + TEXCOORD_COMPONENTS; // 2 + 1 + 2 = 5
-    public static final int VERTICES_PER_SPRITE = 4; // Using indexed drawing for quads
+    public static final int TEXINDEX_COMPONENTS = 1; // NEW: One float for the index
+
+    public static final int COMPONENTS_PER_VERTEX = POSITION_COMPONENTS + COLOR_COMPONENTS + TEXCOORD_COMPONENTS + TEXINDEX_COMPONENTS; // 2 + 1 + 2 + 1 = 6
+
+    public static final int VERTICES_PER_SPRITE = 4;
     public static final int INDICES_PER_SPRITE = 6;
     public int renderCalls;
 
+    public static final VertexAttributes BATCH_ATTRIBUTES = new VertexAttributes(
+            new VertexAttribute(VertexAttributes.Usage.Position, POSITION_COMPONENTS, ShaderProgram.POSITION_ATTRIBUTE), // Location 0
+            new VertexAttribute(VertexAttributes.Usage.ColorPacked, 4, ShaderProgram.COLOR_ATTRIBUTE), // Location 1 (Still float, but shader unpacks)
+            new VertexAttribute(VertexAttributes.Usage.TextureCoordinates, TEXCOORD_COMPONENTS, ShaderProgram.TEXCOORD_ATTRIBUTE + "0"), // Location 2
+            new VertexAttribute(VertexAttributes.Usage.Generic, TEXINDEX_COMPONENTS, GL20.GL_FLOAT, false, "a_texIndex", 0)
+    );
+
     private final VulkanTexture[] currentTextureInSet;
+
+    private boolean blendingEnabled = true; // Default state
+    private int blendSrcFunc = GL20.GL_SRC_ALPHA; // Default libgdx blend func
+    private int blendDstFunc = GL20.GL_ONE_MINUS_SRC_ALPHA; // Default libgdx blend func
+    private int blendSrcFuncAlpha = GL20.GL_SRC_ALPHA; // Default separate alpha
+    private int blendDstFuncAlpha = GL20.GL_ONE_MINUS_SRC_ALPHA; // Default separate alpha
+    private boolean blendFuncSeparate = false; // Flag to track if separate func was used
+
+    private final VulkanTexture[] currentBatchTextures; // Textures active in the current batch segment
+    private final ObjectMap<VulkanTexture, Integer> textureToIndex; // Map active textures to their index [0..MAX_BATCH_TEXTURES-1]
+    private int nextTextureSlot; // Next available slot in currentBatchTextures array
+
+    private final float[] affineVertices; // Temporary buffer per sprite, needs updated size
 
     public VulkanSpriteBatch() {
         this(1024); // Default batch size
     }
 
     public VulkanSpriteBatch(int size) {
-        Gdx.app.log(TAG, "Initializing with size: " + size);
+        Gdx.app.log(TAG, "Initializing with size: " + size + ", MAX_BATCH_TEXTURES=" + MAX_BATCH_TEXTURES);
 
         if (!(Gdx.graphics instanceof VulkanGraphics)) {
             throw new GdxRuntimeException("VulkanSpriteBatch requires the VulkanGraphics backend!");
         }
         VulkanGraphics gfx = (VulkanGraphics) Gdx.graphics;
 
-        gfx.registerFrameResourcePreparer(this); // Register self
-        Gdx.app.log(TAG, "Initialization complete and registered for frame preparation.");
+        gfx.registerFrameResourcePreparer(this); // Register self for prepareResourcesForFrame
+        Gdx.app.log(TAG, "Registered for frame preparation.");
 
-        this.device = gfx.getVulkanDevice();
+        VulkanDevice device = gfx.getVulkanDevice();
         this.vmaAllocator = gfx.getVmaAllocator();
         this.pipelineManager = gfx.getPipelineManager();
         this.descriptorManager = gfx.getDescriptorManager();
@@ -126,14 +143,21 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         if (this.frameCount <= 0) {
             throw new GdxRuntimeException("MAX_FRAMES_IN_FLIGHT must be positive, was: " + this.frameCount);
         }
-
         Gdx.app.log(TAG, "Using Descriptor set buffer count based on MAX_FRAMES_IN_FLIGHT: " + this.frameCount);
-        this.batchDescriptorSets = new long[this.frameCount]; // Initialize array
+        this.batchDescriptorSets = new long[this.frameCount];
 
-        this.vertexSize = COMPONENTS_PER_VERTEX * Float.BYTES;
-        this.vertexFloats = COMPONENTS_PER_VERTEX;
+        this.currentBatchTextures = new VulkanTexture[MAX_BATCH_TEXTURES];
+        this.textureToIndex = new ObjectMap<>(MAX_BATCH_TEXTURES);
+        this.nextTextureSlot = 0;
+
+        this.vertexFloats = COMPONENTS_PER_VERTEX; // Now 6
+        this.vertexSizeInBytes = BATCH_ATTRIBUTES.vertexSize;
+        this.affineVertices = new float[VERTICES_PER_SPRITE * COMPONENTS_PER_VERTEX]; // Temp buffer size updated
+        Gdx.app.log(TAG, "Vertex size: " + vertexSizeInBytes + " bytes (" + vertexFloats + " float components)");
+
         int maxVertices = size * VERTICES_PER_SPRITE;
-        long vertexBufferSizeBytes = (long) maxVertices * vertexSize;
+        long vertexBufferSizeBytes = (long) maxVertices * vertexSizeInBytes; // Use bytes
+
         this.vertexBuffer = VulkanResourceUtil.createManagedBuffer(
                 vmaAllocator, vertexBufferSizeBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                 VMA_MEMORY_USAGE_AUTO,
@@ -143,16 +167,16 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         try {
             vkCheck(vmaMapMemory(vmaAllocator, vertexBuffer.allocationHandle, pDataVB), "VMA Failed to map vertex buffer for batch");
             this.mappedVertexByteBuffer = MemoryUtil.memByteBuffer(pDataVB.get(0), (int) vertexBufferSizeBytes);
-            this.vertices = this.mappedVertexByteBuffer.asFloatBuffer();
-            Gdx.app.log(TAG, "Vertex buffer created and persistently mapped.");
+            this.vertices = this.mappedVertexByteBuffer.asFloatBuffer(); // Still use FloatBuffer
+            Gdx.app.log(TAG, "Vertex buffer created and persistently mapped (Capacity: " + vertices.capacity() + " floats).");
         } finally {
             MemoryUtil.memFree(pDataVB);
         }
         Gdx.app.log(TAG, "Created vertexBuffer handle: " + this.vertexBuffer.bufferHandle + ", Allocation: " + this.vertexBuffer.allocationHandle);
 
-        this.indicesCpu = BufferUtils.newShortBuffer(size * INDICES_PER_SPRITE);
-        ((Buffer) this.indicesCpu).clear();
-        for (int i = 0, v = 0; i < size * INDICES_PER_SPRITE; i += INDICES_PER_SPRITE, v += 4) {
+        ShortBuffer indicesCpu = BufferUtils.newShortBuffer(size * INDICES_PER_SPRITE);
+        ((Buffer) indicesCpu).clear();
+        for (int i = 0, v = 0; i < size * INDICES_PER_SPRITE; i += INDICES_PER_SPRITE, v += VERTICES_PER_SPRITE) { // Use constant
             indicesCpu.put((short) v);
             indicesCpu.put((short) (v + 1));
             indicesCpu.put((short) (v + 2));
@@ -160,7 +184,7 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
             indicesCpu.put((short) (v + 3));
             indicesCpu.put((short) v);
         }
-        ((Buffer) this.indicesCpu).flip();
+        ((Buffer) indicesCpu).flip();
         long indexBufferSize = (long) indicesCpu.limit() * Short.BYTES;
         VulkanBuffer stagingIndexBuffer = null;
         try {
@@ -195,32 +219,24 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         }
         Gdx.app.log(TAG, "Created indexBuffer handle: " + this.indexBuffer.bufferHandle + ", Allocation: " + this.indexBuffer.allocationHandle);
 
-        long uboSize = 16 * Float.BYTES;
+        long uboSize = 16 * Float.BYTES; // Size of mat4
         this.projMatrixUbo = VulkanResourceUtil.createManagedBuffer(
                 vmaAllocator, uboSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                 VMA_MEMORY_USAGE_AUTO,
-                VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT // No persistent mapping needed
+                VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
         );
-        if (this.projMatrixUbo == null) {
-            throw new GdxRuntimeException("Failed to create Projection matrix UBO");
-        }
         Gdx.app.log(TAG, "Projection matrix UBO created.");
+        Gdx.app.log(TAG, "Created projMatrixUbo handle: " + this.projMatrixUbo.bufferHandle + ", Allocation: " + this.projMatrixUbo.allocationHandle);
 
-        Gdx.app.log(TAG, "Getting SpriteBatch descriptor set layout from manager...");
-        this.batchDescriptorLayout = descriptorManager.getOrCreateSpriteBatchLayout();
+        Gdx.app.log(TAG, "Getting SpriteBatch descriptor set layout (indexing) from manager...");
+        this.batchDescriptorLayout = descriptorManager.getOrCreateSpriteBatchLayout(); // Should return the indexed layout now
         if (this.batchDescriptorLayout == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Failed to get SpriteBatch descriptor set layout from manager.");
+            throw new GdxRuntimeException("Failed to get Indexed SpriteBatch descriptor set layout from manager.");
         }
         Gdx.app.log(TAG, "Obtained batch descriptor set layout: " + this.batchDescriptorLayout);
 
-        Gdx.app.log(TAG, "Allocating " + frameCount + " descriptor sets using manager...");
-        if (this.batchDescriptorLayout == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Cannot allocate descriptor sets, layout handle is null.");
-        }
-        Gdx.app.log(TAG, "Created projMatrixUbo handle: " + this.projMatrixUbo.bufferHandle + ", Allocation: " + this.projMatrixUbo.allocationHandle);
-
         Gdx.app.log(TAG, "Allocating " + this.frameCount + " descriptor sets using manager...");
-        defaultTexture = findDefaultWhiteTexture(); // <<< Helper needed
+        defaultTexture = findDefaultWhiteTexture(); // Create default texture
 
         currentTextureInSet = new VulkanTexture[this.frameCount];
 
@@ -229,43 +245,36 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
             if (setHandle == VK_NULL_HANDLE) {
                 throw new GdxRuntimeException("Failed to allocate descriptor set [" + i + "] via manager.");
             }
-            this.batchDescriptorSets[i] = setHandle; // Store handle in array
+            this.batchDescriptorSets[i] = setHandle;
             Gdx.app.log(TAG, "Allocated batch descriptor set [" + i + "]: " + setHandle);
 
-            // Perform initial UBO update for each set
             if (this.projMatrixUbo == null || this.projMatrixUbo.bufferHandle == VK_NULL_HANDLE) {
                 throw new IllegalStateException("projMatrixUbo invalid before initial descriptor update for set [" + i + "]!");
             }
             Gdx.app.log(TAG, "Performing initial UBO update for set [" + i + "]: " + setHandle);
-            VulkanDescriptorManager.updateUniformBuffer(
-                    rawDevice,                        // Pass VkDevice
-                    setHandle,                        // The set to update
-                    0,                                // Binding index for UBO
-                    this.projMatrixUbo.bufferHandle,  // Extract handle from VulkanBuffer
-                    0,                                // Offset within the buffer (assuming 0)
-                    this.projMatrixUbo.size           // Range/Size of the buffer (assuming VulkanBuffer has a 'size' field)
+            VulkanDescriptorManager.updateUniformBuffer(rawDevice, setHandle, 0, this.projMatrixUbo.bufferHandle, 0, this.projMatrixUbo.size
             );
 
-            Gdx.app.log(TAG, "Performing initial Sampler update for set [" + i + "]: " + setHandle);
-            VulkanDescriptorManager.updateCombinedImageSampler(
-                    rawDevice,
-                    setHandle,
-                    1, // Binding 1 for sampler
-                    defaultTexture // Use the default texture
-            );
+            Gdx.app.log(TAG, "Performing initial Sampler updates [0.." + (MAX_BATCH_TEXTURES - 1) + "] for set [" + i + "]: " + setHandle);
+            if (defaultTexture == null || defaultTexture.getImageViewHandle() == VK_NULL_HANDLE || defaultTexture.getSamplerHandle() == VK_NULL_HANDLE) {
+                throw new GdxRuntimeException("Default texture is invalid during descriptor set initialization!");
+            }
+            for (int slot = 0; slot < MAX_BATCH_TEXTURES; slot++) {
+                VulkanDescriptorManager.updateCombinedImageSampler(rawDevice, setHandle, 1, slot, defaultTexture);
+            }
 
             this.currentTextureInSet[i] = defaultTexture;
         }
-        Gdx.app.log(TAG, "Batch descriptor sets allocated and initial UBO updated.");
+        Gdx.app.log(TAG, "Batch descriptor sets allocated and initial updates applied.");
 
         Gdx.app.log(TAG, "Getting pipeline layout from PipelineManager...");
-        this.batchPipelineLayout = pipelineManager.getOrCreatePipelineLayout(this.batchDescriptorLayout);
+        this.batchPipelineLayout = pipelineManager.getOrCreatePipelineLayout(this.batchDescriptorLayout); // Uses the indexed layout handle
         if (this.batchPipelineLayout == VK_NULL_HANDLE) {
             throw new GdxRuntimeException("Failed to get/create pipeline layout for batch from PipelineManager.");
         }
         Gdx.app.log(TAG, "Obtained pipeline layout: " + this.batchPipelineLayout);
 
-        Gdx.app.log(TAG, "Initialization complete.");
+        Gdx.app.log(TAG, "VulkanSpriteBatch Initialization complete.");
     }
 
     private VulkanTexture findDefaultWhiteTexture() {
@@ -277,82 +286,27 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         return tex;
     }
 
-    private void createBatchDescriptorSetLayout() {
-        Gdx.app.log(TAG, "Creating batch descriptor set layout...");
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(2, stack);
-            // Binding 0: Uniform Buffer (Projection Matrix) - Vertex Stage
-            bindings.get(0).binding(0)
-                    .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-                    .descriptorCount(1)
-                    .stageFlags(VK_SHADER_STAGE_VERTEX_BIT)
-                    .pImmutableSamplers(null);
-            // Binding 1: Combined Image Sampler (Texture) - Fragment Stage
-            bindings.get(1).binding(1)
-                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                    .descriptorCount(1)
-                    .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
-                    .pImmutableSamplers(null);
-
-            VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
-                    .sType$Default()
-                    .pBindings(bindings);
-
-            LongBuffer pLayout = stack.mallocLong(1);
-            vkCheck(vkCreateDescriptorSetLayout(rawDevice, layoutInfo, null, pLayout), "Failed to create batch descriptor set layout");
-            this.batchDescriptorLayout = pLayout.get(0); // Store the handle
-            Gdx.app.log(TAG, "Batch descriptor set layout created: " + this.batchDescriptorLayout);
-        }
-    }
-
-    private void updateUboDescriptor(long descriptorSet, VulkanBuffer ubo) {
-        //Gdx.app.log(TAG, "Updating UBO descriptor for set " + descriptorSet);
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack)
-                    .buffer(ubo.bufferHandle)
-                    .offset(0)
-                    .range(ubo.size); // Use full buffer range
-
-            VkWriteDescriptorSet.Buffer descriptorWrite = VkWriteDescriptorSet.calloc(1, stack);
-            descriptorWrite.get(0)
-                    .sType$Default()
-                    .dstSet(descriptorSet)
-                    .dstBinding(0) // UBO at binding 0
-                    .dstArrayElement(0)
-                    .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-                    .descriptorCount(1)
-                    .pBufferInfo(bufferInfo); // Link buffer info
-
-            vkUpdateDescriptorSets(rawDevice, descriptorWrite, null);
-        }
-    }
-
     private void updateProjectionMatrixUBO() {
         if (projMatrixUbo == null || vmaAllocator == VK_NULL_HANDLE) {
             Gdx.app.error(TAG, "Cannot update UBO - buffer or allocator is null.");
-            return; // Or throw exception
+            return;
         }
 
         PointerBuffer pData = MemoryUtil.memAllocPointer(1);
         try {
-            // Map the buffer
+
             vkCheck(vmaMapMemory(vmaAllocator, projMatrixUbo.allocationHandle, pData), "VMA map failed for projection update");
             ByteBuffer uboByteBuffer = MemoryUtil.memByteBuffer(pData.get(0), (int) projMatrixUbo.size);
             FloatBuffer uboFloatBuffer = uboByteBuffer.asFloatBuffer();
 
-            //Gdx.app.log(TAG, "Updating UBO with Matrix:\n" + this.projectionMatrix); // Log matrix
-            // Copy matrix data (column-major)
             uboFloatBuffer.put(this.projectionMatrix.val);
-            // No flip() needed
 
-            // Flush allocation to ensure GPU visibility (CRITICAL)
             Vma.vmaFlushAllocation(vmaAllocator, projMatrixUbo.allocationHandle, 0, projMatrixUbo.size);
 
-            // Unmap the buffer
             vmaUnmapMemory(vmaAllocator, projMatrixUbo.allocationHandle);
 
         } catch (Exception e) {
-            // Ensure pData is freed if mapping succeeded but subsequent steps failed
+
             if (pData.get(0) != 0) { // Check if mapping was successful before unmapping attempt
                 try {
                     vmaUnmapMemory(vmaAllocator, projMatrixUbo.allocationHandle);
@@ -366,20 +320,18 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         }
     }
 
-    private void updateTextureDescriptor(long descriptorSet, VulkanTexture texture) {
-        // Gdx.app.log(TAG, "updateTextureDescriptor called for Set=" + descriptorSet); // Optional Debug
+    /*private void updateTextureDescriptor(long descriptorSet, VulkanTexture texture) {
         if (texture == null || rawDevice == null) {
             Gdx.app.error(TAG, "Cannot update texture descriptor - texture or rawDevice is null");
             return;
         }
-        // Calls the static helper in VulkanDescriptorManager
         VulkanDescriptorManager.updateCombinedImageSampler(rawDevice, descriptorSet, 1, texture);
     }
 
     private void createBatchPipeline() {
         Gdx.app.log(TAG, "Requesting sprite batch pipeline...");
 
-        Gdx.app.log(TAG, "TODO: Pipeline creation should be moved to VulkanPipelineManager!");
+        //Gdx.app.log(TAG, "TODO: Pipeline creation should be moved to VulkanPipelineManager!");
         FileHandle vertShaderFile = Gdx.files.internal("data/vulkan/shaders/spritebatch.vert.spv"); // Adjust path if needed
         FileHandle fragShaderFile = Gdx.files.internal("data/vulkan/shaders/spritebatch.frag.spv"); // Adjust path if needed
         if (!vertShaderFile.exists() || !fragShaderFile.exists()) {
@@ -395,28 +347,35 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         Gdx.app.log(TAG, "Using pipeline layout: " + this.batchPipelineLayout);
     }
 
-    // Make sure lastTexture is accessible if needed from VulkanWindow
     public VulkanTexture getLastTexture() {
         return lastTexture;
-    }
+    }*/
 
     @Override
     public void begin() {
         if (drawing) throw new IllegalStateException("Batch.end must be called before begin.");
 
         drawing = true;
-        renderCalls = 0;
+        renderCalls = 0; // Keep this
+        lastTexture = null; // Reset last texture submitted
+
         spriteCount = 0;
         vertexBufferIdx = 0;
-        pipelineAndSetBoundThisBatch = false;
 
-        updateProjectionMatrixUBO();
+        nextTextureSlot = 0;
+        textureToIndex.clear();
+        Arrays.fill(currentBatchTextures, null); // Clear texture slots
+
+        pipelineAndSetBoundThisBatch = false; // Reset pipeline binding state
+
+        updateProjectionMatrixUBO(); // Update UBO at start
     }
 
     @Override
     public void end() {
         if (!drawing) throw new IllegalStateException("Batch.begin must be called before end.");
-        if (spriteCount > 0) {
+
+        if (spriteCount > 0 || vertexBufferIdx > 0) { // Check vertexBufferIdx too
             flush();
         }
         drawing = false;
@@ -464,41 +423,46 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
                      boolean flipX, boolean flipY) {
 
         if (!drawing) throw new IllegalStateException("Batch.begin must be called before draw.");
-        if (!(texture instanceof VulkanTexture)) throw new GdxRuntimeException("Texture is not a VulkanTexture instance!");
-        VulkanTexture vkTexture = (VulkanTexture) texture;
 
-        // Use affineVertices as temporary storage to avoid heap allocation
-        float[] verts = this.affineVertices; // Reuse the member array
-        int i = 0; // Index into verts array
+        VulkanTexture vkTexture = (VulkanTexture) texture; // Can be null
 
-        // Calculate texture coordinates first (potentially needed for switchTexture)
-        float u, v, u2, v2;
-        if (vkTexture != lastTexture) {
-            // If texture is switching, calculate invTexWidth/Height *before* using them
-            if (vkTexture.getWidth() == 0 || vkTexture.getHeight() == 0) {
+        int texIndex = getTextureIndex(vkTexture);
+        if (texIndex == -1) { // -1 indicates flush was triggered
+            texIndex = getTextureIndex(vkTexture); // Retry
+            if (texIndex == -1) throw new GdxRuntimeException("Failed to obtain texture index slot even after flush!");
+        }
+        float floatTexIndex = (float) texIndex;
+
+        float[] verts = this.affineVertices;
+        int i = 0;
+
+        VulkanTexture textureInSlot = currentBatchTextures[texIndex];
+        if (textureInSlot == null) throw new GdxRuntimeException("No valid texture found in slot " + texIndex);
+
+        // Calculate invTexWidth/Height only if texture changed (or first draw)
+        // This check might be simplified or removed if performance isn't critical here
+        if (textureInSlot != lastTexture || invTexWidth == 0) { // Check against lastTexture used for *this specific draw call logic*
+            if (textureInSlot.getWidth() == 0 || textureInSlot.getHeight() == 0) {
                 invTexWidth = 0;
                 invTexHeight = 0;
-                Gdx.app.error(TAG, "Texture dimensions are zero when calculating UVs!");
+                Gdx.app.error(TAG, "Texture dimensions are zero when calculating UVs for texture in slot " + texIndex);
             } else {
-                invTexWidth = 1.0f / vkTexture.getWidth();
-                invTexHeight = 1.0f / vkTexture.getHeight();
+                invTexWidth = 1.0f / textureInSlot.getWidth();
+                invTexHeight = 1.0f / textureInSlot.getHeight();
             }
+            // Note: We are NOT updating the global `this.lastTexture` here, only the cached inv sizes
         }
-        // Check again *after* potential update in case dimensions were 0
+
         if (invTexWidth == 0 || invTexHeight == 0) {
             Gdx.app.error(TAG, "Cannot draw, invTexWidth or invTexHeight is zero.");
-            return; // Avoid division by zero
+            return;
         }
 
-        u = srcX * invTexWidth;
-        // Vulkan/GL default UV origin (0,0) is bottom-left. LibGDX TextureRegion assumes top-left.
-        // Adjust v/v2 accordingly if needed based on your texture loading / coordinate system.
-        // Assuming standard LibGDX region coords (0,0 top-left):
-        v = srcY * invTexHeight; // Top Y coord becomes V start
-        u2 = (srcX + srcWidth) * invTexWidth;
-        v2 = (srcY + srcHeight) * invTexHeight; // Bottom Y coord becomes V end
+        float u = srcX * invTexWidth;
+        float v = srcY * invTexHeight;
+        float u2 = (srcX + srcWidth) * invTexWidth;
+        float v2 = (srcY + srcHeight) * invTexHeight;
 
-        // --- Vertex Position Calculation (same as before) ---
         final float worldOriginX = x + originX;
         final float worldOriginY = y + originY;
         float fx = -originX;
@@ -513,14 +477,10 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
             fy2 *= scaleY;
         }
 
-        final float p1x = fx;
-        final float p1y = fy;
-        final float p2x = fx;
-        final float p2y = fy2;
-        final float p3x = fx2;
-        final float p3y = fy2;
-        final float p4x = fx2;
-        final float p4y = fy;
+        final float p1x = fx, p1y = fy;
+        final float p2x = fx, p2y = fy2;
+        final float p3x = fx2, p3y = fy2;
+        final float p4x = fx2, p4y = fy;
 
         float x1, y1, x2, y2, x3, y3, x4, y4;
 
@@ -534,7 +494,7 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
             x3 = cos * p3x - sin * p3y;
             y3 = sin * p3x + cos * p3y;
             x4 = x1 + (x3 - x2);
-            y4 = y3 - (y2 - y1); // parallelogram completion
+            y4 = y3 - (y2 - y1);
         } else {
             x1 = p1x;
             y1 = p1y;
@@ -554,9 +514,7 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         y3 += worldOriginY;
         x4 += worldOriginX;
         y4 += worldOriginY;
-        // --- End Vertex Position Calculation ---
 
-        // Handle texture coordinate flipping
         if (flipX) {
             float tmp = u;
             u = u2;
@@ -568,137 +526,155 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
             v2 = tmp;
         }
 
-        // Populate vertex array (X, Y, Color, U, V) - counter-clockwise quad
-        // Vertex 0 (maps to bottom-left UV: u, v2 - assuming standard GL/Vulkan UVs)
+        // Populate vertex array (X, Y, Color, U, V, TexIndex)
         verts[i++] = x1;
         verts[i++] = y1;
         verts[i++] = colorPacked;
         verts[i++] = u;
         verts[i++] = v;
-        // Vertex 1 (maps to top-left UV: u, v)
+        verts[i++] = floatTexIndex;
         verts[i++] = x2;
         verts[i++] = y2;
         verts[i++] = colorPacked;
         verts[i++] = u;
         verts[i++] = v2;
-        // Vertex 2 (maps to top-right UV: u2, v)
+        verts[i++] = floatTexIndex;
         verts[i++] = x3;
         verts[i++] = y3;
         verts[i++] = colorPacked;
         verts[i++] = u2;
         verts[i++] = v2;
-        // Vertex 3 (maps to bottom-right UV: u2, v2)
+        verts[i++] = floatTexIndex;
         verts[i++] = x4;
         verts[i++] = y4;
         verts[i++] = colorPacked;
         verts[i++] = u2;
         verts[i++] = v;
+        verts[i++] = floatTexIndex;
 
-        // Call internal draw with the prepared vertices
-        drawInternal(vkTexture, verts, 0, i); // Pass offset 0 and the actual count i
+        drawInternal(verts, 0, i);
     }
 
     @Override
     public void draw(Texture texture, float x, float y, float width, float height, int srcX, int srcY, int srcWidth, int srcHeight, boolean flipX, boolean flipY) {
-        // Call the detailed version with defaults for origin, scale, rotation
         draw(texture, x, y, 0f, 0f, width, height, 1f, 1f, 0f, srcX, srcY, srcWidth, srcHeight, flipX, flipY);
     }
 
     @Override
     public void draw(Texture texture, float x, float y, int srcX, int srcY, int srcWidth, int srcHeight) {
-        // Call the detailed version with defaults for size matching src, origin, scale, rotation, flips
         draw(texture, x, y, 0f, 0f, srcWidth, srcHeight, 1f, 1f, 0f, srcX, srcY, srcWidth, srcHeight, false, false);
     }
 
     @Override
     public void draw(Texture texture, float x, float y, float width, float height, float u, float v, float u2, float v2) {
         if (!drawing) throw new IllegalStateException("Batch.begin must be called before draw.");
-        if (!(texture instanceof VulkanTexture)) throw new GdxRuntimeException("Texture is not a VulkanTexture instance!");
+
         VulkanTexture vkTexture = (VulkanTexture) texture;
 
-        // Use affineVertices as temporary storage
+        int texIndex = getTextureIndex(vkTexture);
+        if (texIndex == -1) {
+            texIndex = getTextureIndex(vkTexture);
+        }
+        if (texIndex == -1) throw new GdxRuntimeException("Failed to obtain texture index slot even after flush!");
+        float floatTexIndex = (float) texIndex;
+
         float[] verts = this.affineVertices;
         int i = 0;
 
-        // Vertex 0 (Bottom Left)
+        // Populate vertex array (X, Y, Color, U, V, TexIndex)
         verts[i++] = x;
         verts[i++] = y;
         verts[i++] = colorPacked;
         verts[i++] = u;
-        verts[i++] = v2; // Map to u, v2
-        // Vertex 1 (Top Left)
+        verts[i++] = v2;
+        verts[i++] = floatTexIndex;
         verts[i++] = x;
         verts[i++] = y + height;
         verts[i++] = colorPacked;
         verts[i++] = u;
-        verts[i++] = v; // Map to u, v
-        // Vertex 2 (Top Right)
+        verts[i++] = v;
+        verts[i++] = floatTexIndex;
         verts[i++] = x + width;
         verts[i++] = y + height;
         verts[i++] = colorPacked;
         verts[i++] = u2;
-        verts[i++] = v; // Map to u2, v
-        // Vertex 3 (Bottom Right)
+        verts[i++] = v;
+        verts[i++] = floatTexIndex;
         verts[i++] = x + width;
         verts[i++] = y;
         verts[i++] = colorPacked;
         verts[i++] = u2;
-        verts[i++] = v2; // Map to u2, v2
+        verts[i++] = v2;
+        verts[i++] = floatTexIndex;
 
-        drawInternal(vkTexture, verts, 0, i);
+        drawInternal(verts, 0, i);
     }
 
     @Override
     public void draw(Texture texture, float x, float y) {
-        // Call draw with texture's width/height
-        draw(texture, x, y, texture.getWidth(), texture.getHeight());
+        draw(texture, x, y, texture.getWidth(), texture.getHeight(), 0f, 0f, 1f, 1f);
     }
 
     @Override
     public void draw(Texture texture, float x, float y, float width, float height) {
-        if (!drawing) throw new IllegalStateException("Batch.begin must be called before draw.");
-        if (!(texture instanceof VulkanTexture)) throw new GdxRuntimeException("Texture is not a VulkanTexture instance!");
-        VulkanTexture vkTexture = (VulkanTexture) texture;
-
-        // Use affineVertices as temporary storage
-        float[] verts = this.affineVertices;
-        int i = 0;
-
-        // Default UVs (0,0) to (1,1) -> maps to (0,1) to (1,0) in typical GL/Vulkan unless flipped
-        float u = 0, v = 0, u2 = 1, v2 = 1; // These might need adjustment based on texture coord conventions
-
-        // Vertex 0 (Bottom Left)
-        verts[i++] = x;
-        verts[i++] = y;
-        verts[i++] = colorPacked;
-        verts[i++] = u;
-        verts[i++] = v2;
-        // Vertex 1 (Top Left)
-        verts[i++] = x;
-        verts[i++] = y + height;
-        verts[i++] = colorPacked;
-        verts[i++] = u;
-        verts[i++] = v;
-        // Vertex 2 (Top Right)
-        verts[i++] = x + width;
-        verts[i++] = y + height;
-        verts[i++] = colorPacked;
-        verts[i++] = u2;
-        verts[i++] = v;
-        // Vertex 3 (Bottom Right)
-        verts[i++] = x + width;
-        verts[i++] = y;
-        verts[i++] = colorPacked;
-        verts[i++] = u2;
-        verts[i++] = v2;
-
-        drawInternal(vkTexture, verts, 0, i);
+        // Default UVs (0,0) to (1,1) -> maps to (0,1) to (1,0) in typical GL unless flipped
+        // LibGDX convention often uses (0,0) top-left, (1,1) bottom-right for UVs
+        // Let's use the standard LibGDX convention u=0,v=0 top-left, u2=1,v2=1 bottom-right
+        draw(texture, x, y, width, height, 0f, 0f, 1f, 1f);
     }
 
     @Override
     public void draw(Texture texture, float[] spriteVertices, int offset, int count) {
-        // This is the core implementation used by other draw methods when rotation/scaling are involved
-        drawInternal((VulkanTexture) texture, spriteVertices, offset, count);
+        if (!drawing) throw new IllegalStateException("Batch.begin must be called before draw.");
+
+        final int INPUT_COMPONENTS = VulkanSpriteBatch.POSITION_COMPONENTS + VulkanSpriteBatch.COLOR_COMPONENTS + VulkanSpriteBatch.TEXCOORD_COMPONENTS;
+
+        if (count % INPUT_COMPONENTS != 0) { // Check if count is multiple of 5
+            throw new GdxRuntimeException("Incoming spriteVertices count (" + count + ") must be a multiple of the expected input components (" + INPUT_COMPONENTS + ")");
+        }
+
+        VulkanTexture vkTexture = (VulkanTexture) texture;
+
+        int texIndex = getTextureIndex(vkTexture);
+        if (texIndex == -1) {
+            texIndex = getTextureIndex(vkTexture);
+        }
+        if (texIndex == -1) throw new GdxRuntimeException("Failed to obtain texture index slot even after flush!");
+        float floatTexIndex = (float) texIndex;
+
+        // We need to copy the input vertices and insert the texture index
+        int numVertices = count / (COMPONENTS_PER_VERTEX - 1); // Original components per vertex
+        if (numVertices * (COMPONENTS_PER_VERTEX - 1) != count) {
+            throw new GdxRuntimeException("spriteVertices count does not match expected components per vertex for input.");
+        }
+        int outputCount = numVertices * COMPONENTS_PER_VERTEX; // Target count including index
+
+        // Use affineVertices as a temporary buffer if large enough, otherwise allocate
+        float[] vertsWithIndex;
+        if (outputCount <= affineVertices.length) {
+            vertsWithIndex = affineVertices;
+        } else {
+            // This case should be rare for single sprite draws, but handle it
+            vertsWithIndex = new float[outputCount];
+            Gdx.app.debug(TAG, "Allocating temporary vertex buffer for draw(spriteVertices) size: " + outputCount);
+        }
+
+        int inputIdx = offset;
+        int outputIdx = 0;
+        for (int v = 0; v < numVertices; v++) {
+            // Copy Position (2 floats)
+            vertsWithIndex[outputIdx++] = spriteVertices[inputIdx++];
+            vertsWithIndex[outputIdx++] = spriteVertices[inputIdx++];
+            // Copy Color (1 float)
+            vertsWithIndex[outputIdx++] = spriteVertices[inputIdx++];
+            // Copy TexCoords (2 floats)
+            vertsWithIndex[outputIdx++] = spriteVertices[inputIdx++];
+            vertsWithIndex[outputIdx++] = spriteVertices[inputIdx++];
+            // Add TexIndex (1 float)
+            vertsWithIndex[outputIdx++] = floatTexIndex;
+        }
+
+        drawInternal(vertsWithIndex, 0, outputCount);
     }
 
     @Override
@@ -708,139 +684,350 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
 
     @Override
     public void draw(TextureRegion region, float x, float y, float width, float height) {
-        // Call the detailed version with defaults
-        draw(region, x, y, 0f, 0f, width, height, 1f, 1f, 0f);
-    }
-
-    @Override
-    public void draw(TextureRegion region, float x, float y, float originX, float originY, float width, float height, float scaleX, float scaleY, float rotation) {
-        // Pass through to the core Texture draw method, extracting region info
-        draw(region.getTexture(), x, y, originX, originY, width, height, scaleX, scaleY, rotation,
-                region.getRegionX(), region.getRegionY(), region.getRegionWidth(), region.getRegionHeight(),
-                false, false); // Assuming non-flipped TextureRegion data initially
-    }
-
-    @Override
-    public void draw(TextureRegion region, float x, float y, float originX, float originY, float width, float height, float scaleX, float scaleY, float rotation,
-                     boolean clockwise) {
-        // This method requires calculating vertices differently if clockwise rotation means something specific
-        Gdx.app.error(TAG, "draw(..., clockwise) not fully implemented.");
-        // Fallback to non-clockwise for now
-        draw(region, x, y, originX, originY, width, height, scaleX, scaleY, rotation);
-    }
-
-    @Override
-    public void draw(TextureRegion region, float width, float height, com.badlogic.gdx.math.Affine2 transform) {
         if (!drawing) throw new IllegalStateException("Batch.begin must be called before draw.");
         if (!(region.getTexture() instanceof VulkanTexture)) throw new GdxRuntimeException("TextureRegion's texture is not a VulkanTexture!");
         VulkanTexture vkTexture = (VulkanTexture) region.getTexture();
 
-        // Use affineVertices as temporary storage
+        int texIndex = getTextureIndex(vkTexture);
+        if (texIndex == -1) {
+            texIndex = getTextureIndex(vkTexture);
+        }
+        if (texIndex == -1) throw new GdxRuntimeException("Failed to obtain texture index slot even after flush!");
+        float floatTexIndex = (float) texIndex;
+
+        float[] verts = this.affineVertices;
+        int i = 0;
+
+        float u = region.getU();
+        float v = region.getV();
+        float u2 = region.getU2();
+        float v2 = region.getV2();
+
+        // Populate vertex array (X, Y, Color, U, V, TexIndex)
+        verts[i++] = x;
+        verts[i++] = y;
+        verts[i++] = colorPacked;
+        verts[i++] = u;
+        verts[i++] = v2;
+        verts[i++] = floatTexIndex;
+        verts[i++] = x;
+        verts[i++] = y + height;
+        verts[i++] = colorPacked;
+        verts[i++] = u;
+        verts[i++] = v;
+        verts[i++] = floatTexIndex;
+        verts[i++] = x + width;
+        verts[i++] = y + height;
+        verts[i++] = colorPacked;
+        verts[i++] = u2;
+        verts[i++] = v;
+        verts[i++] = floatTexIndex;
+        verts[i++] = x + width;
+        verts[i++] = y;
+        verts[i++] = colorPacked;
+        verts[i++] = u2;
+        verts[i++] = v2;
+        verts[i++] = floatTexIndex;
+
+        drawInternal(verts, 0, i);
+    }
+
+    // Inside VulkanSpriteBatch.java
+
+    @Override
+    public void draw(TextureRegion region, float x, float y, float originX, float originY, float width, float height, float scaleX, float scaleY, float rotation) {
+        if (!drawing) throw new IllegalStateException("Batch.begin must be called before draw.");
+
+        Texture texture = region.getTexture(); // Get texture from region
+        if (!(texture instanceof VulkanTexture)) {
+            throw new GdxRuntimeException("TextureRegion's texture is not a VulkanTexture instance!");
+        }
+        VulkanTexture vkTexture = (VulkanTexture) texture;
+
+        // --- Get Texture Index ---
+        int texIndex = getTextureIndex(vkTexture);
+        if (texIndex == -1) { // Handle potential flush and retry
+            texIndex = getTextureIndex(vkTexture);
+            if (texIndex == -1) throw new GdxRuntimeException("Failed to obtain texture index slot even after flush!");
+        }
+        float floatTexIndex = (float) texIndex;
+        // --- End Texture Index ---
+
+        float[] verts = this.affineVertices; // Use temporary vertex array
+        int i = 0;
+
+        // --- Calculate Vertex Positions (Identical to complex Texture draw method) ---
+        final float worldOriginX = x + originX;
+        final float worldOriginY = y + originY;
+        float fx = -originX;
+        float fy = -originY;
+        float fx2 = width - originX;
+        float fy2 = height - originY;
+
+        // Apply scale
+        if (scaleX != 1 || scaleY != 1) {
+            fx *= scaleX;
+            fy *= scaleY;
+            fx2 *= scaleX;
+            fy2 *= scaleY;
+        }
+
+        // Local sprite coordinates relative to origin
+        final float p1x = fx;
+        final float p1y = fy;
+        final float p2x = fx;
+        final float p2y = fy2;
+        final float p3x = fx2;
+        final float p3y = fy2;
+        final float p4x = fx2;
+        final float p4y = fy;
+
+        float x1, y1, x2, y2, x3, y3, x4, y4;
+
+        // Apply rotation
+        if (rotation != 0) {
+            final float cos = MathUtils.cosDeg(rotation);
+            final float sin = MathUtils.sinDeg(rotation);
+            x1 = cos * p1x - sin * p1y;
+            y1 = sin * p1x + cos * p1y; // Top left
+            x2 = cos * p2x - sin * p2y;
+            y2 = sin * p2x + cos * p2y; // Bottom left
+            x3 = cos * p3x - sin * p3y;
+            y3 = sin * p3x + cos * p3y; // Bottom right
+            // Top right vertex is derived from the other three: = V1 + (V3 - V2)
+            x4 = x1 + (x3 - x2);
+            y4 = y1 + (y3 - y2);               // Top right
+        } else { // No rotation, just use scaled local coords
+            x1 = p1x;
+            y1 = p1y;
+            x2 = p2x;
+            y2 = p2y;
+            x3 = p3x;
+            y3 = p3y;
+            x4 = p4x;
+            y4 = p4y;
+        }
+
+        // Add world origin
+        x1 += worldOriginX;
+        y1 += worldOriginY;
+        x2 += worldOriginX;
+        y2 += worldOriginY;
+        x3 += worldOriginX;
+        y3 += worldOriginY;
+        x4 += worldOriginX;
+        y4 += worldOriginY;
+        // --- End Vertex Position Calculation ---
+
+        // --- Get Texture Coordinates from Region ---
+        float u = region.getU();
+        float v = region.getV();
+        float u2 = region.getU2();
+        float v2 = region.getV2();
+        // --- End UV Calculation ---
+
+        // --- Populate Vertex Array (X, Y, Color, U, V, TexIndex) ---
+        // Order matches the calculated positions: BL, TL, TR, BR for the quad indices (0,1,2, 2,3,0) typically
+        // But UVs need careful mapping. Let's use the standard LibGDX mapping:
+        // x1,y1 (rotated p1: top-left)   -> u, v
+        // x2,y2 (rotated p2: bottom-left) -> u, v2
+        // x3,y3 (rotated p3: bottom-right)-> u2, v2
+        // x4,y4 (rotated p4: top-right)  -> u2, v
+
+        verts[i++] = x1;
+        verts[i++] = y1;
+        verts[i++] = colorPacked;
+        verts[i++] = u;
+        verts[i++] = v;
+        verts[i++] = floatTexIndex; // Top-Left vertex
+        verts[i++] = x2;
+        verts[i++] = y2;
+        verts[i++] = colorPacked;
+        verts[i++] = u;
+        verts[i++] = v2;
+        verts[i++] = floatTexIndex; // Bottom-Left vertex
+        verts[i++] = x3;
+        verts[i++] = y3;
+        verts[i++] = colorPacked;
+        verts[i++] = u2;
+        verts[i++] = v2;
+        verts[i++] = floatTexIndex; // Bottom-Right vertex
+        verts[i++] = x4;
+        verts[i++] = y4;
+        verts[i++] = colorPacked;
+        verts[i++] = u2;
+        verts[i++] = v;
+        verts[i++] = floatTexIndex; // Top-Right vertex
+
+        // --- Call Internal Draw ---
+        drawInternal(verts, 0, i); // Pass the populated vertex data
+    }
+
+    @Override
+    public void draw(TextureRegion region, float x, float y, float originX, float originY, float width, float height, float scaleX, float scaleY, float rotation, boolean clockwise) {
+        // Clockwise rotation affects vertex order or UVs, but not the indexing logic itself.
+        // For now, delegate to non-clockwise version as before.
+        Gdx.app.error(TAG, "draw(..., clockwise) not fully implemented with correct vertex/UV order.");
+        draw(region, x, y, originX, originY, width, height, scaleX, scaleY, rotation);
+    }
+
+    @Override
+    public void draw(TextureRegion region, float width, float height, Affine2 transform) {
+        if (!drawing) throw new IllegalStateException("Batch.begin must be called before draw.");
+        if (!(region.getTexture() instanceof VulkanTexture)) throw new GdxRuntimeException("TextureRegion's texture is not a VulkanTexture!");
+        VulkanTexture vkTexture = (VulkanTexture) region.getTexture();
+
+        int texIndex = getTextureIndex(vkTexture);
+        if (texIndex == -1) {
+            texIndex = getTextureIndex(vkTexture);
+        }
+        if (texIndex == -1) throw new GdxRuntimeException("Failed to obtain texture index slot even after flush!");
+        float floatTexIndex = (float) texIndex;
+
         float[] verts = this.affineVertices;
         int idx = 0;
 
-        // --- 1. Calculate Vertex Positions ---
-        final float m00 = transform.m00;
-        final float m01 = transform.m01;
-        final float m02 = transform.m02; // x translation
-        final float m10 = transform.m10;
-        final float m11 = transform.m11;
-        final float m12 = transform.m12; // y translation
+        // --- 1. Calculate Vertex Positions (same as before) ---
+        final float m00 = transform.m00, m01 = transform.m01, m02 = transform.m02;
+        final float m10 = transform.m10, m11 = transform.m11, m12 = transform.m12;
+        float x1 = m02, y1 = m12;
+        float x2 = m01 * height + m02, y2 = m11 * height + m12;
+        float x3 = m00 * width + m01 * height + m02, y3 = m10 * width + m11 * height + m12;
+        float x4 = m00 * width + m02, y4 = m10 * width + m12;
+        // --- End Position Calculation ---
 
-        float x1 = m02;
-        float y1 = m12;                     // Top-left (0,0)
-        float x2 = m01 * height + m02;
-        float y2 = m11 * height + m12;      // Bottom-left (0,height)
-        float x3 = m00 * width + m01 * height + m02;
-        float y3 = m10 * width + m11 * height + m12; // Bottom-right (width,height)
-        float x4 = m00 * width + m02;
-        float y4 = m10 * width + m12;      // Top-right (width,0)
+        // --- 2. Get Texture Coordinates (same as before) ---
+        float u = region.getU(), v = region.getV();
+        float u2 = region.getU2(), v2 = region.getV2();
+        // --- End UV Calculation ---
 
-        // --- 2. Get Texture Coordinates ---
-        float u = region.getU();
-        float v = region.getV(); // Top-left UV
-        float u2 = region.getU2();
-        float v2 = region.getV2(); // Bottom-right UV
-
-        // --- 3. Get Packed Color ---
+        // --- 3. Get Packed Color (same as before) ---
         float color = this.colorPacked;
 
-        // --- 4. Populate Temporary Vertex Array (X, Y, Color, U, V) - counter-clockwise quad ---
+        // --- 4. Populate Vertex Array (X, Y, Color, U, V, TexIndex) ---
         verts[idx++] = x1;
         verts[idx++] = y1;
         verts[idx++] = color;
         verts[idx++] = u;
-        verts[idx++] = v;  // Top-left vertex, maps to u,v
+        verts[idx++] = v;
+        verts[idx++] = floatTexIndex;
         verts[idx++] = x2;
         verts[idx++] = y2;
         verts[idx++] = color;
         verts[idx++] = u;
-        verts[idx++] = v2; // Bottom-left vertex, maps to u,v2
+        verts[idx++] = v2;
+        verts[idx++] = floatTexIndex;
         verts[idx++] = x3;
         verts[idx++] = y3;
         verts[idx++] = color;
         verts[idx++] = u2;
-        verts[idx++] = v2; // Bottom-right vertex, maps to u2,v2
+        verts[idx++] = v2;
+        verts[idx++] = floatTexIndex;
         verts[idx++] = x4;
         verts[idx++] = y4;
         verts[idx++] = color;
         verts[idx++] = u2;
-        verts[idx++] = v;  // Top-right vertex, maps to u2,v
+        verts[idx++] = v;
+        verts[idx++] = floatTexIndex;
 
-        // Call internal draw with the prepared vertices
-        drawInternal(vkTexture, verts, 0, idx); // Pass offset 0 and the actual count idx
+        drawInternal(verts, 0, idx);
     }
 
-    private void drawInternal(VulkanTexture texture, float[] spriteVertices, int offset, int count) {
-        // --- Switch Texture Logic ---
-        if (texture != lastTexture) {
-            switchTexture(texture); // This calls flush() if needed
-        }
-        // ---
-
-        // --- Buffer Full Check ---
-        // Check if adding the current sprite vertices would exceed capacity
+    /**
+     * Copies the specified sprite vertex data into the main vertex buffer.
+     * Handles buffer-full conditions by flushing.
+     * Assumes the texture index is already baked into the spriteVertices array.
+     *
+     * @param spriteVertices The vertex data array (X, Y, Color, U, V, TexIndex).
+     * @param offset         The starting offset in spriteVertices.
+     * @param count          The number of float components to copy from spriteVertices.
+     */
+    private void drawInternal(float[] spriteVertices, int offset, int count) {
+        // Check if the vertex buffer is full BEFORE adding new data
         if (vertexBufferIdx + count > vertices.capacity()) {
-            Gdx.app.log(TAG, "Buffer full or requires flush. vertexBufferIdx=" + vertexBufferIdx + ", count=" + count + ", capacity=" + vertices.capacity());
-            flush(); // Flush before adding new data
+            Gdx.app.log(TAG, "Vertex Buffer full (cap=" + vertices.capacity() + ", current=" + vertexBufferIdx + ", adding=" + count + "). Flushing.");
+            flush(); // This resets spriteCount and vertexBufferIdx
 
-            // After flush, re-check if texture changed unexpectedly (shouldn't happen with switchTexture logic)
-            if (texture != lastTexture) {
-                Gdx.app.error(TAG, "Texture changed unexpectedly after buffer-full flush! This indicates a logic error.");
-                switchTexture(texture); // Re-switch just in case, though flush should handle it
-            }
+            // After flush, the pipeline/set needs rebinding
+            pipelineAndSetBoundThisBatch = false;
         }
-        // ---
 
-        // --- Copy Vertex Data ---
         try {
-            // Ensure indices are valid before putting data
+            // Basic validation before putting data
             if (vertexBufferIdx < 0 || offset < 0 || count <= 0 || vertexBufferIdx + count > vertices.capacity() || offset + count > spriteVertices.length) {
                 throw new IllegalArgumentException("Invalid indices for vertices.put: vertexBufferIdx=" + vertexBufferIdx
                         + ", offset=" + offset + ", count=" + count + ", vertices.capacity=" + vertices.capacity()
                         + ", spriteVertices.length=" + spriteVertices.length);
             }
 
-            vertices.position(vertexBufferIdx); // Set position in target buffer
-            vertices.put(spriteVertices, offset, count); // Copy data
-            vertexBufferIdx += count; // Increment target index
+            // Position the buffer and put the data
+            vertices.position(vertexBufferIdx);
+            vertices.put(spriteVertices, offset, count);
+            vertexBufferIdx += count; // Increment float index
 
-            // Increment sprite count based on vertices added
-            if (count % vertexFloats != 0) {
-                Gdx.app.error(TAG, "drawInternal count (" + count + ") not multiple of vertexFloats (" + vertexFloats + ")!");
-            }
-            int verticesAdded = count / vertexFloats;
-            if (verticesAdded % VERTICES_PER_SPRITE != 0) {
-                Gdx.app.error(TAG, "drawInternal verticesAdded (" + verticesAdded + ") not multiple of VERTICES_PER_SPRITE (" + VERTICES_PER_SPRITE + ")!");
-            }
-            spriteCount += verticesAdded / VERTICES_PER_SPRITE;
+            // Update sprite count based on vertices added (using the NEW vertexFloats size)
+            int verticesAdded = count / this.vertexFloats; // vertexFloats is now 6
+            spriteCount += verticesAdded / VERTICES_PER_SPRITE; // VERTICES_PER_SPRITE is still 4
 
         } catch (BufferOverflowException | IndexOutOfBoundsException | IllegalArgumentException e) {
             Gdx.app.error(TAG, "Buffer Exception during vertices.put. vertexBufferIdx=" + vertexBufferIdx + ", offset=" + offset + ", count=" + count + ", vertices.capacity=" + vertices.capacity() + ", spriteVertices.length=" + spriteVertices.length, e);
-            // Depending on severity, you might want to re-throw or just log and continue/reset state
             throw new GdxRuntimeException("Error copying vertex data", e);
         }
-        // ---
+    }
+
+    /**
+     * Gets the index for the given texture within the current batch segment [0..MAX_BATCH_TEXTURES-1].
+     * If the texture is not yet in the batch and the batch texture limit is reached,
+     * this method triggers a flush() and resets the texture state, returning -1
+     * to signal the caller needs to retry getting the index (which will then be 0).
+     * If the texture is null, returns index 0 (assuming default texture is at slot 0).
+     *
+     * @param texture The texture to get an index for. Can be null (uses defaultTexture).
+     * @return The index (0 to MAX_BATCH_TEXTURES-1) or -1 if a flush occurred and retry is needed.
+     * @throws GdxRuntimeException if the texture has invalid handles or defaultTexture is null/invalid when needed.
+     */
+    private int getTextureIndex(VulkanTexture texture) {
+        // Use default texture if input is null
+        VulkanTexture tex = (texture == null) ? defaultTexture : texture;
+
+        // Basic validation of the texture we intend to use
+        if (tex == null) {
+            throw new GdxRuntimeException("Cannot get texture index: Input texture and defaultTexture are both null!");
+        }
+        if (tex.getImageViewHandle() == VK_NULL_HANDLE || tex.getSamplerHandle() == VK_NULL_HANDLE) {
+            throw new GdxRuntimeException("Cannot get texture index: Texture object (hash=" + tex.hashCode() + ") has invalid handles!");
+        }
+
+        Integer index = textureToIndex.get(tex);
+
+        if (index != null) {
+            // Texture already in this batch segment, return existing index
+            return index;
+        }
+
+        // --- Texture is NOT in the current batch segment ---
+
+        if (nextTextureSlot >= MAX_BATCH_TEXTURES) {
+            Gdx.app.log(TAG, "Max batch textures (" + MAX_BATCH_TEXTURES + ") reached. Flushing.");
+            flush(); // Flush current data using the textures currently mapped
+
+            // Reset state for the next segment
+            nextTextureSlot = 0;
+            textureToIndex.clear();
+            Arrays.fill(currentBatchTextures, null);
+            pipelineAndSetBoundThisBatch = false; // Force rebind (pipeline and set) after flush
+
+            return -1; // Signal caller to retry getTextureIndex
+        }
+
+        index = nextTextureSlot;
+        textureToIndex.put(tex, index); // Add to map
+        currentBatchTextures[index] = tex; // Store in array for potential future descriptor updates
+        nextTextureSlot++; // Increment next available slot
+
+        lastTexture = tex;
+
+        return index;
     }
 
     @Override
@@ -949,17 +1136,18 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         VkCommandBuffer currentCommandBuffer = gfx.getCurrentCommandBuffer();
         int currentFrameIndex = gfx.getCurrentFrameIndex();
 
-        // --- Context and Resource Validation ---
-        if (currentRenderPassHandle == VK_NULL_HANDLE || currentCommandBuffer == null || lastTexture == null
+        if (currentRenderPassHandle == VK_NULL_HANDLE || currentCommandBuffer == null
+                // || lastTexture == null // <<<--- REMOVE THIS CHECK
                 || this.vertexBuffer == null || this.vertexBuffer.bufferHandle == VK_NULL_HANDLE
                 || this.indexBuffer == null || this.indexBuffer.bufferHandle == VK_NULL_HANDLE
                 || this.batchPipelineLayout == VK_NULL_HANDLE
                 || batchDescriptorSets == null || currentFrameIndex < 0 || currentFrameIndex >= batchDescriptorSets.length
                 || batchDescriptorSets[currentFrameIndex] == VK_NULL_HANDLE) {
-            // Log specific details for easier debugging
+
+            // Log specific details for easier debugging (adjusted log message)
             Gdx.app.error(TAG, "Flush Error: Invalid Vulkan context or resource state."
                     + " RP=" + currentRenderPassHandle + ", CB=" + (currentCommandBuffer != null ? currentCommandBuffer.address() : "null")
-                    + ", Texture=" + (lastTexture != null ? lastTexture.hashCode() : "null")
+                    // + ", Texture=" + (lastTexture != null ? lastTexture.hashCode() : "null") // Removed texture from log message too
                     + ", VB=" + (this.vertexBuffer != null ? this.vertexBuffer.bufferHandle : "null")
                     + ", IB=" + (this.indexBuffer != null ? this.indexBuffer.bufferHandle : "null")
                     + ", PipelineLayout=" + this.batchPipelineLayout
@@ -970,17 +1158,14 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
             );
             // Reset state and throw to prevent further errors in this frame
             resetCountersAndLog();
-            throw new GdxRuntimeException("Cannot flush() batch due to invalid Vulkan context or resource state.");
+            // Maybe throw a more specific error or just return if recoverable? For now, throw.
+            throw new GdxRuntimeException("Cannot flush() batch due to invalid Vulkan context or resource state (Check RP, CB, Buffers, Layout, Set Handle).");
         }
-        // --- End Validation ---
 
         long currentFrameSet = batchDescriptorSets[currentFrameIndex]; // Get the set for THIS frame
 
         // --- Bind Pipeline and Descriptor Set if Needed ---
         if (!pipelineAndSetBoundThisBatch) {
-            /*Gdx.app.log(TAG, "Flush/BindPipeline: Requesting pipeline for Layout=" + this.batchPipelineLayout
-                    + ", Current Context RenderPass=" + currentRenderPassHandle + " (0x" + Long.toHexString(currentRenderPassHandle) + ")"
-                    + " on CmdBuffer 0x" + Long.toHexString(currentCommandBuffer.address()));*/
 
             // Get pipeline from manager
             long pipelineToUse = pipelineManager.getOrCreateSpriteBatchPipeline(this.batchPipelineLayout, currentRenderPassHandle);
@@ -992,37 +1177,21 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
 
             // Bind the descriptor set for the current frame
             try (MemoryStack stack = MemoryStack.stackPush()) {
-                LongBuffer pSet = stack.longs(currentFrameSet); // Use the frame-specific set handle
+                LongBuffer pSet = stack.longs(currentFrameSet);
                 vkCmdBindDescriptorSets(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, this.batchPipelineLayout, 0, pSet, null);
-                //Gdx.app.log(TAG, "Flush: Bound Pipeline=" + pipelineToUse + " and DescriptorSet=" + currentFrameSet + " (Frame " + currentFrameIndex + ")");
             }
+
             pipelineAndSetBoundThisBatch = true; // Mark as bound for this flush sequence
         }
-        // ---
 
-        // --- Bind Vertex and Index Buffers ---
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            // --- Corrected Vertex Buffer Binding (Matching YOUR Environment) ---
 
-            // Create a LongBuffer for the buffer handle(s)
-            // Using stack.longs() is concise for single values
             LongBuffer pBuffers = stack.longs(vertexBuffer.bufferHandle);
-
-            // Create a LongBuffer for the offset(s)
             LongBuffer pOffsets = stack.longs(0L); // Use 0L for long literal zero
-
-            // Call the signature your IDE finds: VkCommandBuffer, firstBinding, LongBuffer, LongBuffer
-            // NOTE: No 'bindingCount' (the '1') argument here!
             vkCmdBindVertexBuffers(currentCommandBuffer, 0, pBuffers, pOffsets);
-            // --- End Corrected Vertex Buffer Binding ---
-
-            // Index buffer binding remains the same
             vkCmdBindIndexBuffer(currentCommandBuffer, indexBuffer.bufferHandle, 0, VK_INDEX_TYPE_UINT16);
         }
 
-        // ---
-
-        // --- Flush Mapped Vertex Buffer Memory ---
         long vertexBytesToFlush = (long) vertexBufferIdx * Float.BYTES;
         if (vertexBytesToFlush > 0) {
             if (vertexBuffer.allocationHandle != VK_NULL_HANDLE) {
@@ -1035,18 +1204,14 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
                 throw new GdxRuntimeException("VMA Allocation handle invalid during flush.");
             }
         }
-        // ---
 
-        // --- Issue Draw Call ---
         int indexCountToDraw = currentSpriteCount * INDICES_PER_SPRITE;
         // Gdx.app.log(TAG, "Flush: vkCmdDrawIndexed(indices=" + indexCountToDraw + ", sprites=" + currentSpriteCount +")"); // Verbose log
         vkCmdDrawIndexed(currentCommandBuffer, indexCountToDraw, 1, 0, 0, 0); // Draw the vertices
         renderCalls++;
-        // ---
 
-        // --- Reset Counters for Next Batch ---
-        resetCountersAndLog();
-        // ---
+        vertexBufferIdx = 0;
+        spriteCount = 0;
     }
 
     private void resetCountersAndLog() {
@@ -1054,103 +1219,85 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         spriteCount = 0;
     }
 
-    /**
-     * Records the specified texture as the last one requested for drawing globally.
-     * If the new texture is different from the last one recorded, the batch is flushed
-     * if it contains pending vertices. The actual descriptor set update(s) will happen
-     * later during prepareResourcesForFrame when necessary.
-     *
-     * @param texture The new VulkanTexture to switch to. Must not be null and must
-     * have valid internal Vulkan handles.
-     * @throws IllegalArgumentException if the provided texture is null.
-     * @throws GdxRuntimeException if the provided texture has invalid internal handles.
-     */
-    protected void switchTexture(VulkanTexture texture) {
-        // --- Input Validation ---
+    /*protected void switchTexture(VulkanTexture texture) {
         if (texture == null) {
             throw new IllegalArgumentException("Cannot switch to a null texture.");
         }
-
-        // --- Check if Switch is Needed (Comparing with immediate last texture) ---
-        if (lastTexture == texture) {
-            // No change needed in the globally last requested texture
-            return;
+        if (texture.getImageViewHandle() == VK_NULL_HANDLE || texture.getSamplerHandle() == VK_NULL_HANDLE) {
+            throw new GdxRuntimeException("switchTexture called with a VulkanTexture that has invalid handles.");
         }
 
-        long newImageViewHandle = texture.getImageViewHandle();
-        long newSamplerHandle = texture.getSamplerHandle();
-        Gdx.app.log(TAG, "switchTexture: Recording switch from " + (lastTexture != null ? lastTexture.hashCode() : "null") + " to " + texture.hashCode()
-                + " | NewTex Valid? ImgView=" + newImageViewHandle + " Sampler=" + newSamplerHandle);
-
-        if (newImageViewHandle == VK_NULL_HANDLE || newSamplerHandle == VK_NULL_HANDLE) {
-            // If the incoming texture is already invalid (e.g., disposed prematurely),
-            // we cannot use it. This indicates an error at the call site.
-            throw new GdxRuntimeException("switchTexture called with a VulkanTexture that has invalid handles (ImageView/Sampler is VK_NULL_HANDLE). Texture hash: " + texture.hashCode());
+        // Update cache if needed, but NO flush here.
+        if (lastTexture != texture) {
+            // Update lastTexture tracked for prepareResourcesForFrame (also updated in getTextureIndex)
+            lastTexture = texture;
+            // Update inverse texture size cache if still needed
+            if (texture.getWidth() <= 0 || texture.getHeight() <= 0) {
+                invTexWidth = 0;
+                invTexHeight = 0;
+            } else {
+                invTexWidth = 1.0f / texture.getWidth();
+                invTexHeight = 1.0f / texture.getHeight();
+            }
         }
-
-        if (this.spriteCount > 0 || this.vertexBufferIdx > 0) {
-            Gdx.app.log(TAG, "switchTexture: Flushing " + spriteCount + " sprites (" + vertexBufferIdx + " floats) before texture state change.");
-            flush(); // This will use the *previous* lastTexture state for binding
-        } else {
-            // Even if no flush happened, ensure counters are zero
-            resetCountersAndLog();
-        }
-
-        lastTexture = texture;
-
-        // Update inverse texture size cache based on the new texture
-        if (texture.getWidth() <= 0 || texture.getHeight() <= 0) {
-            Gdx.app.error(TAG, "Texture dimensions are zero or negative (" + texture.getWidth() + "x" + texture.getHeight() + ") in switchTexture for texture " + texture.hashCode());
-            invTexWidth = 0; // Avoid NaN/Infinity
-            invTexHeight = 0;
-        } else {
-            invTexWidth = 1.0f / texture.getWidth();
-            invTexHeight = 1.0f / texture.getHeight();
-        }
-
-        this.pipelineAndSetBoundThisBatch = false;
-
-        Gdx.app.log(TAG, "switchTexture: Completed recording switch. lastTexture=" + lastTexture.hashCode() + ", needsRebind=true");
-    }
+    }*/
 
     @Override
     public void disableBlending() {
-        Gdx.app.log(TAG, "WARN: disableBlending() not fully implemented."); /* TODO */
+        if (blendingEnabled) {
+            flush(); // Flush pending draws with the old state
+            blendingEnabled = false;
+        }
     }
 
     @Override
     public void enableBlending() {
-        Gdx.app.log(TAG, "WARN: enableBlending() not fully implemented."); /* TODO */
+        if (!blendingEnabled) {
+            flush(); // Flush pending draws with the old state
+            blendingEnabled = true;
+        }
     }
 
     @Override
     public void setBlendFunction(int srcFunc, int dstFunc) {
-        Gdx.app.log(TAG, "WARN: setBlendFunction() not fully implemented."); /* TODO */
+        setBlendFunctionSeparate(srcFunc, dstFunc, srcFunc, dstFunc); // Delegate to separate
+        blendFuncSeparate = false; // Mark as non-separate for getters if needed
     }
 
     @Override
     public void setBlendFunctionSeparate(int srcFuncColor, int dstFuncColor, int srcFuncAlpha, int dstFuncAlpha) {
-        Gdx.app.log(TAG, "WARN: setBlendFunctionSeparate() not fully implemented."); /* TODO */
+        if (this.blendSrcFunc != srcFuncColor || this.blendDstFunc != dstFuncColor ||
+                this.blendSrcFuncAlpha != srcFuncAlpha || this.blendDstFuncAlpha != dstFuncAlpha) {
+
+            flush(); // Flush pending draws with the old state
+            this.blendSrcFunc = srcFuncColor;
+            this.blendDstFunc = dstFuncColor;
+            this.blendSrcFuncAlpha = srcFuncAlpha;
+            this.blendDstFuncAlpha = dstFuncAlpha;
+            this.blendFuncSeparate = true; // Mark as separate
+        }
     }
 
     @Override
     public int getBlendSrcFunc() {
-        return -1; /* TODO */
+        return blendSrcFunc;
     }
 
     @Override
     public int getBlendDstFunc() {
-        return -1; /* TODO */
+        return blendDstFunc;
     }
 
     @Override
     public int getBlendSrcFuncAlpha() {
-        return -1; /* TODO */
+        // Return color func if separate wasn't used, mimicking OpenGL behavior
+        return blendFuncSeparate ? blendSrcFuncAlpha : blendSrcFunc;
     }
 
     @Override
     public int getBlendDstFuncAlpha() {
-        return -1; /* TODO */
+        // Return color func if separate wasn't used
+        return blendFuncSeparate ? blendDstFuncAlpha : blendDstFunc;
     }
 
     @Override
@@ -1183,12 +1330,11 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         if (transform == null) throw new IllegalArgumentException("transform matrix cannot be null.");
         // Flush if transform changes mid-batch
         if (drawing && (spriteCount > 0 || vertexBufferIdx > 0)) {
-            Gdx.app.log(TAG, "Transform matrix changed mid-batch, flushing.");
+            VulkanApplication app = (VulkanApplication) Gdx.app;
+            //Gdx.app.log(TAG, "Window " + app.getCurrentWindow().hashCode() + "\tTransform matrix changed mid-batch, flushing.");
             flush();
         }
         this.transformMatrix.set(transform);
-        // Note: Basic SpriteBatch doesn't use the transform matrix directly in the shader usually.
-        // If you modify the shader/pipeline to use it, you'd need a separate UBO for it.
     }
 
 
@@ -1204,7 +1350,7 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
 
     @Override
     public boolean isBlendingEnabled() {
-        return true; /* TODO: Track actual state */
+        return blendingEnabled;
     }
 
     @Override
@@ -1256,35 +1402,63 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
             return;
         }
 
-        // Check if the descriptor set for the upcoming frame (frameIndex)
-        // already contains the required texture state.
-        // Compare with the texture we *recorded* as being in the set during the *last* update for this frameIndex.
-        if (currentTextureInSet[frameIndex] != requiredTexture) {
+        VulkanTexture textureForSlot0 = this.lastTexture != null ? this.lastTexture : this.defaultTexture;
+        if (textureForSlot0 == null) {
+            Gdx.app.error(TAG, "prepareResourcesForFrame: Cannot determine texture for slot 0 for frame " + frameIndex);
+            return;
+        }
 
-            long frameSet = batchDescriptorSets[frameIndex]; // Get the handle for the set to update
-
+        // Check if texture for slot 0 needs update (simplified check)
+        if (currentTextureInSet[frameIndex] != textureForSlot0) { // Still comparing single texture tracking
+            long frameSet = batchDescriptorSets[frameIndex];
             if (frameSet != VK_NULL_HANDLE) {
-                // Final check: Ensure the texture we are about to bind is actually valid *now*.
-                if (requiredTexture.getImageViewHandle() == VK_NULL_HANDLE || requiredTexture.getSamplerHandle() == VK_NULL_HANDLE) {
-                    Gdx.app.error(TAG,"prepareResourcesForFrame: Required texture hash=" + requiredTexture.hashCode() + " has invalid handles! Cannot update Set " + frameIndex);
+                if (textureForSlot0.getImageViewHandle() == VK_NULL_HANDLE || textureForSlot0.getSamplerHandle() == VK_NULL_HANDLE) {
+                    Gdx.app.error(TAG, "prepareResourcesForFrame: Required texture for slot 0 (hash=" + textureForSlot0.hashCode() + ") has invalid handles! Cannot update Set " + frameIndex);
                 } else {
-                    // Log the update attempt
-                    Gdx.app.log(TAG, "prepareResourcesForFrame: Updating texture descriptor for set " + frameSet + " (Frame " + frameIndex
+                    Gdx.app.log(TAG, "prepareResourcesForFrame: Updating texture descriptor SLOT 0 for set " + frameSet + " (Frame " + frameIndex
                             + ") from Texture " + (currentTextureInSet[frameIndex] != null ? currentTextureInSet[frameIndex].hashCode() : "null (init)")
-                            + " to Texture " + requiredTexture.hashCode());
+                            + " to Texture " + textureForSlot0.hashCode());
 
-                    // Perform the actual descriptor set update for Binding 1 (Sampler)
-                    VulkanDescriptorManager.updateCombinedImageSampler(rawDevice, frameSet, 1, requiredTexture);
+                    // Assuming an updated method that takes an array index (element)
+                    VulkanDescriptorManager.updateCombinedImageSampler(rawDevice, frameSet, 1, 0, textureForSlot0); // Update element 0
 
-                    // Record that this set now contains the required texture state
-                    currentTextureInSet[frameIndex] = requiredTexture;
+                    // Record only the texture updated in slot 0
+                    currentTextureInSet[frameIndex] = textureForSlot0; // This tracking is now insufficient
                 }
             } else {
                 Gdx.app.error(TAG, "prepareResourcesForFrame: Cannot update descriptor set, handle is null for frame " + frameIndex);
             }
-        } else {
-            // Log that no update was needed (optional verbose log)
-            // Gdx.app.log(TAG, "prepareResourcesForFrame(" + frameIndex + "): Set already contains required texture " + requiredTexture.hashCode());
         }
     }
+
+    /*private int mapGLBlendFactorToVulkan(int glBlendFactor) {
+        switch (glBlendFactor) {
+            case GL20.GL_ZERO:
+                return VK_BLEND_FACTOR_ZERO;
+            case GL20.GL_ONE:
+                return VK_BLEND_FACTOR_ONE;
+            case GL20.GL_SRC_COLOR:
+                return VK_BLEND_FACTOR_SRC_COLOR;
+            case GL20.GL_ONE_MINUS_SRC_COLOR:
+                return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+            case GL20.GL_DST_COLOR:
+                return VK_BLEND_FACTOR_DST_COLOR;
+            case GL20.GL_ONE_MINUS_DST_COLOR:
+                return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+            case GL20.GL_SRC_ALPHA:
+                return VK_BLEND_FACTOR_SRC_ALPHA;
+            case GL20.GL_ONE_MINUS_SRC_ALPHA:
+                return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            case GL20.GL_DST_ALPHA:
+                return VK_BLEND_FACTOR_DST_ALPHA;
+            case GL20.GL_ONE_MINUS_DST_ALPHA:
+                return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+            case GL20.GL_SRC_ALPHA_SATURATE:
+                return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
+            // Add GL30 constants if needed (GL_CONSTANT_COLOR etc.) -> map to VK equivalents
+            default:
+                Gdx.app.error(TAG, "Unsupported blend factor: " + glBlendFactor);
+                return VK_BLEND_FACTOR_ONE; // Sensible default?
+        }
+    }*/
 }

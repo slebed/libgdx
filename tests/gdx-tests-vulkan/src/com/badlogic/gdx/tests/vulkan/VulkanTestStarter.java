@@ -13,6 +13,7 @@ import com.badlogic.gdx.assets.loaders.FileHandleResolver;
 import com.badlogic.gdx.assets.loaders.resolvers.InternalFileHandleResolver;
 import com.badlogic.gdx.backend.vulkan.VulkanApplication;
 import com.badlogic.gdx.backend.vulkan.VulkanApplicationConfiguration;
+import com.badlogic.gdx.backend.vulkan.VulkanDebugLogger;
 import com.badlogic.gdx.backend.vulkan.VulkanScreenViewport;
 
 import com.badlogic.gdx.backend.vulkan.VulkanStage;
@@ -45,6 +46,8 @@ public class VulkanTestStarter {
         vkConfig.setWindowedMode(640, 480);
         vkConfig.enableValidationLayers(true, null);
         vkConfig.setPresentationMode(VulkanApplicationConfiguration.SwapchainPresentMode.MAILBOX);
+
+        VulkanDebugLogger.enableAll();
 
         ApplicationListener listenerToStart = null;
         String testName = options.startupTestName;
@@ -245,7 +248,7 @@ public class VulkanTestStarter {
             if (primaryWin != null) {
                 int currentX = primaryWin.getPositionX();
                 int currentY = primaryWin.getPositionY();
-                winConfig.setWindowPosition(currentX + 40, currentY + 40);
+                winConfig.setWindowPosition(currentX + 80, currentY + 80);
                 Gdx.app.log("VulkanTestChooser", "Positioning new window relative to: " + currentX + "," + currentY);
             } else {
                 Gdx.app.error("VulkanTestChooser", "Could not get primary/current window reference to position new window.");

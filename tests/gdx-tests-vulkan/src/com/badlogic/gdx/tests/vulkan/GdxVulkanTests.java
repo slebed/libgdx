@@ -57,7 +57,9 @@ public class GdxVulkanTests {
                 Scene2dTest.class,
                 VulkanSpriteBatchPerformanceTest.class,
                 VulkanSpriteBatchPerformanceTest2.class,
-                VulkanSpriteBatchTest.class
+                VulkanSpriteBatchTest.class,
+                VulkanSpriteBatchStressTest.class,
+                VulkanSpriteBatchTextureSwitchTest.class
                 // @on
         );
 
