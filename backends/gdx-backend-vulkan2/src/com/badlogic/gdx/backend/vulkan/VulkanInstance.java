@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.lwjgl.vulkan.VK10.*;
+import static org.lwjgl.vulkan.VK12.VK_API_VERSION_1_2;
 
 public class VulkanInstance implements VkResource {
 
@@ -35,6 +36,7 @@ public class VulkanInstance implements VkResource {
         private String applicationName;
         private List<String> requiredExtensions = new ArrayList<>();
         private List<String> validationLayers = new ArrayList<>();
+        private int apiVersion =  VK_API_VERSION_1_2;;
 
         public Builder setApplicationName(String applicationName) {
             this.applicationName = applicationName;
@@ -51,11 +53,16 @@ public class VulkanInstance implements VkResource {
             return this;
         }
 
+        public Builder setApiVersion(int applicationVersion) {
+            this.apiVersion = applicationVersion;
+            return this;
+        }
+
         public VulkanInstance build() {
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 VkApplicationInfo appInfo = VkApplicationInfo.calloc(stack).sType(VK_STRUCTURE_TYPE_APPLICATION_INFO)
                         .pApplicationName(stack.UTF8(applicationName)).pEngineName(stack.UTF8("libGDX Vulkan Backend"))
-                        .apiVersion(VK_API_VERSION_1_0).engineVersion(VK_MAKE_VERSION(1, 0, 0))
+                        .apiVersion(apiVersion)   //.apiVersion(VK_API_VERSION_1_0).engineVersion(VK_MAKE_VERSION(1, 0, 0))
                         .applicationVersion(VK_MAKE_VERSION(1, 0, 0));
 
                 PointerBuffer ppExtensions = stack.mallocPointer(requiredExtensions.size());
@@ -82,6 +89,7 @@ public class VulkanInstance implements VkResource {
                 return new VulkanInstance(new VkInstanceHandle(pInstance.get(0), ci));
             }
         }
+
     }
 
     private static class VkInstanceHandle extends org.lwjgl.vulkan.VkInstance {

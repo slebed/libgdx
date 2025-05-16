@@ -359,7 +359,8 @@ public class GdxTests {
                 VulkanQuadTest.class,
                 JsonTest.class,
                 QuadTreeFloatTest.class,
-                QuadTreeFloatNearestTest.class
+                QuadTreeFloatNearestTest.class,
+				OpenGLSpriteBatchStressTest.class
                 // @on
 
 		// SoundTouchTest.class, Mpg123Test.class, WavTest.class, FreeTypeTest.class,

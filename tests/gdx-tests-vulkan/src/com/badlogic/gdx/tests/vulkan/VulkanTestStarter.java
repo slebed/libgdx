@@ -45,7 +45,7 @@ public class VulkanTestStarter {
         vkConfig.setTitle("Vulkan Test"); // Default title
         vkConfig.setWindowedMode(640, 480);
         vkConfig.enableValidationLayers(true, null);
-        vkConfig.setPresentationMode(VulkanApplicationConfiguration.SwapchainPresentMode.MAILBOX);
+        vkConfig.setPresentationMode(VulkanApplicationConfiguration.SwapchainPresentMode.FIFO);
 
         VulkanDebugLogger.enableAll();
 
@@ -241,7 +241,7 @@ public class VulkanTestStarter {
             VulkanWindowConfiguration winConfig = new VulkanWindowConfiguration();
 
             winConfig.setTitle(testName + " (Vulkan Test)");
-            winConfig.setWindowedMode(800, 600);
+            winConfig.setWindowedMode(1920, 1080);
 
             VulkanApplication app = (VulkanApplication) Gdx.app;
             VulkanWindow primaryWin = app.getCurrentWindow();
@@ -254,7 +254,7 @@ public class VulkanTestStarter {
                 Gdx.app.error("VulkanTestChooser", "Could not get primary/current window reference to position new window.");
             }
 
-            winConfig.setPresentMode(VulkanApplicationConfiguration.SwapchainPresentMode.FIFO);
+            winConfig.setPresentMode(VulkanApplicationConfiguration.SwapchainPresentMode.MAILBOX);
             Gdx.app.log("VulkanTestChooser", "Setting present mode for '" + testName + "' to: " + winConfig.getPresentMode());
 
             app.newWindow(new GdxTestWrapper(test, options.logGLErrors), winConfig);

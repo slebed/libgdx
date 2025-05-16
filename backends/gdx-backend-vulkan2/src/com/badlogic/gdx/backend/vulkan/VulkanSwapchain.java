@@ -25,6 +25,7 @@ import static org.lwjgl.vulkan.VK10.*;
 // Disposable might be better than VkResource if it's a libGDX convention
 public class VulkanSwapchain implements Disposable {
     private final String TAG = "VulkanSwapchain";
+    private static final boolean debug = true;
 
     private final VulkanDevice device;
     private final VkPhysicalDevice physicalDevice;
@@ -104,8 +105,7 @@ public class VulkanSwapchain implements Disposable {
     public long getFramebuffer(int index) {
         if (swapchainFramebuffers == null || index < 0 || index >= swapchainFramebuffers.size()) {
             // Log error or throw? Throwing is generally safer.
-            throw new IndexOutOfBoundsException("Invalid index for swapchain framebuffer: " + index + ", Size="
-                    + (swapchainFramebuffers != null ? swapchainFramebuffers.size() : "null"));
+            throw new IndexOutOfBoundsException("Invalid index for swapchain framebuffer: " + index + ", Size=" + (swapchainFramebuffers != null ? swapchainFramebuffers.size() : "null"));
         }
         return swapchainFramebuffers.get(index);
     }
@@ -128,13 +128,13 @@ public class VulkanSwapchain implements Disposable {
      */
     public int acquireNextImage(long signalSemaphore, long fence, IntBuffer pImageIndex) {
         final long handleToCheck = this.swapchain; // Read into local var
-        // Gdx.app.log( TAG, "[Acquire] Checking handle: " + handleToCheck); // Log before check
+        // if (debug) Gdx.app.log( TAG, "[Acquire] Checking handle: " + handleToCheck); // Log before check
         if (handleToCheck == VK_NULL_HANDLE) {
             Gdx.app.error(TAG, "[Acquire] PRE-CHECK FAILED: swapchain handle is VK_NULL_HANDLE. Flagging for recreation.");
             needsRecreation = true;
             return VK_ERROR_INITIALIZATION_FAILED;
         }
-        // Gdx.app.log( TAG, "[Acquire] PRE-NATIVE CALL: About to call vkAcquireNextImageKHR with handle: " +
+        // if (debug) Gdx.app.log( TAG, "[Acquire] PRE-NATIVE CALL: About to call vkAcquireNextImageKHR with handle: " +
         // handleToCheck); // Log right before native call
 
         if (swapchain == VK_NULL_HANDLE) {
@@ -149,7 +149,7 @@ public class VulkanSwapchain implements Disposable {
 
         if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR || acquireResult == VK_SUBOPTIMAL_KHR) {
             needsRecreation = true; // Mark for recreation on next frame
-            //Gdx.app.log(TAG, "acquireNextImage result: " + VkResultDecoder.decode(acquireResult) + ". Flagged for recreation.");
+            //if (debug) Gdx.app.log(TAG, "acquireNextImage result: " + VkResultDecoder.decode(acquireResult) + ". Flagged for recreation.");
         } else if (acquireResult != VK_SUCCESS) {
             Gdx.app.error(TAG, "Failed to acquire swap chain image! Result: " + VkResultDecoder.decode(acquireResult));
             // Consider throwing specific exceptions for critical errors like VK_ERROR_DEVICE_LOST
@@ -179,7 +179,7 @@ public class VulkanSwapchain implements Disposable {
 
             if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR) {
                 needsRecreation = true; // Mark for recreation on next frame
-                //Gdx.app.log(TAG,                        "vkQueuePresentKHR result: " + VkResultDecoder.decode(presentResult) + ". Flagged for recreation.");
+                if (debug) Gdx.app.log(TAG,                        "vkQueuePresentKHR result: " + VkResultDecoder.decode(presentResult) + ". Flagged for recreation.");
             } else if (presentResult != VK_SUCCESS) {
                 Gdx.app.error(TAG, "Failed to present swap chain image! Result: " + VkResultDecoder.decode(presentResult));
                 // Consider throwing specific exceptions
@@ -193,7 +193,7 @@ public class VulkanSwapchain implements Disposable {
      * calling this method.
      */
     public void recreate() {
-        //Gdx.app.log(TAG, "Recreating swapchain (VSync=" + this.vsyncEnabled + ")...");
+        //if (debug) Gdx.app.log(TAG, "Recreating swapchain (VSync=" + this.vsyncEnabled + ")...");
 
         // 1. Cleanup existing resources (without waiting for idle again)
         cleanupInternal(false);
@@ -202,7 +202,7 @@ public class VulkanSwapchain implements Disposable {
         try {
             Builder.recreateInternal(this); // Pass 'this' to static recreate method
             needsRecreation = false; // Reset flag after successful recreation
-            //Gdx.app.log(TAG, "Swapchain recreation complete.");
+            //if (debug) Gdx.app.log(TAG, "Swapchain recreation complete.");
         } catch (Exception e) {
             Gdx.app.error(TAG, "Failed during swapchain recreation", e);
             // Attempt cleanup again if recreation fails
@@ -214,10 +214,10 @@ public class VulkanSwapchain implements Disposable {
 
     @Override
     public void dispose() {
-        Gdx.app.log(TAG, "Disposing swapchain resources...");
+        if (debug) Gdx.app.log(TAG, "Disposing swapchain resources...");
         // Ensure device is idle before final cleanup
         cleanupInternal(true);
-        Gdx.app.log(TAG, "Swapchain resources disposed.");
+        if (debug) Gdx.app.log(TAG, "Swapchain resources disposed.");
     }
 
     /**
@@ -228,9 +228,9 @@ public class VulkanSwapchain implements Disposable {
     private void cleanupInternal(boolean waitIdle) {
         if (waitIdle && rawDevice != null && swapchain != VK_NULL_HANDLE) {
             // Only wait if we actually have something potentially in flight
-            //Gdx.app.log(TAG, "Waiting for device idle before cleanup...");
+            //if (debug) Gdx.app.log(TAG, "Waiting for device idle before cleanup...");
             vkDeviceWaitIdle(rawDevice);
-            //Gdx.app.log(TAG, "Device idle.");
+            //if (debug) Gdx.app.log(TAG, "Device idle.");
         }
 
         // Framebuffers
@@ -365,7 +365,6 @@ public class VulkanSwapchain implements Disposable {
          * @param oldSwapchainHandle Handle to the old swapchain (VK_NULL_HANDLE if initial creation or not reusing).
          * @return A new VulkanSwapchain instance containing all created resources.
          */
-        //private static VulkanSwapchain createSwapchainResources(Object source, boolean useVSync, long oldSwapchainHandle) {
         private static VulkanSwapchain createSwapchainResources(Object source, VulkanWindowConfiguration windowConf, long oldSwapchainHandle) {
 
             // Extract dependencies from source object
@@ -410,7 +409,7 @@ public class VulkanSwapchain implements Disposable {
                 IntBuffer pHeightCheck = stack.mallocInt(1);
                 GLFW.glfwGetFramebufferSize(windowHnd, pWidthCheck, pHeightCheck);
                 if (pWidthCheck.get(0) == 0 || pHeightCheck.get(0) == 0) {
-                    //Gdx.app.log("VulkanSwapchain.Builder", "Skipping resource creation for zero size window.");
+                    //if (debug) Gdx.app.log("VulkanSwapchain.Builder", "Skipping resource creation for zero size window.");
                     throw new GdxRuntimeException("Cannot create swapchain for zero-sized window.");
                 }
 
@@ -432,7 +431,7 @@ public class VulkanSwapchain implements Disposable {
                 vkCheck(vkGetPhysicalDeviceSurfacePresentModesKHR(physDev, surf, presentModeCount, null), "Failed query present modes count");
 
                 int count = presentModeCount.get(0); // Read the count *after* the Vulkan call
-                //Gdx.app.log("VulkanSwapchain.Builder", "Reported present mode count: " + count); // Log the *actual* count
+                //if (debug) Gdx.app.log("VulkanSwapchain.Builder", "Reported present mode count: " + count); // Log the *actual* count
 
                 // ---> Validation <---
                 if (count <= 0) {
@@ -463,10 +462,12 @@ public class VulkanSwapchain implements Disposable {
                 if (caps.maxImageCount() > 0 && imageCount > caps.maxImageCount()) {
                     imageCount = caps.maxImageCount(); // Clamp to max if defined
                 }
-                //Gdx.app.log("VulkanSwapchain.Builder", "Requesting " + imageCount + " swapchain images.");
+                if (debug) Gdx.app.log("VulkanSwapchain.Builder", "Requesting " + imageCount + " swapchain images.");
 
                 // --- Create Swapchain ---
-                VkSwapchainCreateInfoKHR createInfo = VkSwapchainCreateInfoKHR.calloc(stack).sType$Default().surface(surf)
+                VkSwapchainCreateInfoKHR createInfo = VkSwapchainCreateInfoKHR.calloc(stack)
+                        .sType$Default()
+                        .surface(surf)
                         .minImageCount(imageCount).imageFormat(chosenFormat.format()).imageColorSpace(chosenFormat.colorSpace())
                         .imageExtent(chosenExtent)
                         .imageArrayLayers(1).imageUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
@@ -490,7 +491,7 @@ public class VulkanSwapchain implements Disposable {
                     throw new GdxRuntimeException(errorMsg);
                 }
 
-                //Gdx.app.log("VulkanSwapchain.Builder", "[CreateResources] vkCreateSwapchainKHR returned valid handle: " + swapchainHandle);
+                //if (debug) Gdx.app.log("VulkanSwapchain.Builder", "[CreateResources] vkCreateSwapchainKHR returned valid handle: " + swapchainHandle);
 
                 // --- Get Swapchain Images ---
                 IntBuffer actualImageCountBuf = stack.mallocInt(1);
@@ -513,7 +514,8 @@ public class VulkanSwapchain implements Disposable {
                 // --- Create Framebuffers ---
                 List<Long> framebuffers = createFramebuffersInternal(rawDev, imageViews, renderPassHandle, chosenExtent);
 
-                //Gdx.app.log("VulkanSwapchain.Builder", "Created swapchain resources. PresentMode: " + VkResultDecoder.decodePresentMode(chosenPresentMode) + ", Format: " + chosenFormat.format() + ", Extent: " + chosenExtent.width() + "x" + chosenExtent.height()); // Updated log
+                if (debug)
+                    Gdx.app.log("VulkanSwapchain.Builder", "Created swapchain resources. PresentMode: " + VkResultDecoder.decodePresentMode(chosenPresentMode) + ", Format: " + chosenFormat.format() + ", Extent: " + chosenExtent.width() + "x" + chosenExtent.height()); // Updated log
                 // --- Construct VulkanSwapchain Instance ---
                 // Use a dummy builder just to pass dependencies if called from recreate
                 Builder dummyBuilder = (source instanceof Builder) ? (Builder) source
@@ -526,7 +528,7 @@ public class VulkanSwapchain implements Disposable {
         }
 
         private static int chooseSwapPresentMode(IntBuffer availablePresentModes, VulkanApplicationConfiguration.SwapchainPresentMode desiredMode) {
-            //Gdx.app.log("VulkanSwapchain", "Choosing present mode. Desired: " + desiredMode);
+            //if (debug) Gdx.app.log("VulkanSwapchain", "Choosing present mode. Desired: " + desiredMode);
 
             int desiredVkMode;
             switch (desiredMode) {
@@ -545,6 +547,16 @@ public class VulkanSwapchain implements Disposable {
                     break;
             }
 
+            if (debug) { // Assuming 'debug' is a static boolean you can set
+                StringBuilder modes = new StringBuilder("Available Present Modes: ");
+                for (int i = 0; i < availablePresentModes.limit(); i++) {
+                    modes.append(VkResultDecoder.decodePresentMode(availablePresentModes.get(i))).append(" (").append(availablePresentModes.get(i)).append(") ");
+                }
+                Gdx.app.log("VulkanSwapchain", modes.toString());
+                Gdx.app.log("VulkanSwapchain", "Desired LibGDX Mode: " + desiredMode + ", maps to VkMode: " + desiredVkMode);
+            }
+
+
             // Check if the desired mode is available
             boolean desiredAvailable = false;
             for (int i = 0; i < availablePresentModes.limit(); i++) {
@@ -555,7 +567,7 @@ public class VulkanSwapchain implements Disposable {
             }
 
             if (desiredAvailable) {
-                //Gdx.app.log("VulkanSwapchain", "Desired present mode available: " + desiredVkMode);
+                //if (debug) Gdx.app.log("VulkanSwapchain", "Desired present mode available: " + desiredVkMode);
                 return desiredVkMode;
             }
 
@@ -570,25 +582,25 @@ public class VulkanSwapchain implements Disposable {
                 }
             }
             if (mailboxAvailable && desiredMode != VulkanApplicationConfiguration.SwapchainPresentMode.MAILBOX) { // Only log if it wasn't the desired
-                //Gdx.app.log("VulkanSwapchain", "Desired mode (" + desiredMode + ") not available, falling back to available MAILBOX.");
+                //if (debug) Gdx.app.log("VulkanSwapchain", "Desired mode (" + desiredMode + ") not available, falling back to available MAILBOX.");
                 return VK_PRESENT_MODE_MAILBOX_KHR;
             }
 
 
             // Default guaranteed fallback: FIFO (VSync)
-            //Gdx.app.log("VulkanSwapchain", "Desired mode (" + desiredMode + ") not available, falling back to guaranteed FIFO.");
+            //if (debug) Gdx.app.log("VulkanSwapchain", "Desired mode (" + desiredMode + ") not available, falling back to guaranteed FIFO.");
             return VK_PRESENT_MODE_FIFO_KHR;
         }
 
         private static VkSurfaceFormatKHR chooseSwapSurfaceFormatInternal(VkSurfaceFormatKHR.Buffer availableFormats) {
             for (VkSurfaceFormatKHR format : availableFormats) {
                 if (format.format() == VK_FORMAT_B8G8R8A8_SRGB && format.colorSpace() == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-                    //Gdx.app.log("VulkanSwapchain.Builder", "Chosen format: B8G8R8A8_SRGB");
+                    //if (debug) Gdx.app.log("VulkanSwapchain.Builder", "Chosen format: B8G8R8A8_SRGB");
                     return format;
                 }
             }
             VkSurfaceFormatKHR fallback = availableFormats.get(0);
-            //Gdx.app.log("VulkanSwapchain.Builder", "Chosen format: Fallback " + fallback.format());
+            //if (debug) Gdx.app.log("VulkanSwapchain.Builder", "Chosen format: Fallback " + fallback.format());
             return fallback;
         }
 
@@ -610,7 +622,7 @@ public class VulkanSwapchain implements Disposable {
                             .width(clamp(pWidth.get(0), capabilities.minImageExtent().width(), capabilities.maxImageExtent().width()));
                     actualExtent
                             .height(clamp(pHeight.get(0), capabilities.minImageExtent().height(), capabilities.maxImageExtent().height()));
-                    //Gdx.app.log("VulkanSwapchain.Builder", "Chosen Extent (Clamped): " + actualExtent.width() + "x" + actualExtent.height());
+                    //if (debug) Gdx.app.log("VulkanSwapchain.Builder", "Chosen Extent (Clamped): " + actualExtent.width() + "x" + actualExtent.height());
                     return actualExtent;
                 }
             }

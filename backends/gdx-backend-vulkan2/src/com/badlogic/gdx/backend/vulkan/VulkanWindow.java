@@ -118,7 +118,9 @@ import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
 
 public class VulkanWindow implements Disposable {
-    final private String TAG = "VulkanWindow";
+    private static final String TAG = "VulkanWindow";
+    private static final boolean debug = true;
+
     private final VulkanGraphics vulkanGraphics;
     private long windowHandle;
     final ApplicationListener listener;
@@ -148,7 +150,6 @@ public class VulkanWindow implements Disposable {
     private List<Long> inFlightFences = new ArrayList<>(); // List of VkFence handles
     private int maxFramesInFlight = 1; // Example, configure as needed
     private int currentFrame = 0; // For sync object cycling
-
 
     private final GLFWWindowFocusCallback focusCallback = new GLFWWindowFocusCallback() {
         @Override
@@ -238,7 +239,7 @@ public class VulkanWindow implements Disposable {
             postRunnable(new Runnable() {
                 @Override
                 public void run() {
-                    Gdx.app.log(TAG, "Closing window "+hashCode());
+                    if (debug) Gdx.app.log(TAG, "Closing window " + hashCode());
                     if (windowListener != null) {
                         if (!windowListener.closeRequested()) {
                             GLFW.glfwSetWindowShouldClose(windowHandle, false);
@@ -307,6 +308,7 @@ public class VulkanWindow implements Disposable {
     }
 
     void create(long windowHandle) {
+        if (debug) Gdx.app.log("VulkanAppInit", "Calling window.create() for handle: " + windowHandle);
         if (windowHandle == 0) {
             Gdx.app.error(TAG, "create() called with invalid window handle!");
             throw new GdxRuntimeException("Cannot create VulkanWindow with invalid handle.");
@@ -334,7 +336,7 @@ public class VulkanWindow implements Disposable {
             Gdx.app.error(TAG, "[" + this.hashCode() + "] Cannot set input callbacks during create(), input handler is null!");
         }
 
-        //Gdx.app.log(TAG, "[" + this.hashCode() + "] Creating Vulkan resources...");
+        //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Creating Vulkan resources...");
 
         try {
             VulkanDevice vulkanDevice = application.getVulkanDevice();
@@ -345,7 +347,7 @@ public class VulkanWindow implements Disposable {
                     .windowHandle(this.windowHandle)
                     .configuration(this.config) // Pass VulkanWindowConfiguration
                     .build();
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Swapchain created.");
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Swapchain created.");
         } catch (Exception e) {
             // Clean up surface if swapchain creation fails
             if (this.surface != VK_NULL_HANDLE && application.getVulkanInstance() != null) {
@@ -367,7 +369,7 @@ public class VulkanWindow implements Disposable {
         }
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkDevice device = application.getVulkanDevice().getRawDevice(); // Get raw device
+            VkDevice device = application.getVulkanDevice().getRawDevice();
 
             // --- Create Render Pass ---
             VkAttachmentDescription.Buffer colorAttachment = VkAttachmentDescription.calloc(1, stack).format(this.swapchain.getImageFormat()).samples(VK_SAMPLE_COUNT_1_BIT).loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_STORE).stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE).initialLayout(VK_IMAGE_LAYOUT_UNDEFINED).finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
@@ -386,10 +388,7 @@ public class VulkanWindow implements Disposable {
                 throw new GdxRuntimeException("Failed to create render pass: " + rpResult);
             }
             this.renderPass = pRenderPass.get(0);
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] RenderPass created: " + this.renderPass);
 
-
-            // --- Create Framebuffers ---
             List<Long> swapChainImageViews = this.swapchain.getImageViews();
             VkExtent2D swapChainExtent = this.swapchain.getExtent();
             this.framebuffers = new ArrayList<>(swapChainImageViews.size());
@@ -405,8 +404,6 @@ public class VulkanWindow implements Disposable {
                 }
                 this.framebuffers.add(pFramebuffer.get(0));
             }
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Framebuffers created (" + this.framebuffers.size() + ")");
-
 
             // --- Create Command Pool ---
             int graphicsQueueFamily = application.getGraphicsQueueFamily();
@@ -418,9 +415,7 @@ public class VulkanWindow implements Disposable {
                 throw new GdxRuntimeException("Failed to create command pool: " + cpResult);
             }
             this.commandPool = pCommandPool.get(0);
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Command Pool created: " + this.commandPool);
 
-            //this.maxFramesInFlight = Math.min(this.swapchain.getImageCount(), 2); // Use swapchain count or fixed
             this.commandBuffers = new ArrayList<>(maxFramesInFlight);
             VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack)
                     .sType$Default()
@@ -436,7 +431,6 @@ public class VulkanWindow implements Disposable {
             for (int i = 0; i < maxFramesInFlight; i++) {
                 this.commandBuffers.add(new VkCommandBuffer(pCommandBuffers.get(i), device));
             }
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Command Buffers allocated (" + this.commandBuffers.size() + ")");
 
             // --- Create Synchronization Objects ---
             this.imageAvailableSemaphores = new ArrayList<>(maxFramesInFlight);
@@ -450,17 +444,17 @@ public class VulkanWindow implements Disposable {
             vkCheck(vkCreateSemaphore(device, semaphoreInfo, null, pSemaphore), "Failed to create imageAvailable semaphore");
             long imgAvailSemHandle = pSemaphore.get(0); // Get handle
             imageAvailableSemaphores.add(imgAvailSemHandle);
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Created imageAvailableSemaphore[0]: " + imgAvailSemHandle + " (Hex: " + Long.toHexString(imgAvailSemHandle) + ")"); // <<< LOG HEX TOO
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Created imageAvailableSemaphore[0]: " + imgAvailSemHandle + " (Hex: " + Long.toHexString(imgAvailSemHandle) + ")"); // <<< LOG HEX TOO
 
             vkCheck(vkCreateSemaphore(device, semaphoreInfo, null, pSemaphore), "Failed to create renderFinished semaphore");
             long rndFinSemHandle = pSemaphore.get(0); // Get handle
             renderFinishedSemaphores.add(rndFinSemHandle);
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Created renderFinishedSemaphore[0]: " + rndFinSemHandle + " (Hex: " + Long.toHexString(rndFinSemHandle) + ")"); // <<< LOG HEX TOO
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Created renderFinishedSemaphore[0]: " + rndFinSemHandle + " (Hex: " + Long.toHexString(rndFinSemHandle) + ")"); // <<< LOG HEX TOO
 
             vkCheck(vkCreateFence(device, fenceInfo, null, pFence), "Failed to create inFlight fence");
             long fenceHandle = pFence.get(0); // Get handle
             inFlightFences.add(fenceHandle);
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Created inFlightFence[0]: " + fenceHandle + " (Hex: " + Long.toHexString(fenceHandle) + ")"); // <<< LOG HEX TOO
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Created inFlightFence[0]: " + fenceHandle + " (Hex: " + Long.toHexString(fenceHandle) + ")"); // <<< LOG HEX TOO
 
             for (int i = 0; i < maxFramesInFlight; i++) {
                 int semErrCode1 = vkCreateSemaphore(device, semaphoreInfo, null, pSemaphore);
@@ -478,7 +472,7 @@ public class VulkanWindow implements Disposable {
                 if (!fenceResult.isSuccess()) throw new GdxRuntimeException("Failed to create inFlight fence: " + fenceResult);
                 inFlightFences.add(pFence.get(0));
             }
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Sync objects created (" + maxFramesInFlight + " frames in flight)");
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Sync objects created (" + maxFramesInFlight + " frames in flight)");
 
         } catch (Exception e) {
             disposeVulkanResources(); // Clean up potentially created resources
@@ -488,7 +482,7 @@ public class VulkanWindow implements Disposable {
         if (windowListener != null) {
             windowListener.created(this);
         }
-        //Gdx.app.log(TAG, "[" + this.hashCode() + "] create() finished for handle: " + windowHandle);
+        if (debug) Gdx.app.log("VulkanAppInit", "window.create() finished.");
     }
 
     /**
@@ -550,14 +544,14 @@ public class VulkanWindow implements Disposable {
      * Sets the visibility of the window. Invisible windows will still call their {@link ApplicationListener}
      */
     public void setVisible(boolean visible) {
-        System.out.println("[VulkanWindow] setVisible called with: " + visible);
+        if (debug) System.out.println("[VulkanWindow] setVisible called with: " + visible);
         if (visible) {
-            System.out.println("[VulkanWindow] Attempting glfwShowWindow...");
+            if (debug) System.out.println("[VulkanWindow] Attempting glfwShowWindow...");
             GLFW.glfwShowWindow(windowHandle);
-            System.out.println("[VulkanWindow] glfwShowWindow call finished.");
+            if (debug) System.out.println("[VulkanWindow] glfwShowWindow call finished.");
         } else {
             GLFW.glfwHideWindow(windowHandle);
-            System.out.println("[VulkanWindow] glfwHideWindow call finished.");
+            if (debug) System.out.println("[VulkanWindow] glfwHideWindow call finished.");
         }
     }
 
@@ -738,19 +732,13 @@ public class VulkanWindow implements Disposable {
     }
 
     /**
-     * Performs a single update step, processing input, runnables, and rendering a frame if needed.
-     * This version delegates core Vulkan frame lifecycle management to VulkanGraphics.
-     *
-     * @return True if rendering occurred, false otherwise.
-     */
-    /**
      * Updates the window's state, processes input and runnables,
      * and performs the Vulkan rendering sequence for this window's frame.
      *
      * @return true if rendering occurred, false otherwise.
      */
     boolean update() {
-        //Gdx.app.log(TAG, "[" + this.hashCode() + "] update() called. listenerInitialized=" + this.listenerInitialized + ", listener=" + this.listener); // <-- ADD THIS
+        //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] update() called. listenerInitialized=" + this.listenerInitialized + ", listener=" + this.listener); // <-- ADD THIS
 
         if (!listenerInitialized && listener != null) {
             ensureListenerCreatedAndResized(); // Call helper method
@@ -783,7 +771,7 @@ public class VulkanWindow implements Disposable {
         boolean shouldRender = executedRunnables.size > 0 || (gfx != null && gfx.isContinuousRendering());
         boolean continuous = (gfx != null && gfx.isContinuousRendering());
         executedRunnables.clear();
-        //Gdx.app.log(TAG, "update() called. shouldRender=" + shouldRender + ", continuous=" + continuous + ", requestRendering=" + requestRendering + ", iconified=" + iconified);
+        //if (debug) Gdx.app.log(TAG, "update() called. shouldRender=" + shouldRender + ", continuous=" + continuous + ", requestRendering=" + requestRendering + ", iconified=" + iconified);
         boolean renderingRequested = false;
         synchronized (this) {
             renderingRequested = requestRendering;
@@ -802,7 +790,7 @@ public class VulkanWindow implements Disposable {
         }
 
         try {
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Pre-Render Checks Starting for frame " + currentFrame + "...");
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Pre-Render Checks Starting for frame " + currentFrame + "...");
 
             // Existing resource check
             if (commandBuffers == null || commandBuffers.isEmpty() || // Added null check
@@ -834,7 +822,7 @@ public class VulkanWindow implements Disposable {
             // Existing access (now we know index is likely valid if we get here)
             long fence = inFlightFences.get(currentFrame);
 
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Got fence handle reference for frame " + currentFrame + ": " + fence);
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Got fence handle reference for frame " + currentFrame + ": " + fence);
 
         } catch (Throwable t) {
             Gdx.app.error(TAG, "[" + this.hashCode() + "] !!! EXCEPTION during pre-render checks !!!", t);
@@ -845,14 +833,14 @@ public class VulkanWindow implements Disposable {
 
         // --- Main Rendering Sequence ---
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Starting main Vulkan sequence with MemoryStack for frame " + currentFrame);
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Starting main Vulkan sequence with MemoryStack for frame " + currentFrame);
 
             VulkanDevice vulkanDevice = application.getVulkanDevice();
             VkDevice device = vulkanDevice.getRawDevice();
             VkQueue graphicsQueue = vulkanDevice.getGraphicsQueue();
             VkQueue presentQueue = vulkanDevice.getPresentQueue();
 
-            //Gdx.app.log(TAG, "maxFramesInFlight: " + maxFramesInFlight + commandBuffers.size());
+            //if (debug) Gdx.app.log(TAG, "maxFramesInFlight: " + maxFramesInFlight + commandBuffers.size());
             // Check essential resources
             if (commandBuffers.isEmpty() || inFlightFences.isEmpty() ||
                     imageAvailableSemaphores.isEmpty() || renderFinishedSemaphores.isEmpty() ||
@@ -862,11 +850,11 @@ public class VulkanWindow implements Disposable {
             }
 
             long fence = inFlightFences.get(currentFrame);
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Waiting for fence: " + fence + " (Frame " + currentFrame + ")");
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Waiting for fence: " + fence + " (Frame " + currentFrame + ")");
             long waitStart = System.nanoTime(); // Optional: time the wait
             vkCheck(vkWaitForFences(device, fence, true, Long.MAX_VALUE), "vkWaitForFences failed");
             long waitEnd = System.nanoTime();
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Fence signaled. Wait time: " + ((waitEnd - waitStart) / 1000000.0) + " ms");
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Fence signaled. Wait time: " + ((waitEnd - waitStart) / 1000000.0) + " ms");
             this.vulkanGraphics.prepareAllFrameResources(currentFrame);
 
             // ---> Step 1.5: <<< CLEANUP COMPLETED FRAME DESCRIPTOR SETS >>> <--- ADDED HERE
@@ -881,9 +869,9 @@ public class VulkanWindow implements Disposable {
                 Gdx.app.error(TAG, "[" + this.hashCode() + "] Descriptor Manager is null, cannot clean up sets!");
             }
 
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Resetting fence: " + fence);
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Resetting fence: " + fence);
             vkCheck(vkResetFences(device, fence), "Failed to reset fence after wait");
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Fence reset.");
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Fence reset.");
 
 
             // ---> Step 3: Acquire the next image <---
@@ -908,14 +896,14 @@ public class VulkanWindow implements Disposable {
 
             if (acquireResultCode == VK_ERROR_OUT_OF_DATE_KHR || acquireResultCode == VK_SUBOPTIMAL_KHR || resizeNeeded) {
                 framebufferResized = false; // Reset flag
-                //Gdx.app.log(TAG, "[" + this.hashCode() + "] Swapchain needs recreation (Acquire Result: " + VkResult.translate(acquireResultCode) + " / Resized Flag: " + resizeNeeded + ")");
+                //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Swapchain needs recreation (Acquire Result: " + VkResult.translate(acquireResultCode) + " / Resized Flag: " + resizeNeeded + ")");
 
                 // Fence was already reset in Step 2.
                 try {
-                    //Gdx.app.log(TAG, "[" + this.hashCode() + "] Calling recreateSwapchainAndDependents()...");
+                    //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Calling recreateSwapchainAndDependents()...");
                     recreateSwapchainAndDependents(); // Waits for idle internally
                     // Log after successful recreation
-                    //Gdx.app.log(TAG, "[" + this.hashCode() + "] recreateSwapchainAndDependents() finished successfully.");
+                    //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] recreateSwapchainAndDependents() finished successfully.");
                     justRecreated = true;
 
                     // Update cache & notify listener
@@ -940,10 +928,10 @@ public class VulkanWindow implements Disposable {
             }
 
             if (justRecreated) {
-                //Gdx.app.log(TAG, "[" + this.hashCode() + "] Re-acquiring image after recreation (Timeout: Inf, Sem: " + imageAvailableSemaphore + ")");
+                //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Re-acquiring image after recreation (Timeout: Inf, Sem: " + imageAvailableSemaphore + ")");
                 // Make sure imageAvailableSemaphore handle is still valid (it wasn't recreated)
                 acquireResultCode = swapchain.acquireNextImage(imageAvailableSemaphore, VK_NULL_HANDLE, pImageIndex);
-                //Gdx.app.log(TAG, "[" + this.hashCode() + "] Post-recreation acquireNextImage result: " + VkResult.translate(acquireResultCode));
+                //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Post-recreation acquireNextImage result: " + VkResult.translate(acquireResultCode));
 
                 // Handle potential immediate failure even after recreation
                 if (acquireResultCode != VK_SUCCESS && acquireResultCode != VK_SUBOPTIMAL_KHR) { // Suboptimal is okay here
@@ -957,19 +945,19 @@ public class VulkanWindow implements Disposable {
 
             // If acquire was successful and no resize needed, we have a valid image index
             int imageIndex = pImageIndex.get(0);
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Acquired image index: " + imageIndex);
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Acquired image index: " + imageIndex);
 
             // Fence was already reset in Step 2.
 
             // ---> Step 5: Record the command buffer <---
             VkCommandBuffer commandBuffer = commandBuffers.get(currentFrame);
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Resetting command buffer for frame " + currentFrame);
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Resetting command buffer for frame " + currentFrame);
             vkCheck(vkResetCommandBuffer(commandBuffer, 0), "Failed to reset command buffer"); // Safe, fence protects
 
             VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack).sType$Default();
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Beginning command buffer recording...");
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Beginning command buffer recording...");
             vkCheck(vkBeginCommandBuffer(commandBuffer, beginInfo), "Failed to begin recording command buffer");
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Command buffer recording started.");
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Command buffer recording started.");
 
 
             // Set global context
@@ -995,9 +983,6 @@ public class VulkanWindow implements Disposable {
             clearValues.get(0).color().float32(stack.floats(config.initialBackgroundColor.r, config.initialBackgroundColor.g, config.initialBackgroundColor.b, config.initialBackgroundColor.a));
             renderPassInfo.pClearValues(clearValues);
             vkCmdBeginRenderPass(commandBuffer, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-            /*Gdx.app.log(TAG, "[" + this.hashCode() + "] vkCmdBeginRenderPass: Started RenderPass " + this.renderPass
-                    + " (0x" + Long.toHexString(this.renderPass) + ")"
-                    + " on CmdBuffer 0x" + Long.toHexString(commandBuffer.address()));*/
 
             // Set dynamic states
             VkViewport.Buffer vkViewport = VkViewport.calloc(1, stack)
@@ -1008,10 +993,9 @@ public class VulkanWindow implements Disposable {
                     .offset(VkOffset2D.calloc(stack).set(0, 0)).extent(extent);
             vkCmdSetScissor(commandBuffer, 0, vkScissor);
 
-            // Execute Application Rendering
             try {
                 if (listener != null) listener.render();
-            } catch (Throwable t) { /* ... error handling ... */
+            } catch (Throwable t) {
                 throw t;
             }
 
@@ -1023,8 +1007,6 @@ public class VulkanWindow implements Disposable {
             gfx.setCurrentCommandBuffer(null);
             gfx.setCurrentRenderPassHandle(VK_NULL_HANDLE);
 
-            // ---> Step 6: Submit the command buffer <---
-// ---> Step 6: Submit the command buffer <---
             imageAvailableSemaphore = imageAvailableSemaphores.get(currentFrame);
             long renderFinishedSemaphore = renderFinishedSemaphores.get(currentFrame);
             fence = inFlightFences.get(currentFrame);
@@ -1057,7 +1039,7 @@ public class VulkanWindow implements Disposable {
             submitInfo.pCommandBuffers(pCommandBuffers);          // Set pointer
             submitInfo.pSignalSemaphores(signalSemaphores);         // Set pointer
 
-            //Gdx.app.log(TAG, "Frame " + currentFrame + ": Submitting CB. WaitSem: " + imageAvailableSemaphore + ", SignalSem: " + renderFinishedSemaphore + ", SignalFence: " + fence);
+            //if (debug) Gdx.app.log(TAG, "Frame " + currentFrame + ": Submitting CB. WaitSem: " + imageAvailableSemaphore + ", SignalSem: " + renderFinishedSemaphore + ", SignalFence: " + fence);
             vkCheck(vkQueueSubmit(graphicsQueue, submitInfo, fence), "Failed to submit draw command buffer");
 
             // ---> Step 7: Present the image <---
@@ -1072,7 +1054,7 @@ public class VulkanWindow implements Disposable {
                     .pSwapchains(pSwapchains)
                     .pImageIndices(pImageIndices);
 
-            //Gdx.app.log(TAG, "Frame " + currentFrame + ": Presenting Image " + imageIndex + ". WaitSem: " + renderFinishedSemaphore);
+            //if (debug) Gdx.app.log(TAG, "Frame " + currentFrame + ": Presenting Image " + imageIndex + ". WaitSem: " + renderFinishedSemaphore);
             int presentResultCode = vkQueuePresentKHR(presentQueue, presentInfo);
 
             // Handle present results
@@ -1089,15 +1071,11 @@ public class VulkanWindow implements Disposable {
 
         } catch (Exception e) {
             Gdx.app.error(TAG, "[" + this.hashCode() + "] Exception during Vulkan frame rendering", e);
-            if (gfx != null) {
-                gfx.setCurrentCommandBuffer(null);
-                gfx.setCurrentRenderPassHandle(VK_NULL_HANDLE);
-            }
+            gfx.setCurrentCommandBuffer(null);
+            gfx.setCurrentRenderPassHandle(VK_NULL_HANDLE);
             if (e instanceof GdxRuntimeException) throw (GdxRuntimeException) e;
             throw new GdxRuntimeException("Vulkan frame rendering failed", e);
         }
-
-        // Note: Finally block removed as context clearing is handled in catch or after successful execution
     }
 
     private void ensureListenerCreatedAndResized() {
@@ -1114,9 +1092,9 @@ public class VulkanWindow implements Disposable {
                 int height = Gdx.graphics.getHeight();
 
                 if (width > 0 && height > 0) {
-                    //Gdx.app.log(TAG, "[" + this.hashCode() + "] Calling initial listener.resize(" + width + ", " + height + ")");
+                    //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Calling initial listener.resize(" + width + ", " + height + ")");
                     listener.resize(width, height);
-                    //Gdx.app.log(TAG, "[" + this.hashCode() + "] Initial listener.resize() completed.");
+                    //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Initial listener.resize() completed.");
                 } else {
                     // Log error if dimensions aren't valid yet, might happen if called too early?
                     Gdx.app.error(TAG, "[" + this.hashCode() + "] Invalid dimensions (" + width + "x" + height + ") obtained for initial listener resize.");
@@ -1130,11 +1108,11 @@ public class VulkanWindow implements Disposable {
                 // Crucially, mark the listener as initialized AFTER the try block attempts create/resize,
                 // preventing this block from running again for this window instance.
                 listenerInitialized = true;
-                //Gdx.app.log(TAG, "[" + this.hashCode() + "] Listener marked as initialized (listenerInitialized = true).");
+                if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Listener marked as initialized (listenerInitialized = true).");
             }
         } else {
             // Condition failed, log the reason and skip initialization steps
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Condition FAILED (listenerInitialized=" + listenerInitialized + ", listenerIsNull=" + (listener == null) + "), skipping create/resize.");
+            if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Condition FAILED (listenerInitialized=" + listenerInitialized + ", listenerIsNull=" + (listener == null) + "), skipping create/resize.");
         }
     }
 
@@ -1142,7 +1120,7 @@ public class VulkanWindow implements Disposable {
      * Handles swapchain recreation and dependent resources like framebuffers.
      */
     private void recreateSwapchainAndDependents() {
-        //Gdx.app.log(TAG, "[" + this.hashCode() + "] --- ENTERING recreateSwapchainAndDependents ---");
+        //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] --- ENTERING recreateSwapchainAndDependents ---");
         try {
             VulkanApplication application = (VulkanApplication) Gdx.app;
             VkDevice device = application.getVulkanDevice().getRawDevice();
@@ -1155,12 +1133,12 @@ public class VulkanWindow implements Disposable {
                 if (framebuffer != VK_NULL_HANDLE) vkDestroyFramebuffer(device, framebuffer, null);
             }
             framebuffers.clear();
-            //Gdx.app.log(TAG, "[" + this.hashCode() + "] Old framebuffers destroyed.");
+            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Old framebuffers destroyed.");
 
             // 3. Recreate the swapchain (this cleans up old swapchain, image views internally)
             if (swapchain != null) {
                 swapchain.recreate(); // Assumes this method exists and handles internal cleanup/recreation
-                //Gdx.app.log(TAG, "[" + this.hashCode() + "] Swapchain recreate() called.");
+                //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Swapchain recreate() called.");
             } else {
                 throw new GdxRuntimeException("Cannot recreate null swapchain");
             }
@@ -1178,7 +1156,7 @@ public class VulkanWindow implements Disposable {
                 List<Long> newSwapChainImageViews = this.swapchain.getImageViews();
                 this.framebuffers = new ArrayList<>(newSwapChainImageViews.size());
                 VkExtent2D newSwapChainExtent = this.swapchain.getExtent();
-                //Gdx.app.log(TAG, "[" + this.hashCode() + "] New swapchain extent: " + newSwapChainExtent);
+                //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] New swapchain extent: " + newSwapChainExtent);
 
                 LongBuffer attachments = stack.mallocLong(1);
                 LongBuffer pFramebuffer = stack.mallocLong(1);
@@ -1199,7 +1177,7 @@ public class VulkanWindow implements Disposable {
                     }
                     this.framebuffers.add(pFramebuffer.get(0));
                 }
-                //Gdx.app.log(TAG, "[" + this.hashCode() + "] Framebuffers recreated (" + this.framebuffers.size() + ")");
+                //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Framebuffers recreated (" + this.framebuffers.size() + ")");
             }
         } catch (Exception e) {
             Gdx.app.error(TAG, "[" + this.hashCode() + "] CRITICAL: Failed to recreate swapchain!", e);
@@ -1260,7 +1238,6 @@ public class VulkanWindow implements Disposable {
             logInfo(TAG, "[" + this.hashCode() + "] Device idle.", useGdxLog);
         }
 
-        // --- Nullify ALL GLFW Callbacks FIRST ---
         // This prevents issues if callback objects are freed before GLFW stops using them.
         if (windowHandle != NULL) {
             logInfo(TAG, "[" + this.hashCode() + "] Nullifying GLFW callbacks.", useGdxLog);
@@ -1277,7 +1254,6 @@ public class VulkanWindow implements Disposable {
             GLFW.glfwSetCursorPosCallback(windowHandle, null);
             GLFW.glfwSetMouseButtonCallback(windowHandle, null);
         }
-        // --- End Nullify Callbacks ---
 
         // Dispose Vulkan Resources (Helper Method)
         disposeVulkanResources(); // Disposes swapchain, surface, pool, sync etc.
@@ -1380,9 +1356,9 @@ public class VulkanWindow implements Disposable {
     // Helper method for consistent logging during cleanup
     private void logInfo(String tag, String message, boolean useGdx) {
         if (useGdx) {
-            //Gdx.app.log(tag, message);
+            //if (debug) Gdx.app.log(tag, message);
         } else {
-            System.out.println("[" + tag + "] " + message);
+            if (debug) System.out.println("[" + tag + "] " + message);
         }
     }
 
@@ -1409,9 +1385,9 @@ public class VulkanWindow implements Disposable {
     }
 
     public void setInputHandler(VulkanInput inputInstance) {
-        //Gdx.app.log(TAG, "setInputHandler called with instance hash: " + (inputInstance == null ? "NULL" : inputInstance.hashCode()));
+        //if (debug) Gdx.app.log(TAG, "setInputHandler called with instance hash: " + (inputInstance == null ? "NULL" : inputInstance.hashCode()));
         this.input = inputInstance; // Store the instance
-        //Gdx.app.log(TAG, "Input handler set to: " + (input == null ? "NULL" : input.hashCode()));
+        //if (debug) Gdx.app.log(TAG, "Input handler set to: " + (input == null ? "NULL" : input.hashCode()));
     }
 
     /** Called by VulkanApplication.isFullscreen() */
@@ -1441,7 +1417,7 @@ public class VulkanWindow implements Disposable {
             // Switching from windowed to fullscreen
             // TODO: Need to properly implement storing/restoring previous window state
             // storeCurrentWindowPositionAndDisplayMode(); // Logic needs to exist here or be passed
-            //Gdx.app.log(TAG, "[" + windowHandle + "] Storing window state before fullscreen (TODO: Implement!)");
+            //if (debug) Gdx.app.log(TAG, "[" + windowHandle + "] Storing window state before fullscreen (TODO: Implement!)");
             GLFW.glfwSetWindowMonitor(this.windowHandle, newMode.monitorHandle, 0, 0, newMode.width, newMode.height, newMode.refreshRate);
         }
         // Swapchain recreation will be triggered by resize event / framebufferResized flag
@@ -1455,12 +1431,12 @@ public class VulkanWindow implements Disposable {
         if (!isFullscreenInternal()) {
             // Already windowed, just resize
             // TODO: Implement centering logic if desired, potentially using stored previous position?
-            //Gdx.app.log(TAG, "[" + windowHandle + "] Setting window size to " + width + "x" + height + " (TODO: Centering?)");
+            //if (debug) Gdx.app.log(TAG, "[" + windowHandle + "] Setting window size to " + width + "x" + height + " (TODO: Centering?)");
             GLFW.glfwSetWindowSize(this.windowHandle, width, height);
         } else {
             // Switching from fullscreen to windowed
             // TODO: Restore previous window position/size/mode properly
-            //Gdx.app.log(TAG, "[" + windowHandle + "] Restoring windowed mode at " + width + "x" + height + " (TODO: Use stored state!)");
+            //if (debug) Gdx.app.log(TAG, "[" + windowHandle + "] Restoring windowed mode at " + width + "x" + height + " (TODO: Use stored state!)");
             int posX = 100; // Placeholder - use stored previous X
             int posY = 100; // Placeholder - use stored previous Y
             int refreshRate = GLFW.GLFW_DONT_CARE; // Placeholder
@@ -1495,7 +1471,7 @@ public class VulkanWindow implements Disposable {
                         : VulkanApplicationConfiguration.SwapchainPresentMode.MAILBOX; // Or IMMEDIATE
 
         if (config.presentMode != targetMode) {
-            //Gdx.app.log(TAG, "[" + windowHandle + "] setVSyncInternal(" + vsync + ") changing presentMode to: " + targetMode);
+            //if (debug) Gdx.app.log(TAG, "[" + windowHandle + "] setVSyncInternal(" + vsync + ") changing presentMode to: " + targetMode);
             config.presentMode = targetMode; // Update this window's config
             this.framebufferResized = true; // Flag for swapchain recreation
             this.requestRendering();         // Ensure render loop checks the flag

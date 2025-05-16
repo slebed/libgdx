@@ -47,6 +47,7 @@ import org.lwjgl.vulkan.VkCommandBuffer;
 
 public class VulkanGraphics extends AbstractGraphics implements Disposable {
     private final String TAG = "VulkanGraphics"; // Keep TAG
+    private static final boolean debug = false;
 
     final VulkanApplicationConfiguration config;
     private final long windowHandle;
@@ -196,7 +197,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
      */
     public void updateFramebufferInfo(int backBufferWidth, int backBufferHeight, int logicalWidth, int logicalHeight) {
         // Log the update attempt with the values *received*
-        Gdx.app.log(TAG, "updateFramebufferInfo called with: BB=" + backBufferWidth + " x " + backBufferHeight + ", Logical=" + logicalWidth + " x " + logicalHeight);
+        if (debug) Gdx.app.log(TAG, "updateFramebufferInfo called with: BB=" + backBufferWidth + " x " + backBufferHeight + ", Logical=" + logicalWidth + " x " + logicalHeight);
 
         this.backBufferWidth = backBufferWidth;
         this.backBufferHeight = backBufferHeight;
@@ -209,7 +210,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
             Gdx.app.error(TAG, "Config is null during updateFramebufferInfo, cannot update bufferFormat.");
         }
 
-        Gdx.app.log(TAG, "Cached dimensions updated: BB=" + this.backBufferWidth + " x " + this.backBufferHeight + ", Logical=" + this.logicalWidth + " x " + this.logicalHeight);
+        if (debug) Gdx.app.log(TAG, "Cached dimensions updated: BB=" + this.backBufferWidth + " x " + this.backBufferHeight + ", Logical=" + this.logicalWidth + " x " + this.logicalHeight);
     }
 
     public VulkanDevice getVulkanDevice() {
@@ -447,17 +448,17 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     @Override
     public void dispose() {
-        Gdx.app.log(TAG, "Disposing VulkanGraphics...");
+        if (debug) Gdx.app.log(TAG, "Disposing VulkanGraphics...");
 
         if (vulkanDevice != null && vulkanDevice.getRawDevice() != null) {
-            Gdx.app.log(TAG, "Waiting for device idle before graphics cleanup...");
+            if (debug) Gdx.app.log(TAG, "Waiting for device idle before graphics cleanup...");
         }
 
         // Clear context state
         this.currentRecordingCommandBuffer = null;
         this.currentRenderPassHandle = VK_NULL_HANDLE;
 
-        Gdx.app.log(TAG, "VulkanGraphics cleanup finished.");
+        if (debug) Gdx.app.log(TAG, "VulkanGraphics cleanup finished.");
     }
 
     /**

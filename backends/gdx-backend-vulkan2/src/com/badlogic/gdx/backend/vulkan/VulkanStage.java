@@ -21,6 +21,7 @@ import com.badlogic.gdx.utils.viewport.Viewport;
  * actor hierarchy. */
 public class VulkanStage extends Stage {
     private final String TAG = "VulkanStage";
+    private final boolean debug = false;
 
     private final boolean managesInternalBatch;
     public VulkanTexture whitePixel; // Made package-private for debug draw test access
@@ -30,8 +31,8 @@ public class VulkanStage extends Stage {
     // ---> Flag to track if the first input has been processed <---
     // private boolean firstInputProcessed = false;
     // ---> Temporary vectors for coordinate logging <---
-    private final Vector2 tempScreenCoordsLog = new Vector2();
-    private final Vector2 tempStageCoordsLog = new Vector2();
+    //private final Vector2 tempScreenCoordsLog = new Vector2();
+    //private final Vector2 tempStageCoordsLog = new Vector2();
 
     /** Creates a VulkanStage with a {@link VulkanScreenViewport}, creating and owning its own internal {@link VulkanSpriteBatch}.
      * This Stage will dispose the internally created batch when the stage itself is disposed.
@@ -43,7 +44,7 @@ public class VulkanStage extends Stage {
         // Use VulkanScreenViewport by default if available, otherwise fallback
         // This requires VulkanScreenViewport to be defined in the backend package
         this(new VulkanScreenViewport());
-        Gdx.app.log(TAG, "create() called. Hash: " + this.hashCode());
+        if (debug) Gdx.app.log(TAG, "create() called. Hash: " + this.hashCode());
         // If you have a specific VulkanScreenViewport class:
         // this(new VulkanScreenViewport());
     }
@@ -56,7 +57,7 @@ public class VulkanStage extends Stage {
         super(viewport, new VulkanSpriteBatch());// Super constructor will set ownsBatch = false
         this.managesInternalBatch = true;
         createWhitePixel();
-        Gdx.app.log(TAG, "create() called. Hash: " + this.hashCode());
+        if (debug) Gdx.app.log(TAG, "create() called. Hash: " + this.hashCode());
     }
 
     /** Creates a VulkanStage with the specified viewport and an externally provided batch. This Stage will NOT own or dispose the
@@ -101,30 +102,30 @@ public class VulkanStage extends Stage {
     // --- Dispose Method (Modified to dispose whitePixel) ---
     @Override
     public void dispose() {
-        Gdx.app.log(TAG, "Disposing VulkanStage...");
-        Gdx.app.log(TAG, "dispose() called. Hash: " + this.hashCode());
+        if (debug) Gdx.app.log(TAG, "Disposing VulkanStage...");
+        if (debug) Gdx.app.log(TAG, "dispose() called. Hash: " + this.hashCode());
         // Dispose internal batch FIRST if we own it
         Batch batch = getBatch();
         if (managesInternalBatch && batch != null) {
-            Gdx.app.log(TAG, "Disposing internally managed VulkanSpriteBatch.");
+            if (debug) Gdx.app.log(TAG, "Disposing internally managed VulkanSpriteBatch.");
             batch.dispose();
             // Cannot directly set super.batch = null, Stage doesn't allow it.
             // Rely on Stage internals or potentially reflection if needed, but usually okay.
         } else {
-            Gdx.app.log(TAG, "Dispose: Not disposing batch (managed externally or null). managesInternalBatch=" + managesInternalBatch);
+            if (debug) Gdx.app.log(TAG, "Dispose: Not disposing batch (managed externally or null). managesInternalBatch=" + managesInternalBatch);
         }
 
         // Dispose the white pixel texture
         if (whitePixel != null) {
             whitePixel.dispose();
             whitePixel = null;
-            Gdx.app.log(TAG, "Disposed whitePixel texture.");
+            if (debug) Gdx.app.log(TAG, "Disposed whitePixel texture.");
         }
 
         // Call super.dispose() AFTER handling batch/resources owned by this subclass
         // Though super.dispose() currently does nothing, it's good practice.
         super.dispose();
-        Gdx.app.log(TAG, "VulkanStage disposed.");
+        if (debug) Gdx.app.log(TAG, "VulkanStage disposed.");
     }
 
     // --- Vulkan-Compatible Debug Drawing Logic (Copied In) ---
@@ -138,7 +139,7 @@ public class VulkanStage extends Stage {
             pixmap.fill();
             whitePixel = new VulkanTexture(pixmap); // Assumes VulkanTexture constructor takes Pixmap
             pixmap.dispose();
-            Gdx.app.log(TAG, "Created whitePixel texture.");
+            if (debug) Gdx.app.log(TAG, "Created whitePixel texture.");
         } catch (Exception e) {
             Gdx.app.error(TAG, "Failed to create whitePixel texture", e);
             whitePixel = null; // Ensure it's null on failure

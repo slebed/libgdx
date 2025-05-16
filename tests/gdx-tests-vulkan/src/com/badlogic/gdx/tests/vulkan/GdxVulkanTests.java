@@ -35,7 +35,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.tests.utils.GdxTest;
 import com.badlogic.gdx.utils.ObjectMap;
 import com.badlogic.gdx.utils.StreamUtils;
@@ -46,6 +48,7 @@ import com.badlogic.gdx.utils.StreamUtils;
  * @author badlogicgames@gmail.com
  */
 public class GdxVulkanTests {
+    private static final String TAG = "GdxVulkanTests";
     public static List<Class<? extends GdxTest>> tests; // Declare final list
 
     // Use a static initializer block to create and populate the list
@@ -67,8 +70,8 @@ public class GdxVulkanTests {
         tests = new ArrayList<>(initialTests);
     }
 
-    static final ObjectMap<String, String> obfuscatedToOriginal = new ObjectMap();
-    static final ObjectMap<String, String> originalToObfuscated = new ObjectMap();
+    static final ObjectMap<String, String> obfuscatedToOriginal = new ObjectMap<>();
+    static final ObjectMap<String, String> originalToObfuscated = new ObjectMap<>();
 
     static {
         InputStream mappingInput = GdxVulkanTests.class.getResourceAsStream("/mapping.txt");
@@ -114,10 +117,12 @@ public class GdxVulkanTests {
     public static GdxTest newTest(String testName) {
         testName = originalToObfuscated.get(testName, testName);
         try {
-            return forName(testName).newInstance();
+            return Objects.requireNonNull(forName(testName)).newInstance();
         } catch (InstantiationException e) {
+            Gdx.app.error(TAG, "Failed to instantiate test: " + testName);
             e.printStackTrace();
         } catch (IllegalAccessException e) {
+            Gdx.app.error(TAG, "Failed with illegal access to test: " + testName);
             e.printStackTrace();
         }
         return null;
