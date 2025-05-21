@@ -19,6 +19,8 @@ dependencies {
 	implementation testnatives.desktop
 	// Ensure 'libraries.lwjgl3' config exists in dependencies.gradle
 	implementation libraries.lwjgl3
+
+	//api "org.lwjgl.lwjgl:lwjgl-shaderc:$versions.lwjgl3"
 }
 
 // Task to launch the main test starter AND log necessary info for RenderDoc setup

@@ -34,6 +34,7 @@ public class VulkanTexture extends Texture {
     private final int height;
     private final int format; // Store VkFormat
     private boolean disposed = false;
+private String filePath=null;
 
     /** Constructor that automatically retrieves Vulkan context from Gdx.graphics. Assumes Vulkan backend is initialized and
      * active.
@@ -46,6 +47,7 @@ public class VulkanTexture extends Texture {
         if (file == null || !file.exists()) {
             throw new GdxRuntimeException("FileHandle cannot be null and must exist: " + file);
         }
+        this.filePath = file.path();
 
         if (debug) Gdx.app.log(TAG, "(Constructor) Loading texture from: " + file.path());
 
@@ -651,5 +653,9 @@ public class VulkanTexture extends Texture {
         // Similar complexity to setFilter applies to supporting runtime wrap changes.
         Gdx.app.debug(TAG, "VulkanTexture.setWrap() called, ignoring. U: " + u + ", V: " + v);
         // DO NOT call super.setWrap(u, v);
+    }
+
+    public String getFilePath() {
+        return filePath;
     }
 }

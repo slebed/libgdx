@@ -389,6 +389,13 @@ public class VulkanWindow implements Disposable {
             }
             this.renderPass = pRenderPass.get(0);
 
+            if (this.vulkanGraphics != null) {
+                ((VulkanGraphics)this.vulkanGraphics).setMainSwapchainRenderPass(this.renderPass); // Inform VulkanGraphics
+            } else {
+                Gdx.app.error(TAG, "VulkanGraphics instance is null in VulkanWindow.create() after render pass creation.");
+                // This would be a critical setup error
+            }
+
             List<Long> swapChainImageViews = this.swapchain.getImageViews();
             VkExtent2D swapChainExtent = this.swapchain.getExtent();
             this.framebuffers = new ArrayList<>(swapChainImageViews.size());

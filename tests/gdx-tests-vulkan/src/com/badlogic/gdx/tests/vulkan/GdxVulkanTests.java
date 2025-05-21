@@ -62,7 +62,8 @@ public class GdxVulkanTests {
                 VulkanSpriteBatchPerformanceTest2.class,
                 VulkanSpriteBatchTest.class,
                 VulkanSpriteBatchStressTest.class,
-                VulkanSpriteBatchTextureSwitchTest.class
+                VulkanSpriteBatchTextureSwitchTest.class,
+                VulkanCubeTest.class
                 // @on
         );
 

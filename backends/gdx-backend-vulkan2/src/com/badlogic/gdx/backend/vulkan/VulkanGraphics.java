@@ -75,7 +75,7 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     private final IntBuffer tmpBuffer = BufferUtils.createIntBuffer(1);
     private final IntBuffer tmpBuffer2 = BufferUtils.createIntBuffer(1);
-
+    private long mainSwapchainRenderPass = VK_NULL_HANDLE;
     private final List<VulkanFrameResourcePreparer> frameResourcePreparers = new CopyOnWriteArrayList<>(); // Use thread-safe list if needed, or ArrayList if access is synchronized
 
     public VulkanGraphics(long windowHandle, VulkanApplicationConfiguration config, VulkanApplication app, VulkanDevice device, long vmaAllocatorHandle, VulkanPipelineManager pipelineManager, VulkanDescriptorManager descriptorManager) {
@@ -227,6 +227,25 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     public VulkanDescriptorManager getDescriptorManager() {
         return this.descriptorManager;
+    }
+
+    public void setMainSwapchainRenderPass(long renderPassHandle) {
+        if (renderPassHandle == VK_NULL_HANDLE) {
+            Gdx.app.error(TAG, "Attempted to set main swapchain render pass to VK_NULL_HANDLE");
+        }
+        this.mainSwapchainRenderPass = renderPassHandle;
+        if (debug && mainSwapchainRenderPass != VK_NULL_HANDLE) Gdx.app.log(TAG, "Main swapchain render pass set to: " + mainSwapchainRenderPass);
+    }
+
+    /**
+     * Gets the main VkRenderPass compatible with this graphics context's swapchain.
+     * Used for creating graphics pipelines.
+     */
+    public long getSwapchainRenderPass() {
+        if (mainSwapchainRenderPass == VK_NULL_HANDLE) {
+            Gdx.app.error(TAG, "getSwapchainRenderPass() called but mainSwapchainRenderPass is VK_NULL_HANDLE! Ensure it's set after swapchain/window creation.");
+        }
+        return mainSwapchainRenderPass;
     }
 
     @Override

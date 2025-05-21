@@ -99,6 +99,16 @@ public class VulkanPipelineManager implements Disposable {
         VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Initialized with ShaderManager.");
     }
 
+    /**
+     * Returns the handle to the managed Vulkan pipeline cache object.
+     * This can be used by external pipeline creation processes.
+     *
+     * @return The handle to the VkPipelineCache, or VK_NULL_HANDLE if not created.
+     */
+    public long getVkPipelineCacheHandle() {
+        return this.vkPipelineCacheHandle;
+    }
+
     @Override
     public void dispose() {
         VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Disposing pipeline manager...");
@@ -130,6 +140,11 @@ public class VulkanPipelineManager implements Disposable {
         }
         instancedSpriteBatchPipelineCache.clear();
         VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Instanced SpriteBatch pipeline cache cleared.");
+
+        if (shaderManager != null) {
+            shaderManager.dispose();
+            VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Disposed associated VulkanShaderManager.");
+        }
 
         destroyPipelineCache();
         VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Pipeline manager disposed.");

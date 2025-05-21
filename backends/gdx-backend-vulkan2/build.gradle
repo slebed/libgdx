@@ -45,6 +45,7 @@ dependencies {
 	api "org.lwjgl:lwjgl-openal:$versions.lwjgl3"
 	api "org.lwjgl:lwjgl-stb:$versions.lwjgl3"
 	api "org.lwjgl:lwjgl-jemalloc:$versions.lwjgl3"
+	api "org.lwjgl:lwjgl-shaderc:$versions.lwjgl3"
 	// VMA Binding
 	api "org.lwjgl:lwjgl-vma:$versions.lwjgl3"
 
@@ -58,7 +59,7 @@ dependencies {
 	// ***** USE THE DEFINED VARIABLE FOR VMA NATIVES *****
 	// Add explicit VMA natives using the classifier determined above
 	runtimeOnly "org.lwjgl:lwjgl-vma::$lwjglNativesClassifier"
-	// *****************************************************
+	runtimeOnly "org.lwjgl:lwjgl-shaderc::$lwjglNativesClassifier"
 
 	// You might want to add other natives explicitly too for clarity,
 	// using the same lwjglNativesClassifier variable:
