@@ -57,13 +57,14 @@ public class GdxVulkanTests {
         List<Class<? extends GdxTest>> initialTests = Arrays.asList(
                 // @off
                 VulkanClearScreenTest.class,
-                Scene2dTest.class,
+                VulkanScene2dTest.class,
                 VulkanSpriteBatchPerformanceTest.class,
                 VulkanSpriteBatchPerformanceTest2.class,
                 VulkanSpriteBatchTest.class,
                 VulkanSpriteBatchStressTest.class,
                 VulkanSpriteBatchTextureSwitchTest.class,
-                VulkanCubeTest.class
+                Vulkan3DCubeTest.class,
+                Vulkan3DTexturedCubeTest.class
                 // @on
         );
 

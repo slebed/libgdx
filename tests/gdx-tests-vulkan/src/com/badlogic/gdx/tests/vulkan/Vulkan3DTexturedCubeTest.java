@@ -1,7 +1,80 @@
 package com.badlogic.gdx.tests.vulkan; // Or your preferred test package
 
+import static org.lwjgl.vulkan.VK10.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_A_BIT;
+import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_B_BIT;
+import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_G_BIT;
+import static org.lwjgl.vulkan.VK10.VK_COLOR_COMPONENT_R_BIT;
+import static org.lwjgl.vulkan.VK10.VK_COMPARE_OP_LESS;
+import static org.lwjgl.vulkan.VK10.VK_CULL_MODE_BACK_BIT;
+import static org.lwjgl.vulkan.VK10.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+import static org.lwjgl.vulkan.VK10.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_SCISSOR;
+import static org.lwjgl.vulkan.VK10.VK_DYNAMIC_STATE_VIEWPORT;
+import static org.lwjgl.vulkan.VK10.VK_FRONT_FACE_CLOCKWISE;
+import static org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+import static org.lwjgl.vulkan.VK10.VK_INDEX_TYPE_UINT16;
+import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+import static org.lwjgl.vulkan.VK10.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+import static org.lwjgl.vulkan.VK10.VK_NULL_HANDLE;
+import static org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_GRAPHICS;
+import static org.lwjgl.vulkan.VK10.VK_POLYGON_MODE_FILL;
+import static org.lwjgl.vulkan.VK10.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+import static org.lwjgl.vulkan.VK10.VK_SAMPLE_COUNT_1_BIT;
+import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_FRAGMENT_BIT;
+import static org.lwjgl.vulkan.VK10.VK_SHADER_STAGE_VERTEX_BIT;
+import static org.lwjgl.vulkan.VK10.VK_SHARING_MODE_EXCLUSIVE;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+import static org.lwjgl.vulkan.VK10.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+import static org.lwjgl.vulkan.VK10.VK_SUCCESS;
+import static org.lwjgl.vulkan.VK10.vkAllocateMemory;
+import static org.lwjgl.vulkan.VK10.vkBindBufferMemory;
+import static org.lwjgl.vulkan.VK10.vkCmdBindDescriptorSets;
+import static org.lwjgl.vulkan.VK10.vkCmdBindIndexBuffer;
+import static org.lwjgl.vulkan.VK10.vkCmdBindPipeline;
+import static org.lwjgl.vulkan.VK10.vkCmdBindVertexBuffers;
+import static org.lwjgl.vulkan.VK10.vkCmdDraw;
+import static org.lwjgl.vulkan.VK10.vkCmdDrawIndexed;
+import static org.lwjgl.vulkan.VK10.vkCmdSetScissor;
+import static org.lwjgl.vulkan.VK10.vkCmdSetViewport;
+import static org.lwjgl.vulkan.VK10.vkCreateBuffer;
+import static org.lwjgl.vulkan.VK10.vkCreateDescriptorSetLayout;
+import static org.lwjgl.vulkan.VK10.vkCreateGraphicsPipelines;
+import static org.lwjgl.vulkan.VK10.vkDestroyBuffer;
+import static org.lwjgl.vulkan.VK10.vkDestroyDescriptorSetLayout;
+import static org.lwjgl.vulkan.VK10.vkDestroyPipeline;
+import static org.lwjgl.vulkan.VK10.vkDestroyShaderModule;
+import static org.lwjgl.vulkan.VK10.vkDeviceWaitIdle;
+import static org.lwjgl.vulkan.VK10.vkFreeMemory;
+import static org.lwjgl.vulkan.VK10.vkGetBufferMemoryRequirements;
+import static org.lwjgl.vulkan.VK10.vkGetPhysicalDeviceMemoryProperties;
+import static org.lwjgl.vulkan.VK10.vkMapMemory;
+import static org.lwjgl.vulkan.VK10.vkUnmapMemory;
+import static org.lwjgl.vulkan.VK10.vkUpdateDescriptorSets;
+
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.InputAdapter;
+import com.badlogic.gdx.backend.vulkan.VulkanApplication;
+import com.badlogic.gdx.backend.vulkan.VulkanDescriptorManager;
+import com.badlogic.gdx.backend.vulkan.VulkanDevice;
+import com.badlogic.gdx.backend.vulkan.VulkanGraphics;
+import com.badlogic.gdx.backend.vulkan.VulkanMesh;
+import com.badlogic.gdx.backend.vulkan.VulkanPipelineManager;
+import com.badlogic.gdx.backend.vulkan.VulkanShaderManager;
+import com.badlogic.gdx.backend.vulkan.VulkanTexture;
+import com.badlogic.gdx.backend.vulkan.VulkanVertexAttribute;
+import com.badlogic.gdx.backend.vulkan.VulkanVertexAttributes;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.g3d.utils.CameraInputController;
@@ -11,23 +84,34 @@ import com.badlogic.gdx.tests.utils.GdxTest;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
-// Your Vulkan backend classes
-import com.badlogic.gdx.backend.vulkan.VulkanApplication;
-import com.badlogic.gdx.backend.vulkan.VulkanDevice;
-import com.badlogic.gdx.backend.vulkan.VulkanGraphics;
-import com.badlogic.gdx.backend.vulkan.VulkanMesh;
-import com.badlogic.gdx.backend.vulkan.VulkanShaderManager;
-import com.badlogic.gdx.backend.vulkan.VulkanPipelineManager;
-import com.badlogic.gdx.backend.vulkan.VulkanDescriptorManager;
-import com.badlogic.gdx.backend.vulkan.VulkanVertexAttribute;
-import com.badlogic.gdx.backend.vulkan.VulkanVertexAttributes;
-
-// LWJGL / Vulkan imports
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.shaderc.Shaderc;
-import org.lwjgl.vulkan.*;
-import static org.lwjgl.vulkan.VK10.*;
+import org.lwjgl.vulkan.VkBufferCreateInfo;
+import org.lwjgl.vulkan.VkCommandBuffer;
+import org.lwjgl.vulkan.VkDescriptorBufferInfo;
+import org.lwjgl.vulkan.VkDescriptorImageInfo;
+import org.lwjgl.vulkan.VkDescriptorSetLayoutBinding;
+import org.lwjgl.vulkan.VkDescriptorSetLayoutCreateInfo;
+import org.lwjgl.vulkan.VkExtent2D;
+import org.lwjgl.vulkan.VkGraphicsPipelineCreateInfo;
+import org.lwjgl.vulkan.VkMemoryAllocateInfo;
+import org.lwjgl.vulkan.VkMemoryRequirements;
+import org.lwjgl.vulkan.VkOffset2D;
+import org.lwjgl.vulkan.VkPhysicalDeviceMemoryProperties;
+import org.lwjgl.vulkan.VkPipelineColorBlendAttachmentState;
+import org.lwjgl.vulkan.VkPipelineColorBlendStateCreateInfo;
+import org.lwjgl.vulkan.VkPipelineDepthStencilStateCreateInfo;
+import org.lwjgl.vulkan.VkPipelineDynamicStateCreateInfo;
+import org.lwjgl.vulkan.VkPipelineInputAssemblyStateCreateInfo;
+import org.lwjgl.vulkan.VkPipelineMultisampleStateCreateInfo;
+import org.lwjgl.vulkan.VkPipelineRasterizationStateCreateInfo;
+import org.lwjgl.vulkan.VkPipelineShaderStageCreateInfo;
+import org.lwjgl.vulkan.VkPipelineVertexInputStateCreateInfo;
+import org.lwjgl.vulkan.VkPipelineViewportStateCreateInfo;
+import org.lwjgl.vulkan.VkRect2D;
+import org.lwjgl.vulkan.VkViewport;
+import org.lwjgl.vulkan.VkWriteDescriptorSet;
 
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
@@ -35,7 +119,7 @@ import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.util.Collections;
 
-public class VulkanCubeTest extends GdxTest {
+public class Vulkan3DTexturedCubeTest extends GdxTest {
     private static final String TAG = "VulkanCubeTest";
 
     private PerspectiveCamera camera;
@@ -66,8 +150,8 @@ public class VulkanCubeTest extends GdxTest {
     private Matrix4 modelMatrix = new Matrix4();
     private float rotationAngleDeg = 0f;
     // Re-usable buffer for converting Matrix4.val to what UBO expects
-    private final FloatBuffer matrixConversionBuffer = BufferUtils.newFloatBuffer(16);
-
+    //private final FloatBuffer matrixConversionBuffer = BufferUtils.newFloatBuffer(16);
+    private VulkanTexture cubeTexture;
 
     @Override
     public void create() {
@@ -78,13 +162,12 @@ public class VulkanCubeTest extends GdxTest {
         shaderManager = new VulkanShaderManager(vulkanDevice.getLogicalDevice()); // Test creates its own
 
         setupCamera();
-        setupShaders(); // Uses local shaderManager
+        setupShaders();
         setupCubeMesh();
+        loadCubeTexture();
         setupUniformBuffers();
-        setupDescriptors();    // Creates layout, allocates set using descriptorManager
-        // Pipeline layout obtained using pipelineManager
-        // Pipeline creation requires Gdx.graphics to be initialized to get RenderPass
-        // Defer if Gdx.graphics is null, or ensure it's ready.
+        setupDescriptors();
+
         if (Gdx.graphics != null) {
             vulkanGraphics = (VulkanGraphics) Gdx.graphics;
             setupGraphicsPipeline();
@@ -106,45 +189,103 @@ public class VulkanCubeTest extends GdxTest {
         cameraInputController = new CameraInputController(camera);
     }
 
-    private void setupShaders() {
-        FileHandle vertFile = Gdx.files.internal("data/vulkan/shaders/simple_mesh.vert.glsl"); // Ensure this path is correct
-        FileHandle fragFile = Gdx.files.internal("data/vulkan/shaders/simple_mesh.frag.glsl"); // Ensure this path is correct
-
-        if (!vertFile.exists() || !fragFile.exists()) {
-            throw new GdxRuntimeException("Shader files not found! Searched for " + vertFile.path() + " and " + fragFile.path());
-        }
-
-        vertShaderModule = shaderManager.getShaderModuleFromGlsl(vertFile, Shaderc.shaderc_vertex_shader);
-        fragShaderModule = shaderManager.getShaderModuleFromGlsl(fragFile, Shaderc.shaderc_fragment_shader);
-
+    void setupShaders() {
+        shaderManager = new VulkanShaderManager(vulkanDevice.getLogicalDevice());
+        vertShaderModule = shaderManager.getShaderModuleFromGlsl(
+                Gdx.files.internal("data/vulkan/shaders/textured_mesh.vert.glsl"), // Use new vertex shader
+                Shaderc.shaderc_vertex_shader
+        );
+        fragShaderModule = shaderManager.getShaderModuleFromGlsl(
+                Gdx.files.internal("data/vulkan/shaders/textured_mesh.frag.glsl"), // Use new fragment shader
+                Shaderc.shaderc_fragment_shader
+        );
         if (vertShaderModule == VK_NULL_HANDLE || fragShaderModule == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Failed to load/compile shader modules.");
+            throw new GdxRuntimeException("Failed to load/compile textured shader modules.");
         }
     }
 
-    private void setupCubeMesh() {
+    void setupCubeMesh() {
+        // Each face has 4 vertices. 6 faces * 4 vertices/face = 24 vertices
+        // Each vertex: X, Y, Z, U, V (5 floats)
+        // Total floats: 24 * 5 = 120
         float[] vertices = {
-                // Position (x, y, z)
-                // Front face
-                -0.5f, -0.5f,  0.5f,  0.5f, -0.5f,  0.5f,   0.5f,  0.5f,  0.5f,  -0.5f,  0.5f,  0.5f,
-                // Back face
-                -0.5f, -0.5f, -0.5f,  0.5f, -0.5f, -0.5f,   0.5f,  0.5f, -0.5f,  -0.5f,  0.5f, -0.5f
+                // Front face (Z+)
+                -0.5f, -0.5f,  0.5f,  0.0f, 0.0f, // Bottom-left
+                0.5f, -0.5f,  0.5f,  1.0f, 0.0f, // Bottom-right
+                0.5f,  0.5f,  0.5f,  1.0f, 1.0f, // Top-right
+                -0.5f,  0.5f,  0.5f,  0.0f, 1.0f, // Top-left
+
+                // Back face (Z-)
+                -0.5f, -0.5f, -0.5f,  1.0f, 0.0f, // Bottom-left (viewed from outside, so UVs are mirrored compared to front)
+                -0.5f,  0.5f, -0.5f,  1.0f, 1.0f, // Top-left
+                0.5f,  0.5f, -0.5f,  0.0f, 1.0f, // Top-right
+                0.5f, -0.5f, -0.5f,  0.0f, 0.0f, // Bottom-right
+
+                // Top face (Y+)
+                -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, // Back-left
+                -0.5f,  0.5f,  0.5f,  0.0f, 0.0f, // Front-left
+                0.5f,  0.5f,  0.5f,  1.0f, 0.0f, // Front-right
+                0.5f,  0.5f, -0.5f,  1.0f, 1.0f, // Back-right
+
+                // Bottom face (Y-)
+                -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, // Back-left
+                0.5f, -0.5f, -0.5f,  1.0f, 0.0f, // Back-right
+                0.5f, -0.5f,  0.5f,  1.0f, 1.0f, // Front-right
+                -0.5f, -0.5f,  0.5f,  0.0f, 1.0f, // Front-left
+
+                // Right face (X+)
+                0.5f, -0.5f, -0.5f,  1.0f, 0.0f, // Back-bottom
+                0.5f,  0.5f, -0.5f,  1.0f, 1.0f, // Back-top
+                0.5f,  0.5f,  0.5f,  0.0f, 1.0f, // Front-top
+                0.5f, -0.5f,  0.5f,  0.0f, 0.0f, // Front-bottom
+
+                // Left face (X-)
+                -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, // Back-bottom
+                -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, // Front-bottom
+                -0.5f,  0.5f,  0.5f,  1.0f, 1.0f, // Front-top
+                -0.5f,  0.5f, -0.5f,  0.0f, 1.0f  // Back-top
         };
+
+        // 6 faces * 2 triangles/face * 3 indices/triangle = 36 indices
         short[] indices = {
-                0, 1, 2,  2, 3, 0,   // Front
-                1, 5, 6,  6, 2, 1,   // Right
-                7, 6, 5,  5, 4, 7,   // Back
-                4, 0, 3,  3, 7, 4,   // Left
-                3, 2, 6,  6, 7, 3,   // Top
-                4, 5, 1,  1, 0, 4    // Bottom
+                // Front
+                0, 1, 2,  2, 3, 0,
+                // Back (winding adjusted for outside view)
+                4, 5, 6,  6, 7, 4,
+                // Top
+                8, 9, 10, 10, 11, 8,
+                // Bottom (winding adjusted)
+                12, 13, 14, 14, 15, 12,
+                // Right
+                16, 17, 18, 18, 19, 16,
+                // Left (winding adjusted)
+                20, 21, 22, 22, 23, 20
         };
 
-        VulkanVertexAttribute posAttr = VulkanVertexAttribute.Position(0); // Location 0
-        VulkanVertexAttributes attributes = new VulkanVertexAttributes(posAttr);
+        // VertexAttributes definition remains the same if locations are consistent
+        VulkanVertexAttribute posAttr = VulkanVertexAttribute.Position(0);      // Location 0 for position
+        VulkanVertexAttribute texCoordAttr = VulkanVertexAttribute.TexCoords(0, 1); // Location 1 for texCoord0
 
+        VulkanVertexAttributes attributes = new VulkanVertexAttributes(posAttr, texCoordAttr);
+
+        // If cubeMesh is already created, you might need to dispose it first
+        // or ensure setVertices/setIndices handles buffer recreation properly.
+        if (cubeMesh != null) {
+            cubeMesh.dispose(); // Dispose old mesh if re-setting
+        }
         cubeMesh = new VulkanMesh(vulkanDevice);
         cubeMesh.setVertices(vertices, attributes);
         cubeMesh.setIndices(indices);
+    }
+
+    void loadCubeTexture() {
+        // Replace "data/my_cube_texture.png" with your actual texture file
+        FileHandle textureFile = Gdx.files.internal("data/badlogic.jpg"); // Example
+        if (!textureFile.exists()) {
+            throw new GdxRuntimeException("Cube texture file not found: " + textureFile.path());
+        }
+        cubeTexture = new VulkanTexture(textureFile); // Uses your VulkanTexture class
+        Gdx.app.log(TAG, "Cube texture loaded: " + cubeTexture.getFilePath());
     }
 
     private int findMemoryType(int typeFilter, int properties) {
@@ -191,27 +332,38 @@ public class VulkanCubeTest extends GdxTest {
 
             PointerBuffer pData = stack.mallocPointer(1);
             vkMapMemory(vulkanDevice.getLogicalDevice(), mvpUboMemory, 0, bufferSize, 0, pData);
-            mvpUboMapped = pData.getByteBuffer(0, (int)bufferSize);
+            mvpUboMapped = pData.getByteBuffer(0, (int) bufferSize);
         }
     }
 
-    private void setupDescriptors() {
+    void setupDescriptors() { // Renamed or keep old name if preferred
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            // 1. DescriptorSetLayout for MVP UBO (Test creates this specific layout)
-            VkDescriptorSetLayoutBinding.Buffer uboLayoutBinding = VkDescriptorSetLayoutBinding.calloc(1, stack)
-                    .binding(0) // Matches layout(set=0, binding=0) in shader
+            // 1. DescriptorSetLayout for MVP UBO and Texture Sampler
+            VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(2, stack);
+
+            // Binding 0: MVP UBO (Vertex Shader)
+            bindings.get(0)
+                    .binding(0)
                     .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
                     .descriptorCount(1)
                     .stageFlags(VK_SHADER_STAGE_VERTEX_BIT)
                     .pImmutableSamplers(null);
 
+            // Binding 1: Texture Sampler (Fragment Shader)
+            bindings.get(1)
+                    .binding(1) // Must match layout(binding=1) in fragment shader
+                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                    .descriptorCount(1)
+                    .stageFlags(VK_SHADER_STAGE_FRAGMENT_BIT)
+                    .pImmutableSamplers(null);
+
             VkDescriptorSetLayoutCreateInfo layoutInfo = VkDescriptorSetLayoutCreateInfo.calloc(stack)
                     .sType(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
-                    .pBindings(uboLayoutBinding);
+                    .pBindings(bindings); // Pass both bindings
 
             LongBuffer pSetLayout = stack.mallocLong(1);
             if (vkCreateDescriptorSetLayout(vulkanDevice.getLogicalDevice(), layoutInfo, null, pSetLayout) != VK_SUCCESS) {
-                throw new GdxRuntimeException("Failed to create MVP descriptor set layout.");
+                throw new GdxRuntimeException("Failed to create descriptor set layout for MVP UBO and Texture.");
             }
             mvpDescriptorSetLayout = pSetLayout.get(0);
 
@@ -221,39 +373,64 @@ public class VulkanCubeTest extends GdxTest {
                 throw new GdxRuntimeException("Failed to get or create pipeline layout from VulkanPipelineManager.");
             }
 
-            // 3. Allocate DescriptorSet using VulkanDescriptorManager
+            // 3. Allocate DescriptorSet FROM THE MANAGER
+            // The pool in VulkanDescriptorManager needs to be able to allocate for this new layout.
+            // Its default pool sizes include MAX_SAMPLERS_PER_POOL.
             mvpDescriptorSet = descriptorManager.allocateSet(mvpDescriptorSetLayout);
             if (mvpDescriptorSet == VK_NULL_HANDLE) {
-                throw new GdxRuntimeException("Failed to allocate MVP descriptor set from VulkanDescriptorManager.");
+                throw new GdxRuntimeException("Failed to allocate MVP and Texture descriptor set from VulkanDescriptorManager.");
             }
 
-            // 4. Update DescriptorSet to point to the UBO buffer (using VulkanDescriptorManager's static helper)
-            long uboSize = 3 * 16 * Float.BYTES;
-            VulkanDescriptorManager.updateUniformBuffer(
-                    vulkanDevice.getLogicalDevice(),
-                    mvpDescriptorSet,
-                    0, // binding
-                    mvpUboBuffer,
-                    0, // offset
-                    uboSize // range
-            );
+            // 4. Update DescriptorSet to point to the UBO buffer and Texture
+            VkWriteDescriptorSet.Buffer descriptorWrites = VkWriteDescriptorSet.calloc(2, stack);
+
+            // Write for UBO
+            VkDescriptorBufferInfo.Buffer bufferInfo = VkDescriptorBufferInfo.calloc(1, stack)
+                    .buffer(mvpUboBuffer)
+                    .offset(0)
+                    .range(3 * 16 * Float.BYTES);
+
+            descriptorWrites.get(0)
+                    .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                    .dstSet(mvpDescriptorSet)
+                    .dstBinding(0) // UBO binding
+                    .dstArrayElement(0)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+                    .descriptorCount(1)
+                    .pBufferInfo(bufferInfo);
+
+            // Write for Texture Sampler
+            VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack)
+                    .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+                    .imageView(cubeTexture.getImageViewHandle())
+                    .sampler(cubeTexture.getSamplerHandle());
+
+            descriptorWrites.get(1)
+                    .sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
+                    .dstSet(mvpDescriptorSet)
+                    .dstBinding(1) // Texture sampler binding
+                    .dstArrayElement(0)
+                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                    .descriptorCount(1)
+                    .pImageInfo(imageInfo);
+
+            vkUpdateDescriptorSets(vulkanDevice.getLogicalDevice(), descriptorWrites, null);
         }
     }
 
     private void setupGraphicsPipeline() {
-        if (vulkanGraphics == null) { // Should have been set if Gdx.graphics was ready
+        if (vulkanGraphics == null) {
             vulkanGraphics = (VulkanGraphics) Gdx.graphics;
             if (vulkanGraphics == null) {
                 throw new GdxRuntimeException("VulkanGraphics context not available for pipeline creation in setupGraphicsPipeline.");
             }
         }
-        //long currentRenderPass = vulkanGraphics.getCurrentRenderPassHandle(); // **NEEDS getRenderPass() in VulkanGraphics**
-        long currentRenderPass = vulkanGraphics.getSwapchainRenderPass(); // New, more reliable way for pipeline creation
+
+        long currentRenderPass = vulkanGraphics.getSwapchainRenderPass();
         if (currentRenderPass == VK_NULL_HANDLE) {
             throw new GdxRuntimeException("SwapchainRenderPass not available from VulkanGraphics for pipeline creation.");
         }
-        long currentPipelineCache = pipelineManager.getVkPipelineCacheHandle(); // **NEEDS getVkPipelineCacheHandle() in VulkanPipelineManager**
-
+        long currentPipelineCache = pipelineManager.getVkPipelineCacheHandle();
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             VkPipelineShaderStageCreateInfo.Buffer shaderStages = VkPipelineShaderStageCreateInfo.calloc(2, stack);
@@ -309,8 +486,8 @@ public class VulkanCubeTest extends GdxTest {
                     .pInputAssemblyState(inputAssembly).pViewportState(viewportState)
                     .pRasterizationState(rasterizer).pMultisampleState(multisampling)
                     .pDepthStencilState(depthStencil).pColorBlendState(colorBlending)
-                    .pDynamicState(dynamicState).layout(pipelineLayout) // From VulkanPipelineManager
-                    .renderPass(currentRenderPass) // From VulkanGraphics
+                    .pDynamicState(dynamicState).layout(pipelineLayout)
+                    .renderPass(currentRenderPass)
                     .subpass(0);
 
             LongBuffer pGraphicsPipeline = stack.mallocLong(1);
@@ -327,16 +504,14 @@ public class VulkanCubeTest extends GdxTest {
         if (vulkanGraphics == null) {
             if (Gdx.graphics instanceof VulkanGraphics) {
                 vulkanGraphics = (VulkanGraphics) Gdx.graphics;
-                // If pipeline wasn't created in create() because Gdx.graphics wasn't ready,
-                // attempt to create it now. This is a common pattern for deferred initialization.
+
                 if (graphicsPipeline == VK_NULL_HANDLE) {
                     Gdx.app.log(TAG, "Graphics pipeline was null in render(), attempting setup...");
                     try {
                         setupGraphicsPipeline(); // This method needs vulkanGraphics to get the RenderPass
                     } catch (Exception e) {
                         Gdx.app.error(TAG, "Failed to setup graphics pipeline in render()", e);
-                        // Potentially set a flag to prevent further render attempts or throw
-                        return; // Can't render without a pipeline
+                        return;
                     }
                 }
             } else {
@@ -484,6 +659,11 @@ public class VulkanCubeTest extends GdxTest {
             vkDestroyBuffer(vulkanDevice.getLogicalDevice(), mvpUboBuffer, null);
         }
         if (mvpUboMemory != VK_NULL_HANDLE) vkFreeMemory(vulkanDevice.getLogicalDevice(), mvpUboMemory, null);
+
+        if (cubeTexture != null) {
+            cubeTexture.dispose();
+            cubeTexture = null;
+        }
 
         if (cubeMesh != null) cubeMesh.dispose();
 

@@ -9,13 +9,11 @@ import java.nio.IntBuffer;
 import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.vulkan.VK10.*;
 import static org.lwjgl.vulkan.EXTDescriptorIndexing.*; // For VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME and struct type
-import static org.lwjgl.vulkan.KHRGetPhysicalDeviceProperties2.*; // For KHRGetPhysicalDeviceProperties2 functions and struct types
 import static org.lwjgl.vulkan.VK11.*; // For VK_API_VERSION_1_1, vkGetPhysicalDeviceFeatures2, and struct types
 import static org.lwjgl.vulkan.VK12.*; // For VK_API_VERSION_1_2 and struct types
 import static org.lwjgl.vulkan.VK13.*; // For VK_API_VERSION_1_3 and struct types
 
 import com.badlogic.gdx.Gdx; // For logging
-import com.badlogic.gdx.utils.GdxRuntimeException; // For exceptions
 
 /**
  * Queries and stores various capabilities and limits of a Vulkan PhysicalDevice.
@@ -26,7 +24,7 @@ import com.badlogic.gdx.utils.GdxRuntimeException; // For exceptions
 public class VulkanDeviceCapabilities {
 
     private static final String TAG = VulkanDeviceCapabilities.class.getSimpleName();
-    private static final boolean DEBUG_LOGGING = true; // Set to true for detailed logs during capability querying
+    private static final boolean DEBUG_LOGGING = true;
 
     // --- API Version ---
     private final int apiVersion;
@@ -259,7 +257,8 @@ public class VulkanDeviceCapabilities {
                 if (DEBUG_LOGGING && Gdx.app != null) Gdx.app.log(TAG, "Using KHR vkGetPhysicalDeviceProperties2KHR for extended properties.");
                 KHRGetPhysicalDeviceProperties2.vkGetPhysicalDeviceProperties2KHR(physicalDevice, properties2);
             } else {
-                if (DEBUG_LOGGING && Gdx.app != null) Gdx.app.error(TAG, "Neither core vkGetPhysicalDeviceProperties2 nor KHR version is available for extended property query. Using base properties only.");
+                if (DEBUG_LOGGING && Gdx.app != null)
+                    Gdx.app.error(TAG, "Neither core vkGetPhysicalDeviceProperties2 nor KHR version is available for extended property query. Using base properties only.");
                 // If neither is available, properties2.properties() will effectively be the same as stackCoreProperties.
                 // We already have stackCoreProperties, so we can just use that for the persistent copy.
                 // However, to keep the structure, we copy from properties2.properties() which would have been
@@ -282,7 +281,8 @@ public class VulkanDeviceCapabilities {
                 if (DEBUG_LOGGING && Gdx.app != null) Gdx.app.log(TAG, "Queried VkPhysicalDeviceMaintenance4Properties.maxBufferSize: " + this.maxBufferSize);
             } else {
                 this.maxBufferSize = 0; // Default or indicate not available/queried
-                if (DEBUG_LOGGING && Gdx.app != null) Gdx.app.log(TAG, "VkPhysicalDeviceMaintenance4Properties not queried or maxBufferSize not retrieved. maxBufferSize set to 0.");
+                if (DEBUG_LOGGING && Gdx.app != null)
+                    Gdx.app.log(TAG, "VkPhysicalDeviceMaintenance4Properties not queried or maxBufferSize not retrieved. maxBufferSize set to 0.");
             }
 
 
@@ -388,7 +388,8 @@ public class VulkanDeviceCapabilities {
                 if (DEBUG_LOGGING && Gdx.app != null) Gdx.app.log(TAG, "Using KHR vkGetPhysicalDeviceFeatures2KHR for feature query.");
                 KHRGetPhysicalDeviceProperties2.vkGetPhysicalDeviceFeatures2KHR(physicalDevice, features2Query);
             } else {
-                if (DEBUG_LOGGING && Gdx.app != null) Gdx.app.error(TAG, "Neither core vkGetPhysicalDeviceFeatures2 nor KHR version is available for extended feature query. Querying only base V1.0 features.");
+                if (DEBUG_LOGGING && Gdx.app != null)
+                    Gdx.app.error(TAG, "Neither core vkGetPhysicalDeviceFeatures2 nor KHR version is available for extended feature query. Querying only base V1.0 features.");
                 vkGetPhysicalDeviceFeatures(physicalDevice, features2Query.features()); // Populate only V1.0 features into features2Query.features()
             }
 
@@ -465,9 +466,18 @@ public class VulkanDeviceCapabilities {
                 this.samplerYcbcrConversion = features11.samplerYcbcrConversion();
                 this.shaderDrawParameters = features11.shaderDrawParameters();
             } else {
-                this.storageBuffer16BitAccess = false; this.uniformAndStorageBuffer16BitAccess = false; this.storagePushConstant16 = false; this.storageInputOutput16 = false;
-                this.multiview = false; this.multiviewGeometryShader = false; this.multiviewTessellationShader = false; this.variablePointersStorageBuffer = false;
-                this.variablePointers = false; this.protectedMemory = false; this.samplerYcbcrConversion = false; this.shaderDrawParameters = false;
+                this.storageBuffer16BitAccess = false;
+                this.uniformAndStorageBuffer16BitAccess = false;
+                this.storagePushConstant16 = false;
+                this.storageInputOutput16 = false;
+                this.multiview = false;
+                this.multiviewGeometryShader = false;
+                this.multiviewTessellationShader = false;
+                this.variablePointersStorageBuffer = false;
+                this.variablePointers = false;
+                this.protectedMemory = false;
+                this.samplerYcbcrConversion = false;
+                this.shaderDrawParameters = false;
             }
 
             // Vulkan 1.2 features & Descriptor Indexing
@@ -529,12 +539,31 @@ public class VulkanDeviceCapabilities {
                 diDescBindingUpdateUnusedWhilePending = features12.descriptorBindingUpdateUnusedWhilePending();
                 diScalarBlockLayout = features12.scalarBlockLayout();
             } else {
-                this.samplerMirrorClampToEdge = false; this.drawIndirectCount = false; this.storageBuffer8BitAccess = false; this.uniformAndStorageBuffer8BitAccess = false;
-                this.storagePushConstant8 = false; this.shaderBufferInt64Atomics = false; this.shaderSharedInt64Atomics = false; this.shaderFloat16 = false; this.shaderInt8 = false;
-                this.samplerFilterMinmax = false; this.imagelessFramebuffer = false; this.uniformBufferStandardLayout = false; this.shaderSubgroupExtendedTypes = false;
-                this.separateDepthStencilLayouts = false; this.hostQueryReset = false; this.timelineSemaphore = false; this.bufferDeviceAddress = false;
-                this.bufferDeviceAddressCaptureReplay = false; this.bufferDeviceAddressMultiDevice = false; this.vulkanMemoryModel = false; this.vulkanMemoryModelDeviceScope = false;
-                this.vulkanMemoryModelAvailabilityVisibilityChains = false; this.shaderOutputViewportIndex = false; this.shaderOutputLayer = false; this.subgroupBroadcastDynamicId = false;
+                this.samplerMirrorClampToEdge = false;
+                this.drawIndirectCount = false;
+                this.storageBuffer8BitAccess = false;
+                this.uniformAndStorageBuffer8BitAccess = false;
+                this.storagePushConstant8 = false;
+                this.shaderBufferInt64Atomics = false;
+                this.shaderSharedInt64Atomics = false;
+                this.shaderFloat16 = false;
+                this.shaderInt8 = false;
+                this.samplerFilterMinmax = false;
+                this.imagelessFramebuffer = false;
+                this.uniformBufferStandardLayout = false;
+                this.shaderSubgroupExtendedTypes = false;
+                this.separateDepthStencilLayouts = false;
+                this.hostQueryReset = false;
+                this.timelineSemaphore = false;
+                this.bufferDeviceAddress = false;
+                this.bufferDeviceAddressCaptureReplay = false;
+                this.bufferDeviceAddressMultiDevice = false;
+                this.vulkanMemoryModel = false;
+                this.vulkanMemoryModelDeviceScope = false;
+                this.vulkanMemoryModelAvailabilityVisibilityChains = false;
+                this.shaderOutputViewportIndex = false;
+                this.shaderOutputLayer = false;
+                this.subgroupBroadcastDynamicId = false;
             }
 
             if (this.apiVersion < VK_API_VERSION_1_2 && extDescriptorIndexingFeatures != null) {
@@ -603,192 +632,698 @@ public class VulkanDeviceCapabilities {
                 this.shaderIntegerDotProduct = features13.shaderIntegerDotProduct();
                 this.maintenance4 = features13.maintenance4();
             } else {
-                this.robustImageAccess = false; this.inlineUniformBlock = false; this.descriptorBindingInlineUniformBlockUpdateAfterBind = false;
-                this.pipelineCreationCacheControl = false; this.privateData = false; this.shaderDemoteToHelperInvocation = false; this.shaderTerminateInvocation = false;
-                this.subgroupSizeControl = false; this.computeFullSubgroups = false; this.synchronization2 = false; this.textureCompressionASTC_HDR = false;
-                this.shaderZeroInitializeWorkgroupMemory = false; this.dynamicRendering = false; this.shaderIntegerDotProduct = false; this.maintenance4 = false;
+                this.robustImageAccess = false;
+                this.inlineUniformBlock = false;
+                this.descriptorBindingInlineUniformBlockUpdateAfterBind = false;
+                this.pipelineCreationCacheControl = false;
+                this.privateData = false;
+                this.shaderDemoteToHelperInvocation = false;
+                this.shaderTerminateInvocation = false;
+                this.subgroupSizeControl = false;
+                this.computeFullSubgroups = false;
+                this.synchronization2 = false;
+                this.textureCompressionASTC_HDR = false;
+                this.shaderZeroInitializeWorkgroupMemory = false;
+                this.dynamicRendering = false;
+                this.shaderIntegerDotProduct = false;
+                this.maintenance4 = false;
             }
         }
     }
 
     // --- Getters for API version and Limits ---
-    public int getApiVersion() { return apiVersion; }
-    public String getApiVersionString() { return apiVersionString; }
-    public VkPhysicalDeviceLimits getLimits() { return limits; }
-    public long getMaxBufferSize() { return maxBufferSize; }
+    public int getApiVersion() {
+        return apiVersion;
+    }
+
+    public String getApiVersionString() {
+        return apiVersionString;
+    }
+
+    public VkPhysicalDeviceLimits getLimits() {
+        return limits;
+    }
+
+    public long getMaxBufferSize() {
+        return maxBufferSize;
+    }
 
     // --- Getters for individual limit values ---
-    public int getMaxImageDimension1D() { return maxImageDimension1D; }
-    public int getMaxImageDimension2D() { return maxImageDimension2D; }
-    public int getMaxImageDimension3D() { return maxImageDimension3D; }
-    public int getMaxImageDimensionCube() { return maxImageDimensionCube; }
-    public int getMaxImageArrayLayers() { return maxImageArrayLayers; }
-    public long getMaxTexelBufferElements() { return maxTexelBufferElements; }
-    public long getMaxUniformBufferRange() { return maxUniformBufferRange; }
-    public long getMaxStorageBufferRange() { return maxStorageBufferRange; }
-    public int getMaxPushConstantsSize() { return maxPushConstantsSize; }
-    public int getMaxMemoryAllocationCount() { return maxMemoryAllocationCount; }
-    public int getMaxSamplerAllocationCount() { return maxSamplerAllocationCount; }
-    public long getBufferImageGranularity() { return bufferImageGranularity; }
-    public long getSparseAddressSpaceSize() { return sparseAddressSpaceSize; }
-    public int getMaxBoundDescriptorSets() { return maxBoundDescriptorSets; }
-    public int getMaxPerStageDescriptorSamplers() { return maxPerStageDescriptorSamplers; }
-    public int getMaxPerStageDescriptorUniformBuffers() { return maxPerStageDescriptorUniformBuffers; }
-    public int getMaxPerStageDescriptorStorageBuffers() { return maxPerStageDescriptorStorageBuffers; }
-    public int getMaxPerStageDescriptorSampledImages() { return maxPerStageDescriptorSampledImages; }
-    public int getMaxPerStageDescriptorStorageImages() { return maxPerStageDescriptorStorageImages; }
-    public int getMaxPerStageDescriptorInputAttachments() { return maxPerStageDescriptorInputAttachments; }
-    public int getMaxPerStageResources() { return maxPerStageResources; }
-    public int getMaxDescriptorSetSamplers() { return maxDescriptorSetSamplers; }
-    public int getMaxDescriptorSetUniformBuffers() { return maxDescriptorSetUniformBuffers; }
-    public int getMaxDescriptorSetUniformBuffersDynamic() { return maxDescriptorSetUniformBuffersDynamic; }
-    public int getMaxDescriptorSetStorageBuffers() { return maxDescriptorSetStorageBuffers; }
-    public int getMaxDescriptorSetStorageBuffersDynamic() { return maxDescriptorSetStorageBuffersDynamic; }
-    public int getMaxDescriptorSetSampledImages() { return maxDescriptorSetSampledImages; }
-    public int getMaxDescriptorSetStorageImages() { return maxDescriptorSetStorageImages; }
-    public int getMaxDescriptorSetInputAttachments() { return maxDescriptorSetInputAttachments; }
-    public int getMaxVertexInputAttributes() { return maxVertexInputAttributes; }
-    public int getMaxVertexInputBindings() { return maxVertexInputBindings; }
-    public int getMaxVertexInputAttributeOffset() { return maxVertexInputAttributeOffset; }
-    public int getMaxVertexInputBindingStride() { return maxVertexInputBindingStride; }
-    public int getMaxVertexOutputComponents() { return maxVertexOutputComponents; }
+    public int getMaxImageDimension1D() {
+        return maxImageDimension1D;
+    }
+
+    public int getMaxImageDimension2D() {
+        return maxImageDimension2D;
+    }
+
+    public int getMaxImageDimension3D() {
+        return maxImageDimension3D;
+    }
+
+    public int getMaxImageDimensionCube() {
+        return maxImageDimensionCube;
+    }
+
+    public int getMaxImageArrayLayers() {
+        return maxImageArrayLayers;
+    }
+
+    public long getMaxTexelBufferElements() {
+        return maxTexelBufferElements;
+    }
+
+    public long getMaxUniformBufferRange() {
+        return maxUniformBufferRange;
+    }
+
+    public long getMaxStorageBufferRange() {
+        return maxStorageBufferRange;
+    }
+
+    public int getMaxPushConstantsSize() {
+        return maxPushConstantsSize;
+    }
+
+    public int getMaxMemoryAllocationCount() {
+        return maxMemoryAllocationCount;
+    }
+
+    public int getMaxSamplerAllocationCount() {
+        return maxSamplerAllocationCount;
+    }
+
+    public long getBufferImageGranularity() {
+        return bufferImageGranularity;
+    }
+
+    public long getSparseAddressSpaceSize() {
+        return sparseAddressSpaceSize;
+    }
+
+    public int getMaxBoundDescriptorSets() {
+        return maxBoundDescriptorSets;
+    }
+
+    public int getMaxPerStageDescriptorSamplers() {
+        return maxPerStageDescriptorSamplers;
+    }
+
+    public int getMaxPerStageDescriptorUniformBuffers() {
+        return maxPerStageDescriptorUniformBuffers;
+    }
+
+    public int getMaxPerStageDescriptorStorageBuffers() {
+        return maxPerStageDescriptorStorageBuffers;
+    }
+
+    public int getMaxPerStageDescriptorSampledImages() {
+        return maxPerStageDescriptorSampledImages;
+    }
+
+    public int getMaxPerStageDescriptorStorageImages() {
+        return maxPerStageDescriptorStorageImages;
+    }
+
+    public int getMaxPerStageDescriptorInputAttachments() {
+        return maxPerStageDescriptorInputAttachments;
+    }
+
+    public int getMaxPerStageResources() {
+        return maxPerStageResources;
+    }
+
+    public int getMaxDescriptorSetSamplers() {
+        return maxDescriptorSetSamplers;
+    }
+
+    public int getMaxDescriptorSetUniformBuffers() {
+        return maxDescriptorSetUniformBuffers;
+    }
+
+    public int getMaxDescriptorSetUniformBuffersDynamic() {
+        return maxDescriptorSetUniformBuffersDynamic;
+    }
+
+    public int getMaxDescriptorSetStorageBuffers() {
+        return maxDescriptorSetStorageBuffers;
+    }
+
+    public int getMaxDescriptorSetStorageBuffersDynamic() {
+        return maxDescriptorSetStorageBuffersDynamic;
+    }
+
+    public int getMaxDescriptorSetSampledImages() {
+        return maxDescriptorSetSampledImages;
+    }
+
+    public int getMaxDescriptorSetStorageImages() {
+        return maxDescriptorSetStorageImages;
+    }
+
+    public int getMaxDescriptorSetInputAttachments() {
+        return maxDescriptorSetInputAttachments;
+    }
+
+    public int getMaxVertexInputAttributes() {
+        return maxVertexInputAttributes;
+    }
+
+    public int getMaxVertexInputBindings() {
+        return maxVertexInputBindings;
+    }
+
+    public int getMaxVertexInputAttributeOffset() {
+        return maxVertexInputAttributeOffset;
+    }
+
+    public int getMaxVertexInputBindingStride() {
+        return maxVertexInputBindingStride;
+    }
+
+    public int getMaxVertexOutputComponents() {
+        return maxVertexOutputComponents;
+    }
 
     // --- Getters for Vulkan 1.0 Core Features ---
-    public boolean isRobustBufferAccess() { return robustBufferAccess; }
-    public boolean isFullDrawIndexUint32() { return fullDrawIndexUint32; }
-    public boolean isImageCubeArray() { return imageCubeArray; }
-    public boolean isIndependentBlend() { return independentBlend; }
-    public boolean isGeometryShader() { return geometryShader; }
-    public boolean isTessellationShader() { return tessellationShader; }
-    public boolean isSampleRateShading() { return sampleRateShading; }
-    public boolean isDualSrcBlend() { return dualSrcBlend; }
-    public boolean isLogicOp() { return logicOp; }
-    public boolean isMultiDrawIndirect() { return multiDrawIndirect; }
-    public boolean isDrawIndirectFirstInstance() { return drawIndirectFirstInstance; }
-    public boolean isDepthClamp() { return depthClamp; }
-    public boolean isDepthBiasClamp() { return depthBiasClamp; }
-    public boolean isFillModeNonSolid() { return fillModeNonSolid; }
-    public boolean isDepthBounds() { return depthBounds; }
-    public boolean isWideLines() { return wideLines; }
-    public boolean isLargePoints() { return largePoints; }
-    public boolean isAlphaToOne() { return alphaToOne; }
-    public boolean isMultiViewport() { return multiViewport; }
-    public boolean isSamplerAnisotropy() { return samplerAnisotropy; }
-    public boolean isTextureCompressionETC2() { return textureCompressionETC2; }
-    public boolean isTextureCompressionASTC_LDR() { return textureCompressionASTC_LDR; }
-    public boolean isTextureCompressionBC() { return textureCompressionBC; }
-    public boolean isOcclusionQueryPrecise() { return occlusionQueryPrecise; }
-    public boolean isPipelineStatisticsQuery() { return pipelineStatisticsQuery; }
-    public boolean isVertexPipelineStoresAndAtomics() { return vertexPipelineStoresAndAtomics; }
-    public boolean isFragmentStoresAndAtomics() { return fragmentStoresAndAtomics; }
-    public boolean isShaderTessellationAndGeometryPointSize() { return shaderTessellationAndGeometryPointSize; }
-    public boolean isShaderImageGatherExtended() { return shaderImageGatherExtended; }
-    public boolean isShaderStorageImageExtendedFormats() { return shaderStorageImageExtendedFormats; }
-    public boolean isShaderStorageImageMultisample() { return shaderStorageImageMultisample; }
-    public boolean isShaderStorageImageReadWithoutFormat() { return shaderStorageImageReadWithoutFormat; }
-    public boolean isShaderStorageImageWriteWithoutFormat() { return shaderStorageImageWriteWithoutFormat; }
-    public boolean isShaderUniformBufferArrayDynamicIndexing() { return shaderUniformBufferArrayDynamicIndexing; }
-    public boolean isShaderSampledImageArrayDynamicIndexing() { return shaderSampledImageArrayDynamicIndexing; }
-    public boolean isShaderStorageBufferArrayDynamicIndexing() { return shaderStorageBufferArrayDynamicIndexing; }
-    public boolean isShaderStorageImageArrayDynamicIndexing() { return shaderStorageImageArrayDynamicIndexing; }
-    public boolean isShaderClipDistance() { return shaderClipDistance; }
-    public boolean isShaderCullDistance() { return shaderCullDistance; }
-    public boolean isShaderFloat64() { return shaderFloat64; }
-    public boolean isShaderInt64() { return shaderInt64; }
-    public boolean isShaderInt16() { return shaderInt16; }
-    public boolean isShaderResourceResidency() { return shaderResourceResidency; }
-    public boolean isShaderResourceMinLod() { return shaderResourceMinLod; }
-    public boolean isSparseBinding() { return sparseBinding; }
-    public boolean isSparseResidencyBuffer() { return sparseResidencyBuffer; }
-    public boolean isSparseResidencyImage2D() { return sparseResidencyImage2D; }
-    public boolean isSparseResidencyImage3D() { return sparseResidencyImage3D; }
-    public boolean isSparseResidency2Samples() { return sparseResidency2Samples; }
-    public boolean isSparseResidency4Samples() { return sparseResidency4Samples; }
-    public boolean isSparseResidency8Samples() { return sparseResidency8Samples; }
-    public boolean isSparseResidency16Samples() { return sparseResidency16Samples; }
-    public boolean isSparseResidencyAliased() { return sparseResidencyAliased; }
-    public boolean isVariableMultisampleRate() { return variableMultisampleRate; }
-    public boolean isInheritedQueries() { return inheritedQueries; }
+    public boolean isRobustBufferAccess() {
+        return robustBufferAccess;
+    }
+
+    public boolean isFullDrawIndexUint32() {
+        return fullDrawIndexUint32;
+    }
+
+    public boolean isImageCubeArray() {
+        return imageCubeArray;
+    }
+
+    public boolean isIndependentBlend() {
+        return independentBlend;
+    }
+
+    public boolean isGeometryShader() {
+        return geometryShader;
+    }
+
+    public boolean isTessellationShader() {
+        return tessellationShader;
+    }
+
+    public boolean isSampleRateShading() {
+        return sampleRateShading;
+    }
+
+    public boolean isDualSrcBlend() {
+        return dualSrcBlend;
+    }
+
+    public boolean isLogicOp() {
+        return logicOp;
+    }
+
+    public boolean isMultiDrawIndirect() {
+        return multiDrawIndirect;
+    }
+
+    public boolean isDrawIndirectFirstInstance() {
+        return drawIndirectFirstInstance;
+    }
+
+    public boolean isDepthClamp() {
+        return depthClamp;
+    }
+
+    public boolean isDepthBiasClamp() {
+        return depthBiasClamp;
+    }
+
+    public boolean isFillModeNonSolid() {
+        return fillModeNonSolid;
+    }
+
+    public boolean isDepthBounds() {
+        return depthBounds;
+    }
+
+    public boolean isWideLines() {
+        return wideLines;
+    }
+
+    public boolean isLargePoints() {
+        return largePoints;
+    }
+
+    public boolean isAlphaToOne() {
+        return alphaToOne;
+    }
+
+    public boolean isMultiViewport() {
+        return multiViewport;
+    }
+
+    public boolean isSamplerAnisotropy() {
+        return samplerAnisotropy;
+    }
+
+    public boolean isTextureCompressionETC2() {
+        return textureCompressionETC2;
+    }
+
+    public boolean isTextureCompressionASTC_LDR() {
+        return textureCompressionASTC_LDR;
+    }
+
+    public boolean isTextureCompressionBC() {
+        return textureCompressionBC;
+    }
+
+    public boolean isOcclusionQueryPrecise() {
+        return occlusionQueryPrecise;
+    }
+
+    public boolean isPipelineStatisticsQuery() {
+        return pipelineStatisticsQuery;
+    }
+
+    public boolean isVertexPipelineStoresAndAtomics() {
+        return vertexPipelineStoresAndAtomics;
+    }
+
+    public boolean isFragmentStoresAndAtomics() {
+        return fragmentStoresAndAtomics;
+    }
+
+    public boolean isShaderTessellationAndGeometryPointSize() {
+        return shaderTessellationAndGeometryPointSize;
+    }
+
+    public boolean isShaderImageGatherExtended() {
+        return shaderImageGatherExtended;
+    }
+
+    public boolean isShaderStorageImageExtendedFormats() {
+        return shaderStorageImageExtendedFormats;
+    }
+
+    public boolean isShaderStorageImageMultisample() {
+        return shaderStorageImageMultisample;
+    }
+
+    public boolean isShaderStorageImageReadWithoutFormat() {
+        return shaderStorageImageReadWithoutFormat;
+    }
+
+    public boolean isShaderStorageImageWriteWithoutFormat() {
+        return shaderStorageImageWriteWithoutFormat;
+    }
+
+    public boolean isShaderUniformBufferArrayDynamicIndexing() {
+        return shaderUniformBufferArrayDynamicIndexing;
+    }
+
+    public boolean isShaderSampledImageArrayDynamicIndexing() {
+        return shaderSampledImageArrayDynamicIndexing;
+    }
+
+    public boolean isShaderStorageBufferArrayDynamicIndexing() {
+        return shaderStorageBufferArrayDynamicIndexing;
+    }
+
+    public boolean isShaderStorageImageArrayDynamicIndexing() {
+        return shaderStorageImageArrayDynamicIndexing;
+    }
+
+    public boolean isShaderClipDistance() {
+        return shaderClipDistance;
+    }
+
+    public boolean isShaderCullDistance() {
+        return shaderCullDistance;
+    }
+
+    public boolean isShaderFloat64() {
+        return shaderFloat64;
+    }
+
+    public boolean isShaderInt64() {
+        return shaderInt64;
+    }
+
+    public boolean isShaderInt16() {
+        return shaderInt16;
+    }
+
+    public boolean isShaderResourceResidency() {
+        return shaderResourceResidency;
+    }
+
+    public boolean isShaderResourceMinLod() {
+        return shaderResourceMinLod;
+    }
+
+    public boolean isSparseBinding() {
+        return sparseBinding;
+    }
+
+    public boolean isSparseResidencyBuffer() {
+        return sparseResidencyBuffer;
+    }
+
+    public boolean isSparseResidencyImage2D() {
+        return sparseResidencyImage2D;
+    }
+
+    public boolean isSparseResidencyImage3D() {
+        return sparseResidencyImage3D;
+    }
+
+    public boolean isSparseResidency2Samples() {
+        return sparseResidency2Samples;
+    }
+
+    public boolean isSparseResidency4Samples() {
+        return sparseResidency4Samples;
+    }
+
+    public boolean isSparseResidency8Samples() {
+        return sparseResidency8Samples;
+    }
+
+    public boolean isSparseResidency16Samples() {
+        return sparseResidency16Samples;
+    }
+
+    public boolean isSparseResidencyAliased() {
+        return sparseResidencyAliased;
+    }
+
+    public boolean isVariableMultisampleRate() {
+        return variableMultisampleRate;
+    }
+
+    public boolean isInheritedQueries() {
+        return inheritedQueries;
+    }
 
     // --- Getters for Vulkan 1.1 Core Features ---
-    public boolean isStorageBuffer16BitAccess() { return storageBuffer16BitAccess; }
-    public boolean isUniformAndStorageBuffer16BitAccess() { return uniformAndStorageBuffer16BitAccess; }
-    public boolean isStoragePushConstant16() { return storagePushConstant16; }
-    public boolean isStorageInputOutput16() { return storageInputOutput16; }
-    public boolean isMultiview() { return multiview; }
-    public boolean isMultiviewGeometryShader() { return multiviewGeometryShader; }
-    public boolean isMultiviewTessellationShader() { return multiviewTessellationShader; }
-    public boolean isVariablePointersStorageBuffer() { return variablePointersStorageBuffer; }
-    public boolean isVariablePointers() { return variablePointers; }
-    public boolean isProtectedMemory() { return protectedMemory; }
-    public boolean isSamplerYcbcrConversion() { return samplerYcbcrConversion; }
-    public boolean isShaderDrawParameters() { return shaderDrawParameters; }
+    public boolean isStorageBuffer16BitAccess() {
+        return storageBuffer16BitAccess;
+    }
+
+    public boolean isUniformAndStorageBuffer16BitAccess() {
+        return uniformAndStorageBuffer16BitAccess;
+    }
+
+    public boolean isStoragePushConstant16() {
+        return storagePushConstant16;
+    }
+
+    public boolean isStorageInputOutput16() {
+        return storageInputOutput16;
+    }
+
+    public boolean isMultiview() {
+        return multiview;
+    }
+
+    public boolean isMultiviewGeometryShader() {
+        return multiviewGeometryShader;
+    }
+
+    public boolean isMultiviewTessellationShader() {
+        return multiviewTessellationShader;
+    }
+
+    public boolean isVariablePointersStorageBuffer() {
+        return variablePointersStorageBuffer;
+    }
+
+    public boolean isVariablePointers() {
+        return variablePointers;
+    }
+
+    public boolean isProtectedMemory() {
+        return protectedMemory;
+    }
+
+    public boolean isSamplerYcbcrConversion() {
+        return samplerYcbcrConversion;
+    }
+
+    public boolean isShaderDrawParameters() {
+        return shaderDrawParameters;
+    }
 
     // --- Getters for Vulkan 1.2 Core Features (including Descriptor Indexing) ---
-    public boolean isSamplerMirrorClampToEdge() { return samplerMirrorClampToEdge; }
-    public boolean isDrawIndirectCount() { return drawIndirectCount; }
-    public boolean isStorageBuffer8BitAccess() { return storageBuffer8BitAccess; }
-    public boolean isUniformAndStorageBuffer8BitAccess() { return uniformAndStorageBuffer8BitAccess; }
-    public boolean isStoragePushConstant8() { return storagePushConstant8; }
-    public boolean isShaderBufferInt64Atomics() { return shaderBufferInt64Atomics; }
-    public boolean isShaderSharedInt64Atomics() { return shaderSharedInt64Atomics; }
-    public boolean isShaderFloat16() { return shaderFloat16; }
-    public boolean isShaderInt8() { return shaderInt8; }
-    public boolean isDescriptorIndexingSupported() { return descriptorIndexing; }
-    public boolean isShaderInputAttachmentArrayDynamicIndexing() { return shaderInputAttachmentArrayDynamicIndexing; }
-    public boolean isShaderUniformTexelBufferArrayDynamicIndexing() { return shaderUniformTexelBufferArrayDynamicIndexing; }
-    public boolean isShaderStorageTexelBufferArrayDynamicIndexing() { return shaderStorageTexelBufferArrayDynamicIndexing; }
-    public boolean isShaderUniformBufferArrayNonUniformIndexing() { return shaderUniformBufferArrayNonUniformIndexing; }
-    public boolean isShaderSampledImageArrayNonUniformIndexing() { return shaderSampledImageArrayNonUniformIndexing; }
-    public boolean isShaderStorageBufferArrayNonUniformIndexing() { return shaderStorageBufferArrayNonUniformIndexing; }
-    public boolean isShaderStorageImageArrayNonUniformIndexing() { return shaderStorageImageArrayNonUniformIndexing; }
-    public boolean isShaderInputAttachmentArrayNonUniformIndexing() { return shaderInputAttachmentArrayNonUniformIndexing; }
-    public boolean isShaderUniformTexelBufferArrayNonUniformIndexing() { return shaderUniformTexelBufferArrayNonUniformIndexing; }
-    public boolean isShaderStorageTexelBufferArrayNonUniformIndexing() { return shaderStorageTexelBufferArrayNonUniformIndexing; }
-    public boolean isDescriptorBindingUniformBufferUpdateAfterBind() { return descriptorBindingUniformBufferUpdateAfterBind; }
-    public boolean isDescriptorBindingSampledImageUpdateAfterBind() { return descriptorBindingSampledImageUpdateAfterBind; }
-    public boolean isDescriptorBindingStorageImageUpdateAfterBind() { return descriptorBindingStorageImageUpdateAfterBind; }
-    public boolean isDescriptorBindingStorageBufferUpdateAfterBind() { return descriptorBindingStorageBufferUpdateAfterBind; }
-    public boolean isDescriptorBindingUniformTexelBufferUpdateAfterBind() { return descriptorBindingUniformTexelBufferUpdateAfterBind; }
-    public boolean isDescriptorBindingStorageTexelBufferUpdateAfterBind() { return descriptorBindingStorageTexelBufferUpdateAfterBind; }
-    public boolean isDescriptorBindingUpdateUnusedWhilePending() { return descriptorBindingUpdateUnusedWhilePending; }
-    public boolean isDescriptorBindingPartiallyBound() { return descriptorBindingPartiallyBound; }
-    public boolean isDescriptorBindingVariableDescriptorCount() { return descriptorBindingVariableDescriptorCount; }
-    public boolean isRuntimeDescriptorArray() { return runtimeDescriptorArray; }
-    public boolean isSamplerFilterMinmax() { return samplerFilterMinmax; }
-    public boolean isScalarBlockLayout() { return scalarBlockLayout; }
-    public boolean isImagelessFramebuffer() { return imagelessFramebuffer; }
-    public boolean isUniformBufferStandardLayout() { return uniformBufferStandardLayout; }
-    public boolean isShaderSubgroupExtendedTypes() { return shaderSubgroupExtendedTypes; }
-    public boolean isSeparateDepthStencilLayouts() { return separateDepthStencilLayouts; }
-    public boolean isHostQueryReset() { return hostQueryReset; }
-    public boolean isTimelineSemaphore() { return timelineSemaphore; }
-    public boolean isBufferDeviceAddress() { return bufferDeviceAddress; }
-    public boolean isBufferDeviceAddressCaptureReplay() { return bufferDeviceAddressCaptureReplay; }
-    public boolean isBufferDeviceAddressMultiDevice() { return bufferDeviceAddressMultiDevice; }
-    public boolean isVulkanMemoryModel() { return vulkanMemoryModel; }
-    public boolean isVulkanMemoryModelDeviceScope() { return vulkanMemoryModelDeviceScope; }
-    public boolean isVulkanMemoryModelAvailabilityVisibilityChains() { return vulkanMemoryModelAvailabilityVisibilityChains; }
-    public boolean isShaderOutputViewportIndex() { return shaderOutputViewportIndex; }
-    public boolean isShaderOutputLayer() { return shaderOutputLayer; }
-    public boolean isSubgroupBroadcastDynamicId() { return subgroupBroadcastDynamicId; }
+    public boolean isSamplerMirrorClampToEdge() {
+        return samplerMirrorClampToEdge;
+    }
+
+    public boolean isDrawIndirectCount() {
+        return drawIndirectCount;
+    }
+
+    public boolean isStorageBuffer8BitAccess() {
+        return storageBuffer8BitAccess;
+    }
+
+    public boolean isUniformAndStorageBuffer8BitAccess() {
+        return uniformAndStorageBuffer8BitAccess;
+    }
+
+    public boolean isStoragePushConstant8() {
+        return storagePushConstant8;
+    }
+
+    public boolean isShaderBufferInt64Atomics() {
+        return shaderBufferInt64Atomics;
+    }
+
+    public boolean isShaderSharedInt64Atomics() {
+        return shaderSharedInt64Atomics;
+    }
+
+    public boolean isShaderFloat16() {
+        return shaderFloat16;
+    }
+
+    public boolean isShaderInt8() {
+        return shaderInt8;
+    }
+
+    public boolean isDescriptorIndexingSupported() {
+        return descriptorIndexing;
+    }
+
+    public boolean isShaderInputAttachmentArrayDynamicIndexing() {
+        return shaderInputAttachmentArrayDynamicIndexing;
+    }
+
+    public boolean isShaderUniformTexelBufferArrayDynamicIndexing() {
+        return shaderUniformTexelBufferArrayDynamicIndexing;
+    }
+
+    public boolean isShaderStorageTexelBufferArrayDynamicIndexing() {
+        return shaderStorageTexelBufferArrayDynamicIndexing;
+    }
+
+    public boolean isShaderUniformBufferArrayNonUniformIndexing() {
+        return shaderUniformBufferArrayNonUniformIndexing;
+    }
+
+    public boolean isShaderSampledImageArrayNonUniformIndexing() {
+        return shaderSampledImageArrayNonUniformIndexing;
+    }
+
+    public boolean isShaderStorageBufferArrayNonUniformIndexing() {
+        return shaderStorageBufferArrayNonUniformIndexing;
+    }
+
+    public boolean isShaderStorageImageArrayNonUniformIndexing() {
+        return shaderStorageImageArrayNonUniformIndexing;
+    }
+
+    public boolean isShaderInputAttachmentArrayNonUniformIndexing() {
+        return shaderInputAttachmentArrayNonUniformIndexing;
+    }
+
+    public boolean isShaderUniformTexelBufferArrayNonUniformIndexing() {
+        return shaderUniformTexelBufferArrayNonUniformIndexing;
+    }
+
+    public boolean isShaderStorageTexelBufferArrayNonUniformIndexing() {
+        return shaderStorageTexelBufferArrayNonUniformIndexing;
+    }
+
+    public boolean isDescriptorBindingUniformBufferUpdateAfterBind() {
+        return descriptorBindingUniformBufferUpdateAfterBind;
+    }
+
+    public boolean isDescriptorBindingSampledImageUpdateAfterBind() {
+        return descriptorBindingSampledImageUpdateAfterBind;
+    }
+
+    public boolean isDescriptorBindingStorageImageUpdateAfterBind() {
+        return descriptorBindingStorageImageUpdateAfterBind;
+    }
+
+    public boolean isDescriptorBindingStorageBufferUpdateAfterBind() {
+        return descriptorBindingStorageBufferUpdateAfterBind;
+    }
+
+    public boolean isDescriptorBindingUniformTexelBufferUpdateAfterBind() {
+        return descriptorBindingUniformTexelBufferUpdateAfterBind;
+    }
+
+    public boolean isDescriptorBindingStorageTexelBufferUpdateAfterBind() {
+        return descriptorBindingStorageTexelBufferUpdateAfterBind;
+    }
+
+    public boolean isDescriptorBindingUpdateUnusedWhilePending() {
+        return descriptorBindingUpdateUnusedWhilePending;
+    }
+
+    public boolean isDescriptorBindingPartiallyBound() {
+        return descriptorBindingPartiallyBound;
+    }
+
+    public boolean isDescriptorBindingVariableDescriptorCount() {
+        return descriptorBindingVariableDescriptorCount;
+    }
+
+    public boolean isRuntimeDescriptorArray() {
+        return runtimeDescriptorArray;
+    }
+
+    public boolean isSamplerFilterMinmax() {
+        return samplerFilterMinmax;
+    }
+
+    public boolean isScalarBlockLayout() {
+        return scalarBlockLayout;
+    }
+
+    public boolean isImagelessFramebuffer() {
+        return imagelessFramebuffer;
+    }
+
+    public boolean isUniformBufferStandardLayout() {
+        return uniformBufferStandardLayout;
+    }
+
+    public boolean isShaderSubgroupExtendedTypes() {
+        return shaderSubgroupExtendedTypes;
+    }
+
+    public boolean isSeparateDepthStencilLayouts() {
+        return separateDepthStencilLayouts;
+    }
+
+    public boolean isHostQueryReset() {
+        return hostQueryReset;
+    }
+
+    public boolean isTimelineSemaphore() {
+        return timelineSemaphore;
+    }
+
+    public boolean isBufferDeviceAddress() {
+        return bufferDeviceAddress;
+    }
+
+    public boolean isBufferDeviceAddressCaptureReplay() {
+        return bufferDeviceAddressCaptureReplay;
+    }
+
+    public boolean isBufferDeviceAddressMultiDevice() {
+        return bufferDeviceAddressMultiDevice;
+    }
+
+    public boolean isVulkanMemoryModel() {
+        return vulkanMemoryModel;
+    }
+
+    public boolean isVulkanMemoryModelDeviceScope() {
+        return vulkanMemoryModelDeviceScope;
+    }
+
+    public boolean isVulkanMemoryModelAvailabilityVisibilityChains() {
+        return vulkanMemoryModelAvailabilityVisibilityChains;
+    }
+
+    public boolean isShaderOutputViewportIndex() {
+        return shaderOutputViewportIndex;
+    }
+
+    public boolean isShaderOutputLayer() {
+        return shaderOutputLayer;
+    }
+
+    public boolean isSubgroupBroadcastDynamicId() {
+        return subgroupBroadcastDynamicId;
+    }
 
     // --- Getters for Vulkan 1.3 Core Features ---
-    public boolean isRobustImageAccess() { return robustImageAccess; }
-    public boolean isInlineUniformBlock() { return inlineUniformBlock; }
-    public boolean isDescriptorBindingInlineUniformBlockUpdateAfterBind() { return descriptorBindingInlineUniformBlockUpdateAfterBind; }
-    public boolean isPipelineCreationCacheControl() { return pipelineCreationCacheControl; }
-    public boolean isPrivateData() { return privateData; }
-    public boolean isShaderDemoteToHelperInvocation() { return shaderDemoteToHelperInvocation; }
-    public boolean isShaderTerminateInvocation() { return shaderTerminateInvocation; }
-    public boolean isSubgroupSizeControl() { return subgroupSizeControl; }
-    public boolean isComputeFullSubgroups() { return computeFullSubgroups; }
-    public boolean isSynchronization2() { return synchronization2; }
-    public boolean isTextureCompressionASTC_HDR() { return textureCompressionASTC_HDR; }
-    public boolean isShaderZeroInitializeWorkgroupMemory() { return shaderZeroInitializeWorkgroupMemory; }
-    public boolean isDynamicRendering() { return dynamicRendering; }
-    public boolean isShaderIntegerDotProduct() { return shaderIntegerDotProduct; }
-    public boolean isMaintenance4() { return maintenance4; }
+    public boolean isRobustImageAccess() {
+        return robustImageAccess;
+    }
+
+    public boolean isInlineUniformBlock() {
+        return inlineUniformBlock;
+    }
+
+    public boolean isDescriptorBindingInlineUniformBlockUpdateAfterBind() {
+        return descriptorBindingInlineUniformBlockUpdateAfterBind;
+    }
+
+    public boolean isPipelineCreationCacheControl() {
+        return pipelineCreationCacheControl;
+    }
+
+    public boolean isPrivateData() {
+        return privateData;
+    }
+
+    public boolean isShaderDemoteToHelperInvocation() {
+        return shaderDemoteToHelperInvocation;
+    }
+
+    public boolean isShaderTerminateInvocation() {
+        return shaderTerminateInvocation;
+    }
+
+    public boolean isSubgroupSizeControl() {
+        return subgroupSizeControl;
+    }
+
+    public boolean isComputeFullSubgroups() {
+        return computeFullSubgroups;
+    }
+
+    public boolean isSynchronization2() {
+        return synchronization2;
+    }
+
+    public boolean isTextureCompressionASTC_HDR() {
+        return textureCompressionASTC_HDR;
+    }
+
+    public boolean isShaderZeroInitializeWorkgroupMemory() {
+        return shaderZeroInitializeWorkgroupMemory;
+    }
+
+    public boolean isDynamicRendering() {
+        return dynamicRendering;
+    }
+
+    public boolean isShaderIntegerDotProduct() {
+        return shaderIntegerDotProduct;
+    }
+
+    public boolean isMaintenance4() {
+        return maintenance4;
+    }
 
 
     public void printSummary() {
@@ -821,12 +1356,18 @@ public class VulkanDeviceCapabilities {
 
     private String getDeviceTypeString(int deviceType) {
         switch (deviceType) {
-            case VK_PHYSICAL_DEVICE_TYPE_OTHER: return "Other";
-            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: return "Integrated GPU";
-            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: return "Discrete GPU";
-            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: return "Virtual GPU";
-            case VK_PHYSICAL_DEVICE_TYPE_CPU: return "CPU";
-            default: return "Unknown (" + deviceType + ")";
+            case VK_PHYSICAL_DEVICE_TYPE_OTHER:
+                return "Other";
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+                return "Integrated GPU";
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+                return "Discrete GPU";
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+                return "Virtual GPU";
+            case VK_PHYSICAL_DEVICE_TYPE_CPU:
+                return "CPU";
+            default:
+                return "Unknown (" + deviceType + ")";
         }
     }
 

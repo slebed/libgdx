@@ -18,7 +18,7 @@ import static org.lwjgl.vulkan.VK10.*;
 
 public class VulkanTextureBatch implements Disposable {
     private static final String TAG = "VulkanTextureBatch";
-    private static final boolean DEBUG = true;
+    private static final boolean DEBUG = false;
 
     private final VulkanDescriptorManager descriptorManager;
     private final VkDevice rawDevice;

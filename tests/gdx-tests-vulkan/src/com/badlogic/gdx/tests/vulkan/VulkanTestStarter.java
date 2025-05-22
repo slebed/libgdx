@@ -254,7 +254,7 @@ public class VulkanTestStarter {
                 Gdx.app.error("VulkanTestChooser", "Could not get primary/current window reference to position new window.");
             }
 
-            winConfig.setPresentMode(VulkanApplicationConfiguration.SwapchainPresentMode.MAILBOX);
+            winConfig.setPresentMode(VulkanApplicationConfiguration.SwapchainPresentMode.IMMEDIATE);
             Gdx.app.log("VulkanTestChooser", "Setting present mode for '" + testName + "' to: " + winConfig.getPresentMode());
 
             app.newWindow(new GdxTestWrapper(test, options.logGLErrors), winConfig);

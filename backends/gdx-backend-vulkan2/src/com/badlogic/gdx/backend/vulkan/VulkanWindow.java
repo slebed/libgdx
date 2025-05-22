@@ -119,7 +119,7 @@ import com.badlogic.gdx.utils.SharedLibraryLoader;
 
 public class VulkanWindow implements Disposable {
     private static final String TAG = "VulkanWindow";
-    private static final boolean debug = true;
+    private static final boolean debug = false;
 
     private final VulkanGraphics vulkanGraphics;
     private long windowHandle;

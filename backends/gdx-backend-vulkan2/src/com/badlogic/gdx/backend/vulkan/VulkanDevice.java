@@ -58,7 +58,7 @@ class VkDeviceHandle { // This class might not be used if VulkanDevice directly 
  */
 public class VulkanDevice {
     private static final String TAG = VulkanDevice.class.getSimpleName();
-    private static final boolean debug = true; // Or from a shared config
+    private static final boolean debug = false; // Or from a shared config
 
     private final VkDevice logicalDevice; // LWJGL's wrapper for the Vulkan logical device
     private final VkQueue graphicsQueue;

@@ -224,13 +224,11 @@ public class VulkanApplication implements VulkanApplicationBase {
             this.primarySurface = pSurface.get(0);
             if (debug) Gdx.app.log(TAG, "Window Surface created for handle: " + windowHandle + ", surface: " + this.primarySurface);
 
-
             this.physicalDevice = selectPhysicalDevice(stack);
             if (this.physicalDevice == null) { // Added null check
                 throw new GdxRuntimeException("Failed to select a suitable Vulkan physical device.");
             }
             if (debug) Gdx.app.log(TAG, "Physical Device selected: " + this.physicalDevice.address());
-
 
             // Instantiate and log device capabilities
             this.deviceCapabilities = new VulkanDeviceCapabilities(this.physicalDevice);
@@ -250,7 +248,6 @@ public class VulkanApplication implements VulkanApplicationBase {
                 this.deviceCapabilities.printSummary(); // For full details if needed
                 Gdx.app.log(TAG, "----------------------------------");
             }
-
 
             QueueFamilyIndices indices = findQueueFamilies(physicalDevice, stack);
             if (!indices.isComplete()) {

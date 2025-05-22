@@ -25,7 +25,7 @@ import static org.lwjgl.vulkan.VK10.*;
 // Disposable might be better than VkResource if it's a libGDX convention
 public class VulkanSwapchain implements Disposable {
     private final String TAG = "VulkanSwapchain";
-    private static final boolean debug = true;
+    private static final boolean debug = false;
 
     private final VulkanDevice device;
     private final VkPhysicalDevice physicalDevice;

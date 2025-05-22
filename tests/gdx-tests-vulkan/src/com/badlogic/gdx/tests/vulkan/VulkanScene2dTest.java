@@ -43,7 +43,7 @@ import com.badlogic.gdx.utils.viewport.Viewport;
 
 import org.lwjgl.vulkan.VK10;
 
-public class Scene2dTest extends GdxTest {
+public class VulkanScene2dTest extends GdxTest {
     private static final String TAG = "Scene2dTest";
     private AssetManager assetManager;
     private VulkanStage testStage;
