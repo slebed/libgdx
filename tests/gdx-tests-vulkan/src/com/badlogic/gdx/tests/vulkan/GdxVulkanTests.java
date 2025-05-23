@@ -56,7 +56,7 @@ public class GdxVulkanTests {
         // Create a temporary list using Arrays.asList (this list might be fixed-size)
         List<Class<? extends GdxTest>> initialTests = Arrays.asList(
                 // @off
-                VulkanClearScreenTest.class,
+                //VulkanClearScreenTest.class,
                 VulkanScene2dTest.class,
                 VulkanSpriteBatchPerformanceTest.class,
                 VulkanSpriteBatchPerformanceTest2.class,
@@ -103,8 +103,9 @@ public class GdxVulkanTests {
 
     public static List<String> getNames() {
         List<String> names = new ArrayList<>(tests.size());
-        for (Class clazz : tests)
+        for (Class clazz : tests) {
             names.add(obfuscatedToOriginal.get(clazz.getSimpleName(), clazz.getSimpleName()));
+        }
         Collections.sort(names);
         return names;
     }

@@ -49,7 +49,7 @@ public class VulkanTestStarter {
 
         VulkanDebugLogger.enableAll();
 
-        ApplicationListener listenerToStart = null;
+        ApplicationListener listenerToStart;
         String testName = options.startupTestName;
 
         if (testName != null) {
@@ -71,10 +71,7 @@ public class VulkanTestStarter {
                 }
             } else {
                 System.err.println("ERROR: Vulkan test specified via argument not found: " + testName);
-                // Optionally list available tests if GdxVulkanTests provides a way
-                // System.err.println("Available Vulkan tests: " + GdxVulkanTests.getNames());
                 System.err.println("Falling back to Test Chooser.");
-                // listenerToStart remains null, chooser will be launched
             }
         }
 
@@ -84,10 +81,8 @@ public class VulkanTestStarter {
                 new VulkanApplication(test, vkConfig);
                 return;
             }
-            // Otherwise, fall back to showing the list
         }
         new VulkanApplication(new VulkanTestChooser(), vkConfig);
-        //new VulkanApplication(new Scene2dTest(), vkConfig);
     }
 
     static class VulkanTestChooser extends ApplicationAdapter {

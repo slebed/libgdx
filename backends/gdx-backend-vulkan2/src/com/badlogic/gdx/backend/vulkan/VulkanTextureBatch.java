@@ -10,6 +10,7 @@ import com.badlogic.gdx.utils.ObjectIntMap;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDevice;
+
 import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -35,8 +36,7 @@ public class VulkanTextureBatch implements Disposable {
 
     private final int maxTexturesInLayout;
     private long activeFrameDescriptorSet = VK_NULL_HANDLE;
-    // This flag tracks if activeFrameDescriptorSet has been fully populated (UBO + Textures)
-    // for the current SpriteBatch.begin() to SpriteBatch.end() cycle.
+
     private boolean activeFrameSetPopulated;
 
     public VulkanTextureBatch(VulkanDescriptorManager descriptorManager, int maxTextures, VulkanGraphics gfx) {
@@ -90,8 +90,7 @@ public class VulkanTextureBatch implements Disposable {
             // Initialize all texture array slots (binding 1) in the new descriptor set with the defaultTexture.
             // Binding 0 (UBO) will be updated just before first use in a frame.
             for (int slot = 0; slot < maxTexturesInLayout; slot++) {
-                VulkanDescriptorManager.updateCombinedImageSampler(rawDevice, frameDescriptorSets[i], 1, slot,
-                        defaultTexture.getImageViewHandle(), defaultTexture.getSamplerHandle());
+                VulkanDescriptorManager.updateCombinedImageSampler(rawDevice, frameDescriptorSets[i], 1, slot, defaultTexture.getImageViewHandle(), defaultTexture.getSamplerHandle());
             }
             if (DEBUG) Gdx.app.log(TAG, "Allocated and initialized DescriptorSet[" + i + "]: " + frameDescriptorSets[i] + " with default textures.");
         }
@@ -137,7 +136,8 @@ public class VulkanTextureBatch implements Disposable {
         // Adding a new texture means the set *might* need an update if it hasn't been populated yet
         // for this begin/end cycle. activeFrameSetPopulated handles this in buildAndBind.
         // No need to change activeFrameSetPopulated here.
-        if (DEBUG) Gdx.app.debug(TAG, "Added unique texture '" + (texture.getFilePath() != null ? texture.getFilePath() : "PixmapTex") + "' to current cycle, assigned slot: " + assignedIndex);
+        if (DEBUG)
+            Gdx.app.debug(TAG, "Added unique texture '" + (texture.getFilePath() != null ? texture.getFilePath() : "PixmapTex") + "' to current cycle, assigned slot: " + assignedIndex);
         return assignedIndex;
     }
 
@@ -153,8 +153,7 @@ public class VulkanTextureBatch implements Disposable {
 
             // 1. Update UBO (Binding 0)
             if (projMatrixUbo != null && projMatrixUbo.getBufferHandle() != VK_NULL_HANDLE) {
-                VulkanDescriptorManager.updateUniformBuffer(rawDevice, activeFrameDescriptorSet, 0,
-                        projMatrixUbo.getBufferHandle(), projMatrixUbo.getOffset(), projMatrixUbo.getSize());
+                VulkanDescriptorManager.updateUniformBuffer(rawDevice, activeFrameDescriptorSet, 0, projMatrixUbo.getBufferHandle(), projMatrixUbo.getOffset(), projMatrixUbo.getSize());
             } else {
                 Gdx.app.error(TAG, "Projection Matrix UBO is null or invalid during DS population.");
             }
@@ -185,8 +184,7 @@ public class VulkanTextureBatch implements Disposable {
             // effectively, or if shaders might sample outside the range of uniqueTexturesForCurrentDrawCycle.size.
             // This was already done during allocateDescriptorSets, so it's a "top-up".
             for (int i = uniqueTexturesForCurrentDrawCycle.size; i < maxTexturesInLayout; i++) {
-                VulkanDescriptorManager.updateCombinedImageSampler(rawDevice, activeFrameDescriptorSet, 1, i,
-                        defaultTexture.getImageViewHandle(), defaultTexture.getSamplerHandle());
+                VulkanDescriptorManager.updateCombinedImageSampler(rawDevice, activeFrameDescriptorSet, 1, i, defaultTexture.getImageViewHandle(), defaultTexture.getSamplerHandle());
             }
 
             activeFrameSetPopulated = true; // Mark as fully populated for this begin/end cycle
@@ -199,8 +197,7 @@ public class VulkanTextureBatch implements Disposable {
 
         // 3. Bind the descriptor set (now correctly populated for this entire begin/end cycle)
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
-                    0, stack.longs(activeFrameDescriptorSet), null);
+            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, stack.longs(activeFrameDescriptorSet), null);
         }
     }
 
