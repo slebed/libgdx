@@ -16,11 +16,47 @@
 
 package com.badlogic.gdx.backend.vulkan;
 
+import static com.badlogic.gdx.backend.vulkan.VulkanMesh.getVkFormat;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16B16A16_SINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16B16A16_SNORM;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16B16A16_UINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16B16A16_UNORM;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16_SINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16_SNORM;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16_UINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16G16_UNORM;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16_SINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16_SNORM;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16_UINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R16_UNORM;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R32G32B32A32_SFLOAT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R32G32B32_SFLOAT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R32G32_SFLOAT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R32_SFLOAT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8G8B8A8_SINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8G8B8A8_SNORM;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8G8B8A8_UINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8G8B8A8_UNORM;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8G8B8_UINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8G8B8_UNORM;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8G8_SINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8G8_SNORM;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8G8_UINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8G8_UNORM;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8_SINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8_SNORM;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8_UINT;
+import static org.lwjgl.vulkan.VK10.VK_FORMAT_R8_UNORM;
+import static org.lwjgl.vulkan.VK10.VK_VERTEX_INPUT_RATE_VERTEX;
+
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
 import com.badlogic.gdx.utils.Collections;
 import com.badlogic.gdx.utils.GdxRuntimeException;
+
+import org.lwjgl.vulkan.VkVertexInputAttributeDescription;
+import org.lwjgl.vulkan.VkVertexInputBindingDescription;
 
 /** Instances of this class specify the vertex attributes of a mesh. VertexAttributes are used by {@link VulkanMesh} instances to define
  * its vertex structure. Vertex attributes have an order. The order is specified by the order they are added to this class.
@@ -59,6 +95,9 @@ public final class VulkanVertexAttributes implements Iterable<VulkanVertexAttrib
 
     private ReadonlyIterable<VulkanVertexAttribute> iterable;
 
+    private VkVertexInputBindingDescription.Buffer bindingDescription;
+    private VkVertexInputAttributeDescription.Buffer attributeDescriptions;
+
     /** Constructor, sets the vertex attributes in a specific order */
     public VulkanVertexAttributes (VulkanVertexAttribute... attributes) {
         if (attributes.length == 0) throw new IllegalArgumentException("attributes must be >= 1");
@@ -69,6 +108,7 @@ public final class VulkanVertexAttributes implements Iterable<VulkanVertexAttrib
 
         this.attributes = list;
         vertexSize = calculateOffsets();
+        generateVertexInputDescriptions();
     }
 
     /** Returns the offset for the first VertexAttribute with the specified usage.
@@ -83,6 +123,62 @@ public final class VulkanVertexAttributes implements Iterable<VulkanVertexAttrib
      * @param usage The usage of the VertexAttribute. */
     public int getOffset (int usage) {
         return getOffset(usage, 0);
+    }
+
+    /**
+     * Helper method to convert a {@link VulkanVertexAttribute} (which uses GL-style types)
+     * to a Vulkan {@code VkFormat}.
+     * @param attribute The VulkanVertexAttribute to convert.
+     * @return The corresponding VkFormat.
+     */
+    public static int getVkFormat(VulkanVertexAttribute attribute) {
+        int numComponents = attribute.numComponents;
+        boolean normalized = attribute.normalized;
+        int type = attribute.type; // Uses constants like VulkanVertexAttribute.GL_FLOAT
+
+        // Map GL types to VkFormat based on numComponents and normalization
+        if (type == VulkanVertexAttribute.GL_FLOAT) {
+            switch (numComponents) {
+                case 1: return VK_FORMAT_R32_SFLOAT;
+                case 2: return VK_FORMAT_R32G32_SFLOAT;
+                case 3: return VK_FORMAT_R32G32B32_SFLOAT;
+                case 4: return VK_FORMAT_R32G32B32A32_SFLOAT;
+            }
+        } else if (type == VulkanVertexAttribute.GL_UNSIGNED_BYTE) {
+            // For Usage.ColorPacked, numComponents is 4, type is GL_UNSIGNED_BYTE, normalized is true.
+            // This maps to VK_FORMAT_R8G8B8A8_UNORM.
+            if (attribute.usage == Usage.ColorPacked && numComponents == 4 && normalized) {
+                return VK_FORMAT_R8G8B8A8_UNORM;
+            }
+            // General cases for unsigned byte
+            if (numComponents == 4) return normalized ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8G8B8A8_UINT;
+            if (numComponents == 3) return normalized ? VK_FORMAT_R8G8B8_UNORM : VK_FORMAT_R8G8B8_UINT; // Check device support for R8G8B8
+            if (numComponents == 2) return normalized ? VK_FORMAT_R8G8_UNORM : VK_FORMAT_R8G8_UINT;
+            if (numComponents == 1) return normalized ? VK_FORMAT_R8_UNORM : VK_FORMAT_R8_UINT;
+        } else if (type == VulkanVertexAttribute.GL_BYTE) {
+            if (numComponents == 4) return normalized ? VK_FORMAT_R8G8B8A8_SNORM : VK_FORMAT_R8G8B8A8_SINT;
+            if (numComponents == 2) return normalized ? VK_FORMAT_R8G8_SNORM : VK_FORMAT_R8G8_SINT;
+            if (numComponents == 1) return normalized ? VK_FORMAT_R8_SNORM : VK_FORMAT_R8_SINT;
+        } else if (type == VulkanVertexAttribute.GL_UNSIGNED_SHORT) {
+            if (numComponents == 4) return normalized ? VK_FORMAT_R16G16B16A16_UNORM : VK_FORMAT_R16G16B16A16_UINT;
+            if (numComponents == 2) return normalized ? VK_FORMAT_R16G16_UNORM : VK_FORMAT_R16G16_UINT;
+            if (numComponents == 1) return normalized ? VK_FORMAT_R16_UNORM : VK_FORMAT_R16_UINT;
+        } else if (type == VulkanVertexAttribute.GL_SHORT) {
+            if (numComponents == 4) return normalized ? VK_FORMAT_R16G16B16A16_SNORM : VK_FORMAT_R16G16B16A16_SINT;
+            if (numComponents == 2) return normalized ? VK_FORMAT_R16G16_SNORM : VK_FORMAT_R16G16_SINT;
+            if (numComponents == 1) return normalized ? VK_FORMAT_R16_SNORM : VK_FORMAT_R16_SINT;
+        } else if (type == VulkanVertexAttribute.GL_FIXED) {
+            // GL_FIXED is 16.16 fixed point. Vulkan doesn't have direct 16.16 formats.
+            // Often, this data is pre-converted to float on CPU, or handled as SINT if shaders can interpret it.
+            // If treated as 32-bit data that shaders unpack or if pre-converted to float:
+            if (numComponents == 1) return VK_FORMAT_R32_SFLOAT; // Or VK_FORMAT_R32_SINT if shader handles fixed point
+            if (numComponents == 2) return VK_FORMAT_R32G32_SFLOAT;
+            if (numComponents == 3) return VK_FORMAT_R32G32B32_SFLOAT;
+            if (numComponents == 4) return VK_FORMAT_R32G32B32A32_SFLOAT;
+        }
+
+        throw new GdxRuntimeException("Unsupported VulkanVertexAttribute for VkFormat: alias=" + attribute.alias +
+                ", numComponents=" + numComponents + ", type=0x" + Integer.toHexString(type) + ", normalized=" + normalized);
     }
 
     /** Returns the first VertexAttribute for the given usage.
@@ -149,7 +245,7 @@ public final class VulkanVertexAttributes implements Iterable<VulkanVertexAttrib
 
     @Override
     public int hashCode () {
-        long result = 61 * attributes.length;
+        long result = 61L * attributes.length;
         for (int i = 0; i < attributes.length; i++)
             result = result * 61 + attributes[i].hashCode();
         return (int)(result ^ (result >> 32));
@@ -167,6 +263,56 @@ public final class VulkanVertexAttributes implements Iterable<VulkanVertexAttrib
             mask = result;
         }
         return mask;
+    }
+
+    /**
+     * Generates the Vulkan vertex input binding and attribute descriptions.
+     * This is called by the constructor after offsets are calculated.
+     */
+    private void generateVertexInputDescriptions() {
+        // Free previous descriptions if they exist (e.g., if this method could be called multiple times)
+        if (this.bindingDescription != null) this.bindingDescription.free();
+        if (this.attributeDescriptions != null) this.attributeDescriptions.free();
+
+        // Create Binding Description (assuming interleaved vertex data in a single buffer binding 0)
+        // These need to be heap allocated as they are returned by getters.
+        this.bindingDescription = VkVertexInputBindingDescription.calloc(1);
+        this.bindingDescription.get(0)
+                .binding(0) // Binding index for the vertex buffer
+                .stride(this.vertexSize) // Stride: size of one complete vertex in bytes
+                .inputRate(VK_VERTEX_INPUT_RATE_VERTEX); // Per-vertex data (not per-instance)
+
+        // Create Attribute Descriptions
+        this.attributeDescriptions = VkVertexInputAttributeDescription.calloc(this.attributes.length);
+        for (int i = 0; i < this.attributes.length; i++) {
+            VulkanVertexAttribute attribute = this.attributes[i];
+            if (attribute.location < 0) { // Ensure location was set
+                throw new GdxRuntimeException("VulkanVertexAttribute '" + attribute.alias +
+                        "' has an invalid shader location (" + attribute.location +
+                        "). Explicit location is required for Vulkan.");
+            }
+            this.attributeDescriptions.get(i)
+                    .binding(0) // Corresponding to the binding index above
+                    .location(attribute.location) // Shader input location
+                    .format(getVkFormat(attribute)) // Convert to VkFormat
+                    .offset(attribute.offset); // Offset within the vertex structure
+        }
+    }
+
+    /**
+     * @return The {@link VkVertexInputBindingDescription.Buffer} for this set of attributes.
+     * The caller should NOT free this buffer; it's managed by this class.
+     */
+    public VkVertexInputBindingDescription.Buffer getBindingDescription() {
+        return this.bindingDescription;
+    }
+
+    /**
+     * @return The {@link VkVertexInputAttributeDescription.Buffer} for this set of attributes.
+     * The caller should NOT free this buffer; it's managed by this class.
+     */
+    public VkVertexInputAttributeDescription.Buffer getAttributeDescriptions() {
+        return this.attributeDescriptions;
     }
 
     /** Calculates the mask based on {@link VulkanVertexAttributes#getMask()} and packs the attributes count into the last 32 bits.

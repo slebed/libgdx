@@ -2,6 +2,7 @@ package com.badlogic.gdx.backend.vulkan; // Your package
 
 // Your VulkanVertexAttribute and VulkanVertexAttributes are in this package.
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import org.lwjgl.PointerBuffer;
@@ -33,6 +34,15 @@ public class VulkanMesh implements Disposable {
 	// These will be heap-allocated as they need to persist
 	private VkVertexInputBindingDescription.Buffer bindingDescription;
 	private VkVertexInputAttributeDescription.Buffer attributeDescriptions;
+
+	public VulkanMesh(){
+		VulkanApplication vulkanApp = (VulkanApplication) Gdx.app;
+        this.vulkanDevice = vulkanApp.getVulkanDevice();
+		this.vertexBufferHandle = VK_NULL_HANDLE;
+		this.vertexBufferMemoryHandle = VK_NULL_HANDLE;
+		this.indexBufferHandle = VK_NULL_HANDLE;
+		this.indexBufferMemoryHandle = VK_NULL_HANDLE;
+	}
 
 	public VulkanMesh(VulkanDevice vulkanDevice) {
 		this.vulkanDevice = vulkanDevice;
@@ -331,6 +341,14 @@ public class VulkanMesh implements Disposable {
 			generateVertexInputDescriptions();
 		}
 		return attributeDescriptions;
+	}
+
+	/**
+	 * Returns the {@link VulkanVertexAttributes} instance defining the structure of this mesh's vertices.
+	 * @return The VulkanVertexAttributes for this mesh, or null if not set.
+	 */
+	public VulkanVertexAttributes getVulkanVertexAttributes() {
+		return this.vulkanVertexAttributes;
 	}
 
 	@Override

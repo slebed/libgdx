@@ -757,7 +757,7 @@ public class VulkanApplication implements VulkanApplicationBase {
 
         if (vulkanDevice != null) {
             if (debug) Gdx.app.log(TAG, "Cleaning up VulkanDevice..."); // Changed from System.out
-            vulkanDevice.cleanup();
+            vulkanDevice.dispose();
             if (debug) Gdx.app.log(TAG, "VulkanDevice cleanup finished."); // Changed from System.out
             vulkanDevice = null;
         }

@@ -151,7 +151,7 @@ public class Vulkan3DCubeTest extends GdxTest {
 
         VulkanVertexAttributes attributes = new VulkanVertexAttributes(posAttr, texCoordAttr);
 
-        cubeMesh = new VulkanMesh(vulkanDevice);
+        cubeMesh = new VulkanMesh();
         cubeMesh.setVertices(vertices, attributes);
         cubeMesh.setIndices(indices);
     }

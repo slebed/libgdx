@@ -9,10 +9,9 @@ import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Consumer; // For executeSingleTimeCommands in VulkanDevice
+import java.util.function.Consumer;
 
 import static org.lwjgl.system.MemoryStack.stackPush;
-// Make sure all necessary static imports for Vulkan constants (VK_...) are present
 import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.vulkan.EXTDescriptorIndexing.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
 import static org.lwjgl.vulkan.KHRSwapchain.VK_KHR_SWAPCHAIN_EXTENSION_NAME;
@@ -23,68 +22,29 @@ import static org.lwjgl.vulkan.VK12.*;
 import static org.lwjgl.vulkan.VK13.*;
 
 
-import com.badlogic.gdx.Gdx; // For logging
-import com.badlogic.gdx.utils.GdxRuntimeException; // For exceptions
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.utils.Disposable;
+import com.badlogic.gdx.utils.GdxRuntimeException;
 
-// Assuming VulkanDeviceCapabilities is in the same package or imported correctly.
-
-/**
- * Placeholder for LibGDX's VkDeviceHandle if it's a custom class.
- * This is based on the error messages encountered. If LibGDX uses
- * org.lwjgl.vulkan.VkDevice directly, this custom class might not be needed,
- * and VulkanDevice would store and use org.lwjgl.vulkan.VkDevice directly.
- */
-class VkDeviceHandle { // This class might not be used if VulkanDevice directly uses org.lwjgl.vulkan.VkDevice
-    public final long handle;
-    public final VkPhysicalDevice physicalDevice;
-    public final VkDeviceCreateInfo createInfo; // Or relevant parts of it
-
-    public VkDeviceHandle(long handle, VkPhysicalDevice physicalDevice, VkDeviceCreateInfo createInfo) {
-        this.handle = handle;
-        this.physicalDevice = physicalDevice;
-        // Caution: createInfo might be stack-allocated when this is called.
-        // If VkDeviceHandle is long-lived, createInfo should be deep-copied or relevant data extracted.
-        this.createInfo = createInfo;
-    }
-
-    public long getHandle() {
-        return handle;
-    }
-}
-
-/**
- * Represents a Vulkan logical device, its associated queues, and command pool.
- * This class is responsible for the creation and management of these core Vulkan objects.
- */
-public class VulkanDevice {
+public class VulkanDevice implements Disposable {
     private static final String TAG = VulkanDevice.class.getSimpleName();
     private static final boolean debug = false; // Or from a shared config
 
-    private final VkDevice logicalDevice; // LWJGL's wrapper for the Vulkan logical device
+    private final VkDevice logicalDevice; // This is the primary LWJGL VkDevice object
     private final VkQueue graphicsQueue;
     private final VkQueue presentQueue;
     private final VkPhysicalDevice physicalDevice;
-    private final long commandPool;
+    private long commandPool; // Should be final if not recreated
     private final int graphicsQueueFamilyIndex;
     private final int presentQueueFamilyIndex;
-    private final VulkanDeviceCapabilities capabilities; // Store capabilities for later reference
+    private final VulkanDeviceCapabilities capabilities;
 
-    /**
-     * Constructs a VulkanDevice.
-     *
-     * @param logicalDevice The LWJGL VkDevice object representing the created logical device.
-     * @param graphicsQueue The graphics queue.
-     * @param presentQueue The presentation queue.
-     * @param physicalDevice The physical device from which this logical device was created.
-     * @param commandPool The command pool associated with the graphics queue.
-     * @param graphicsQueueFamilyIndex The index of the graphics queue family.
-     * @param presentQueueFamilyIndex The index of the presentation queue family.
-     * @param capabilities The capabilities of the physical device, used for creating this logical device.
-     */
+    private boolean isDisposed = false;
+
     public VulkanDevice(VkDevice logicalDevice, VkQueue graphicsQueue, VkQueue presentQueue,
                         VkPhysicalDevice physicalDevice, long commandPool,
                         int graphicsQueueFamilyIndex, int presentQueueFamilyIndex,
-                        VulkanDeviceCapabilities capabilities) { // Added capabilities
+                        VulkanDeviceCapabilities capabilities) {
         this.logicalDevice = logicalDevice;
         this.graphicsQueue = graphicsQueue;
         this.presentQueue = presentQueue;
@@ -92,7 +52,7 @@ public class VulkanDevice {
         this.commandPool = commandPool;
         this.graphicsQueueFamilyIndex = graphicsQueueFamilyIndex;
         this.presentQueueFamilyIndex = presentQueueFamilyIndex;
-        this.capabilities = capabilities; // Store capabilities
+        this.capabilities = capabilities;
         if (debug && Gdx.app != null) Gdx.app.log(TAG, "VulkanDevice created. Graphics Queue: " + graphicsQueue.address() + ", Present Queue: " + presentQueue.address());
     }
 
@@ -100,13 +60,19 @@ public class VulkanDevice {
         return this.logicalDevice;
     }
 
-    public VkDevice getRawDevice() { // Alias for consistency if used elsewhere
+    /**
+     * @deprecated Use getLogicalDevice().address() if you need the raw long handle.
+     * getRawDevice() returning VkDevice might be confusing.
+     */
+    @Deprecated
+    public VkDevice getRawDevice() {
         return getLogicalDevice();
     }
 
     public long getRawDeviceHandle() {
-        if (this.logicalDevice == null) return 0L;
-        return this.logicalDevice.address();
+        // The actual Vulkan handle is obtained via address() on the LWJGL VkDevice object
+        if (this.logicalDevice == null) return 0L; // Or VK_NULL_HANDLE directly if it's defined as 0L
+        return this.logicalDevice.address(); // Corrected: use address()
     }
 
     public VkPhysicalDevice getPhysicalDevice() {
@@ -133,13 +99,28 @@ public class VulkanDevice {
         return presentQueueFamilyIndex;
     }
 
-    public VulkanDeviceCapabilities getCapabilities() { // Getter for stored capabilities
+    public VulkanDeviceCapabilities getCapabilities() {
         return capabilities;
     }
 
+    /**
+     * Checks if the Vulkan logical device is considered available for operations.
+     * This means the device has been created and not yet disposed.
+     *
+     * @return true if the logical device is available, false otherwise.
+     */
+    public boolean isDeviceAvailable() {
+        if (isDisposed) {
+            return false;
+        }
+        // Check if the logicalDevice object exists and its underlying Vulkan handle is valid
+        // logicalDevice.address() is the correct LWJGL method.
+        return this.logicalDevice != null && this.logicalDevice.address() != VK_NULL_HANDLE; // Corrected: use address()
+    }
+
     public void executeSingleTimeCommands(Consumer<VkCommandBuffer> commands) {
-        if (logicalDevice == null || graphicsQueue == null || commandPool == VK_NULL_HANDLE) {
-            if (Gdx.app != null) Gdx.app.error(TAG, "Cannot execute single time commands: device, queue, or command pool is not initialized.");
+        if (!isDeviceAvailable() || graphicsQueue == null || commandPool == VK_NULL_HANDLE) {
+            if (Gdx.app != null) Gdx.app.error(TAG, "Cannot execute single time commands: device, queue, or command pool is not initialized or device is disposed.");
             return;
         }
         try (MemoryStack stack = stackPush()) {
@@ -162,14 +143,14 @@ public class VulkanDevice {
                     .sType(VK_STRUCTURE_TYPE_SUBMIT_INFO)
                     .pCommandBuffers(stack.pointers(commandBuffer));
             vkQueueSubmit(graphicsQueue, submitInfo, VK_NULL_HANDLE);
-            vkQueueWaitIdle(graphicsQueue);
+            vkQueueWaitIdle(graphicsQueue); // Ensure command completes
             vkFreeCommandBuffers(logicalDevice, commandPool, commandBuffer);
         }
     }
 
     public static void transitionImageLayoutCmd(VulkanDevice device, long image, int format, int oldLayout, int newLayout) {
-        if (device == null) {
-            if (Gdx.app != null) Gdx.app.error(TAG, "VulkanDevice is null in transitionImageLayoutCmd");
+        if (device == null || !device.isDeviceAvailable()) {
+            if (Gdx.app != null) Gdx.app.error(TAG, "VulkanDevice is null or not available in transitionImageLayoutCmd");
             return;
         }
         device.executeSingleTimeCommands(commandBuffer -> {
@@ -202,7 +183,7 @@ public class VulkanDevice {
                     if (Gdx.app != null) Gdx.app.error(TAG, "Unsupported layout transition: " + oldLayout + " to " + newLayout);
                     barrier.srcAccessMask(VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT)
                             .dstAccessMask(VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
-                    barrier.subresourceRange().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT); // Default, might be wrong
+                    barrier.subresourceRange().aspectMask(VK_IMAGE_ASPECT_COLOR_BIT);
                     sourceStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
                     destinationStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
                 }
@@ -211,23 +192,30 @@ public class VulkanDevice {
         });
     }
 
-    public void cleanup() {
+    private void cleanupInternal() {
         if (debug && Gdx.app != null) Gdx.app.log(TAG, "Cleaning up VulkanDevice resources...");
+
         if (commandPool != VK_NULL_HANDLE) {
-            if (logicalDevice == null) {
-                if (debug && Gdx.app != null) Gdx.app.error(TAG, "Cannot destroy command pool, logicalDevice is null.");
+            // Use isDeviceAvailable() or check logicalDevice and its handle before using it
+            if (!isDeviceAvailable()) {
+                if (debug && Gdx.app != null) Gdx.app.error(TAG, "Cannot destroy command pool, logicalDevice is not valid.");
             } else {
                 vkDestroyCommandPool(logicalDevice, commandPool, null);
                 if (debug && Gdx.app != null) Gdx.app.log(TAG, "Command pool destroyed.");
             }
+            commandPool = VK_NULL_HANDLE;
         }
-        if (logicalDevice != null) {
-            vkDestroyDevice(logicalDevice, null);
-            if (debug && Gdx.app != null) Gdx.app.log(TAG, "Logical device destroyed.");
-        } else {
-            if (debug && Gdx.app != null) Gdx.app.log(TAG, "Logical device was already null, no destruction needed.");
+        if (debug && Gdx.app != null) Gdx.app.log(TAG, "VulkanDevice internal cleanup finished.");
+    }
+
+    @Override
+    public void dispose() {
+        if (isDisposed) {
+            return;
         }
-        if (debug && Gdx.app != null) Gdx.app.log(TAG, "VulkanDevice cleanup finished.");
+        cleanupInternal();
+        isDisposed = true;
+        if (debug && Gdx.app != null) Gdx.app.log(TAG, "VulkanDevice disposed (marked as unusable).");
     }
 
     public static class Builder {
@@ -235,8 +223,7 @@ public class VulkanDevice {
         private int graphicsQueueFamilyIndex = -1;
         private int presentQueueFamilyIndex = -1;
         private VulkanDeviceCapabilities capabilities;
-        // **** DIAGNOSTIC FLAG ****
-        private boolean temporarilyDisableMaintenance4 = true; // Set to true to test without enabling maintenance4
+        private boolean temporarilyDisableMaintenance4 = true;
 
         public Builder setPhysicalDevice(VkPhysicalDevice physicalDevice) {
             this.physicalDevice = physicalDevice;
@@ -258,7 +245,6 @@ public class VulkanDevice {
             return this;
         }
 
-        // Method to set the diagnostic flag
         public Builder setTemporarilyDisableMaintenance4(boolean disable) {
             this.temporarilyDisableMaintenance4 = disable;
             return this;
@@ -271,25 +257,6 @@ public class VulkanDevice {
             if (this.presentQueueFamilyIndex == -1) throw new IllegalStateException("Present queue family index must be set.");
 
             try (MemoryStack stack = stackPush()) {
-
-                if (debug && Gdx.app != null) {
-                    Gdx.app.log(TAG, "[DeviceBuilder] --- Capabilities Check ---");
-                    Gdx.app.log(TAG, "[DeviceBuilder] API Version from capabilities: " + capabilities.getApiVersion() + " (Target for 1.2 struct: " + VK_API_VERSION_1_2 + ")");
-                    Gdx.app.log(TAG, "[DeviceBuilder] capabilities.isSamplerAnisotropy(): " + capabilities.isSamplerAnisotropy());
-                    Gdx.app.log(TAG, "[DeviceBuilder] capabilities.isRuntimeDescriptorArray(): " + capabilities.isRuntimeDescriptorArray());
-                    Gdx.app.log(TAG, "[DeviceBuilder] capabilities.isShaderSampledImageArrayNonUniformIndexing(): " + capabilities.isShaderSampledImageArrayNonUniformIndexing());
-                    Gdx.app.log(TAG, "[DeviceBuilder] capabilities.isShaderStorageBufferArrayNonUniformIndexing(): " + capabilities.isShaderStorageBufferArrayNonUniformIndexing());
-                    Gdx.app.log(TAG, "[DeviceBuilder] capabilities.isDescriptorBindingPartiallyBound(): " + capabilities.isDescriptorBindingPartiallyBound());
-                    Gdx.app.log(TAG, "[DeviceBuilder] capabilities.isDescriptorBindingVariableDescriptorCount(): " + capabilities.isDescriptorBindingVariableDescriptorCount());
-                    Gdx.app.log(TAG, "[DeviceBuilder] capabilities.isScalarBlockLayout(): " + capabilities.isScalarBlockLayout());
-                    Gdx.app.log(TAG, "[DeviceBuilder] capabilities.isTimelineSemaphore(): " + capabilities.isTimelineSemaphore());
-                    Gdx.app.log(TAG, "[DeviceBuilder] capabilities.isBufferDeviceAddress(): " + capabilities.isBufferDeviceAddress());
-                    Gdx.app.log(TAG, "[DeviceBuilder] capabilities.isDynamicRendering(): " + capabilities.isDynamicRendering());
-                    Gdx.app.log(TAG, "[DeviceBuilder] capabilities.isSynchronization2(): " + capabilities.isSynchronization2());
-                    Gdx.app.log(TAG, "[DeviceBuilder] capabilities.isMaintenance4(): " + capabilities.isMaintenance4());
-                    Gdx.app.log(TAG, "[DeviceBuilder] --- End Capabilities Check ---");
-                }
-
                 FloatBuffer queuePriorities = stack.floats(1.0f);
                 VkDeviceQueueCreateInfo.Buffer queueCreateInfos;
                 java.util.Set<Integer> uniqueQueueFamilies = new java.util.HashSet<>();
@@ -305,19 +272,16 @@ public class VulkanDevice {
 
                 List<String> enabledExtensionsList = new ArrayList<>();
                 enabledExtensionsList.add(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-                /*if (capabilities.getApiVersion() < VK_API_VERSION_1_2 && capabilities.isDescriptorIndexingSupported() &&
-                        (capabilities.isRuntimeDescriptorArray() || capabilities.isShaderSampledImageArrayNonUniformIndexing() ||
-                                capabilities.isShaderStorageBufferArrayNonUniformIndexing() || capabilities.isDescriptorBindingPartiallyBound() ||
-                                capabilities.isDescriptorBindingVariableDescriptorCount())) {
+
+                // Enable VK_EXT_descriptor_indexing if API < 1.2 and capabilities indicate it's supported (via extension)
+                boolean enableDescriptorIndexingViaExtension = capabilities.getApiVersion() < VK_API_VERSION_1_2 &&
+                        capabilities.isDescriptorIndexingSupported(); // isDescriptorIndexingSupported will be true if ext was found
+
+                if (enableDescriptorIndexingViaExtension) {
                     enabledExtensionsList.add(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
                     if (debug && Gdx.app != null) Gdx.app.log(TAG, "Enabling device extension: " + VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
-                }*/
-                if (capabilities.isRuntimeDescriptorArray()
-                        || capabilities.isShaderSampledImageArrayNonUniformIndexing()
-                        || capabilities.isDescriptorBindingPartiallyBound()
-                        || capabilities.isDescriptorBindingVariableDescriptorCount()) {
-                    enabledExtensionsList.add(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
-                    if (debug) Gdx.app.log(TAG, "Enabling device extension: " + VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+                } else if (capabilities.getApiVersion() >= VK_API_VERSION_1_2 && capabilities.isDescriptorIndexingSupported()) {
+                    if (debug && Gdx.app != null) Gdx.app.log(TAG, "Descriptor Indexing features to be enabled via Vulkan 1.2 core features.");
                 }
 
                 PointerBuffer ppEnabledExtensionNames = null;
@@ -328,10 +292,19 @@ public class VulkanDevice {
                     }
                 }
 
-                VkPhysicalDeviceFeatures2 features2 = VkPhysicalDeviceFeatures2.calloc(stack).sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2).pNext(NULL);
-                if (capabilities.isSamplerAnisotropy()) features2.features().samplerAnisotropy(true);
-                if (capabilities.isGeometryShader()) features2.features().geometryShader(true);
-                // TODO: Add ALL other V1.0 features LibGDX typically enables, each guarded by a capabilities check.
+                VkPhysicalDeviceFeatures features0 = VkPhysicalDeviceFeatures.calloc(stack);
+                if (capabilities.isSamplerAnisotropy()) features0.samplerAnisotropy(true);
+                if (capabilities.isGeometryShader()) features0.geometryShader(true);
+                // ... Add other V1.0 features based on capabilities ...
+                if (capabilities.isShaderSampledImageArrayDynamicIndexing()) features0.shaderSampledImageArrayDynamicIndexing(true);
+                if (capabilities.isShaderStorageBufferArrayDynamicIndexing()) features0.shaderStorageBufferArrayDynamicIndexing(true);
+                if (capabilities.isShaderUniformBufferArrayDynamicIndexing()) features0.shaderUniformBufferArrayDynamicIndexing(true);
+                // ... etc for other V1.0 features from your capabilities class
+
+
+                VkPhysicalDeviceFeatures2 features2 = VkPhysicalDeviceFeatures2.calloc(stack)
+                        .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
+                        .features(features0);
 
                 long pNextChainHead = features2.address();
 
@@ -342,165 +315,97 @@ public class VulkanDevice {
                     if (capabilities.isVariablePointersStorageBuffer()) features11.variablePointersStorageBuffer(true);
                     if (capabilities.isVariablePointers()) features11.variablePointers(true);
                     if (capabilities.isShaderDrawParameters()) features11.shaderDrawParameters(true);
+                    // ... other 1.1 features from capabilities ...
                     MemoryUtil.memPutAddress(pNextChainHead + VkBaseOutStructure.PNEXT, features11.address());
                     pNextChainHead = features11.address();
                 }
 
-                boolean diFeaturesActuallyEnabled = false;
-                if (capabilities.getApiVersion() >= VK_API_VERSION_1_2) {
+                // Descriptor Indexing Features
+                if (capabilities.getApiVersion() >= VK_API_VERSION_1_2 && capabilities.isDescriptorIndexingSupported()) {
                     VkPhysicalDeviceVulkan12Features features12 = VkPhysicalDeviceVulkan12Features.calloc(stack)
                             .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES).pNext(NULL);
-                    if (debug && Gdx.app != null) Gdx.app.log(TAG, "[DeviceBuilder] Populating VkPhysicalDeviceVulkan12Features...");
 
-                    features12.descriptorIndexing(true);
-                    diFeaturesActuallyEnabled = true;
-                    if (debug && Gdx.app != null) Gdx.app.log(TAG, "[DeviceBuilder]   features12.descriptorIndexing = true");
+                    features12.descriptorIndexing(true); // Enable the main DI feature
+                    if (capabilities.isRuntimeDescriptorArray()) features12.runtimeDescriptorArray(true);
+                    if (capabilities.isShaderSampledImageArrayNonUniformIndexing()) features12.shaderSampledImageArrayNonUniformIndexing(true);
+                    if (capabilities.isShaderStorageBufferArrayNonUniformIndexing()) features12.shaderStorageBufferArrayNonUniformIndexing(true);
+                    if (capabilities.isDescriptorBindingPartiallyBound()) features12.descriptorBindingPartiallyBound(true);
+                    if (capabilities.isDescriptorBindingVariableDescriptorCount()) features12.descriptorBindingVariableDescriptorCount(true);
+                    if (capabilities.isShaderInputAttachmentArrayDynamicIndexing()) features12.shaderInputAttachmentArrayDynamicIndexing(true);
+                    if (capabilities.isShaderUniformTexelBufferArrayDynamicIndexing()) features12.shaderUniformTexelBufferArrayDynamicIndexing(true);
+                    if (capabilities.isShaderStorageTexelBufferArrayDynamicIndexing()) features12.shaderStorageTexelBufferArrayDynamicIndexing(true);
+                    if (capabilities.isShaderUniformBufferArrayNonUniformIndexing()) features12.shaderUniformBufferArrayNonUniformIndexing(true);
+                    if (capabilities.isShaderInputAttachmentArrayNonUniformIndexing()) features12.shaderInputAttachmentArrayNonUniformIndexing(true);
+                    if (capabilities.isShaderUniformTexelBufferArrayNonUniformIndexing()) features12.shaderUniformTexelBufferArrayNonUniformIndexing(true);
+                    if (capabilities.isShaderStorageTexelBufferArrayNonUniformIndexing()) features12.shaderStorageTexelBufferArrayNonUniformIndexing(true);
+                    if (capabilities.isDescriptorBindingUniformBufferUpdateAfterBind()) features12.descriptorBindingUniformBufferUpdateAfterBind(true);
+                    if (capabilities.isDescriptorBindingSampledImageUpdateAfterBind()) features12.descriptorBindingSampledImageUpdateAfterBind(true);
+                    if (capabilities.isDescriptorBindingStorageImageUpdateAfterBind()) features12.descriptorBindingStorageImageUpdateAfterBind(true);
+                    if (capabilities.isDescriptorBindingStorageBufferUpdateAfterBind()) features12.descriptorBindingStorageBufferUpdateAfterBind(true);
+                    if (capabilities.isDescriptorBindingUniformTexelBufferUpdateAfterBind()) features12.descriptorBindingUniformTexelBufferUpdateAfterBind(true);
+                    if (capabilities.isDescriptorBindingStorageTexelBufferUpdateAfterBind()) features12.descriptorBindingStorageTexelBufferUpdateAfterBind(true);
+                    if (capabilities.isDescriptorBindingUpdateUnusedWhilePending()) features12.descriptorBindingUpdateUnusedWhilePending(true);
 
-                    if (capabilities.isRuntimeDescriptorArray()) {
-                        features12.runtimeDescriptorArray(true);
-                        diFeaturesActuallyEnabled = true;
-                        if (debug && Gdx.app != null) Gdx.app.log(TAG, "[DeviceBuilder]   features12.runtimeDescriptorArray = true");
-                    }
-                    if (capabilities.isShaderSampledImageArrayNonUniformIndexing()) {
-                        features12.shaderSampledImageArrayNonUniformIndexing(true);
-                        diFeaturesActuallyEnabled = true;
-                        if (debug && Gdx.app != null) Gdx.app.log(TAG, "[DeviceBuilder]   features12.shaderSampledImageArrayNonUniformIndexing = true");
-                    }
-                    if (capabilities.isShaderStorageBufferArrayNonUniformIndexing()) {
-                        features12.shaderStorageBufferArrayNonUniformIndexing(true);
-                        diFeaturesActuallyEnabled = true;
-                        if (debug && Gdx.app != null) Gdx.app.log(TAG, "[DeviceBuilder]   features12.shaderStorageBufferArrayNonUniformIndexing = true");
-                    }
-                    if (capabilities.isDescriptorBindingPartiallyBound()) {
-                        features12.descriptorBindingPartiallyBound(true);
-                        diFeaturesActuallyEnabled = true;
-                        if (debug && Gdx.app != null) Gdx.app.log(TAG, "[DeviceBuilder]   features12.descriptorBindingPartiallyBound = true");
-                    }
-                    if (capabilities.isDescriptorBindingVariableDescriptorCount()) {
-                        features12.descriptorBindingVariableDescriptorCount(true);
-                        diFeaturesActuallyEnabled = true;
-                        if (debug && Gdx.app != null) Gdx.app.log(TAG, "[DeviceBuilder]   features12.descriptorBindingVariableDescriptorCount = true");
-                    }
-                    if (capabilities.isScalarBlockLayout()) {
-                        features12.scalarBlockLayout(true);
-                        if (debug && Gdx.app != null) Gdx.app.log(TAG, "[DeviceBuilder]   features12.scalarBlockLayout = true");
-                    }
 
+                    if (capabilities.isScalarBlockLayout()) features12.scalarBlockLayout(true);
                     if (capabilities.isTimelineSemaphore()) features12.timelineSemaphore(true);
                     if (capabilities.isBufferDeviceAddress()) features12.bufferDeviceAddress(true);
-                    if (capabilities.isShaderFloat16()) features12.shaderFloat16(true);
-                    if (capabilities.isShaderInt8()) features12.shaderInt8(true);
+                    // ... other 1.2 features from capabilities ...
                     MemoryUtil.memPutAddress(pNextChainHead + VkBaseOutStructure.PNEXT, features12.address());
                     pNextChainHead = features12.address();
-                } else if (enabledExtensionsList.contains(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME)) {
+                } else if (enableDescriptorIndexingViaExtension) { // Only if extension was added and API < 1.2
                     VkPhysicalDeviceDescriptorIndexingFeaturesEXT extFeatures = VkPhysicalDeviceDescriptorIndexingFeaturesEXT.calloc(stack)
                             .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT).pNext(NULL);
-                    if (capabilities.isRuntimeDescriptorArray()) {
-                        extFeatures.runtimeDescriptorArray(true);
-                        diFeaturesActuallyEnabled = true;
-                    }
-                    if (capabilities.isShaderSampledImageArrayNonUniformIndexing()) {
-                        extFeatures.shaderSampledImageArrayNonUniformIndexing(true);
-                        diFeaturesActuallyEnabled = true;
-                    }
-                    if (capabilities.isShaderStorageBufferArrayNonUniformIndexing()) {
-                        extFeatures.shaderStorageBufferArrayNonUniformIndexing(true);
-                        diFeaturesActuallyEnabled = true;
-                    }
-                    if (capabilities.isDescriptorBindingPartiallyBound()) {
-                        extFeatures.descriptorBindingPartiallyBound(true);
-                        diFeaturesActuallyEnabled = true;
-                    }
-                    if (capabilities.isDescriptorBindingVariableDescriptorCount()) {
-                        extFeatures.descriptorBindingVariableDescriptorCount(true);
-                        diFeaturesActuallyEnabled = true;
-                    }
+                    if (capabilities.isRuntimeDescriptorArray()) extFeatures.runtimeDescriptorArray(true);
+                    if (capabilities.isShaderSampledImageArrayNonUniformIndexing()) extFeatures.shaderSampledImageArrayNonUniformIndexing(true);
+                    if (capabilities.isShaderStorageBufferArrayNonUniformIndexing()) extFeatures.shaderStorageBufferArrayNonUniformIndexing(true);
+                    if (capabilities.isDescriptorBindingPartiallyBound()) extFeatures.descriptorBindingPartiallyBound(true);
+                    if (capabilities.isDescriptorBindingVariableDescriptorCount()) extFeatures.descriptorBindingVariableDescriptorCount(true);
+                    if (capabilities.isShaderInputAttachmentArrayDynamicIndexing()) extFeatures.shaderInputAttachmentArrayDynamicIndexing(true);
+                    if (capabilities.isShaderUniformTexelBufferArrayDynamicIndexing()) extFeatures.shaderUniformTexelBufferArrayDynamicIndexing(true);
+                    if (capabilities.isShaderStorageTexelBufferArrayDynamicIndexing()) extFeatures.shaderStorageTexelBufferArrayDynamicIndexing(true);
+                    if (capabilities.isShaderUniformBufferArrayNonUniformIndexing()) extFeatures.shaderUniformBufferArrayNonUniformIndexing(true);
+                    if (capabilities.isShaderInputAttachmentArrayNonUniformIndexing()) extFeatures.shaderInputAttachmentArrayNonUniformIndexing(true);
+                    if (capabilities.isShaderUniformTexelBufferArrayNonUniformIndexing()) extFeatures.shaderUniformTexelBufferArrayNonUniformIndexing(true);
+                    if (capabilities.isShaderStorageTexelBufferArrayNonUniformIndexing()) extFeatures.shaderStorageTexelBufferArrayNonUniformIndexing(true);
+                    if (capabilities.isDescriptorBindingUniformBufferUpdateAfterBind()) extFeatures.descriptorBindingUniformBufferUpdateAfterBind(true);
+                    if (capabilities.isDescriptorBindingSampledImageUpdateAfterBind()) extFeatures.descriptorBindingSampledImageUpdateAfterBind(true);
+                    if (capabilities.isDescriptorBindingStorageImageUpdateAfterBind()) extFeatures.descriptorBindingStorageImageUpdateAfterBind(true);
+                    if (capabilities.isDescriptorBindingStorageBufferUpdateAfterBind()) extFeatures.descriptorBindingStorageBufferUpdateAfterBind(true);
+                    if (capabilities.isDescriptorBindingUniformTexelBufferUpdateAfterBind()) extFeatures.descriptorBindingUniformTexelBufferUpdateAfterBind(true);
+                    if (capabilities.isDescriptorBindingStorageTexelBufferUpdateAfterBind()) extFeatures.descriptorBindingStorageTexelBufferUpdateAfterBind(true);
+                    if (capabilities.isDescriptorBindingUpdateUnusedWhilePending()) extFeatures.descriptorBindingUpdateUnusedWhilePending(true);
                     MemoryUtil.memPutAddress(pNextChainHead + VkBaseOutStructure.PNEXT, extFeatures.address());
                     pNextChainHead = extFeatures.address();
                 }
 
-                if (!diFeaturesActuallyEnabled && (capabilities.isRuntimeDescriptorArray() || capabilities.isShaderSampledImageArrayNonUniformIndexing())) {
-                    if (Gdx.app != null) Gdx.app.error(TAG, "WARNING: Key DI features supported by hardware but NOT enabled in structs for device creation.");
-                }
-
                 if (capabilities.getApiVersion() >= VK_API_VERSION_1_3) {
-                    VkPhysicalDeviceVulkan13Features features13_to_enable = VkPhysicalDeviceVulkan13Features.calloc(stack)
+                    VkPhysicalDeviceVulkan13Features features13 = VkPhysicalDeviceVulkan13Features.calloc(stack)
                             .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES).pNext(NULL);
-                    if (capabilities.isDynamicRendering()) features13_to_enable.dynamicRendering(true);
-                    if (capabilities.isSynchronization2()) features13_to_enable.synchronization2(true);
-
-                    // **** MODIFIED SECTION FOR DIAGNOSTIC ****
+                    if (capabilities.isDynamicRendering()) features13.dynamicRendering(true);
+                    if (capabilities.isSynchronization2()) features13.synchronization2(true);
                     if (capabilities.isMaintenance4() && !temporarilyDisableMaintenance4) {
-                        features13_to_enable.maintenance4(true);
-                        if (debug && Gdx.app != null) Gdx.app.log(TAG, "Enabling V1.3 feature: maintenance4");
+                        features13.maintenance4(true);
                     } else if (capabilities.isMaintenance4() && temporarilyDisableMaintenance4) {
                         if (debug && Gdx.app != null) Gdx.app.log(TAG, "DIAGNOSTIC: Maintenance4 supported BUT TEMPORARILY DISABLED for this test.");
-                        features13_to_enable.maintenance4(false); // Explicitly disable for test
-                    } else {
-                        if (debug && Gdx.app != null) Gdx.app.log(TAG, "V1.3 Maintenance4 feature NOT supported by caps OR NOT being enabled.");
-                        features13_to_enable.maintenance4(false); // Ensure it's false if not supported
                     }
-                    // **** END MODIFIED SECTION ****
-
-                    MemoryUtil.memPutAddress(pNextChainHead + VkBaseOutStructure.PNEXT, features13_to_enable.address());
-                    pNextChainHead = features13_to_enable.address();
-                    if (debug && Gdx.app != null) Gdx.app.log(TAG, "Chained VkPhysicalDeviceVulkan13Features.");
+                    // ... other 1.3 features from capabilities ...
+                    MemoryUtil.memPutAddress(pNextChainHead + VkBaseOutStructure.PNEXT, features13.address());
                 }
-
-                // --- Logging before vkCreateDevice ---
-                if (debug && Gdx.app != null) {
-                    Gdx.app.log(TAG, "--- Pre-vkCreateDevice Feature Check ---");
-                    Gdx.app.log(TAG, "Capabilities: Maintenance4 Supported by PhysicalDevice: " + capabilities.isMaintenance4());
-                    Gdx.app.log(TAG, "Capabilities: MaxBufferSize from PhysicalDevice: " + capabilities.getMaxBufferSize());
-
-                    boolean maintenance4FeatureBeingEnabledInChain = false;
-                    long currentPNextAddressInspect = features2.pNext();
-
-                    boolean foundV12FeaturesInChain = false;
-                    boolean v12ShaderNonUniformEnabledInChain = false;
-
-                    while (currentPNextAddressInspect != NULL) {
-                        VkBaseOutStructure pNextStructInspect = VkBaseOutStructure.create(currentPNextAddressInspect);
-                        if (pNextStructInspect.sType() == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES) {
-                            VkPhysicalDeviceVulkan13Features features13InChainInspect = VkPhysicalDeviceVulkan13Features.create(currentPNextAddressInspect);
-                            maintenance4FeatureBeingEnabledInChain = features13InChainInspect.maintenance4();
-                            Gdx.app.log(TAG, "VkPhysicalDeviceVulkan13Features in chain to be created: maintenance4 set to: " + maintenance4FeatureBeingEnabledInChain);
-                            break;
-                        } else if (pNextStructInspect.sType() == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
-                            foundV12FeaturesInChain = true;
-                            VkPhysicalDeviceVulkan12Features features12InChainInspect = VkPhysicalDeviceVulkan12Features.create(currentPNextAddressInspect);
-                            v12ShaderNonUniformEnabledInChain = features12InChainInspect.shaderSampledImageArrayNonUniformIndexing();
-                            Gdx.app.log(TAG, "VkPhysicalDeviceVulkan12Features in chain: shaderSampledImageArrayNonUniformIndexing set to: " + v12ShaderNonUniformEnabledInChain);
-                            // You can log other 1.2 features here too
-                        }
-                        VkBaseOutStructure nextStructCandidate = pNextStructInspect.pNext();
-                        currentPNextAddressInspect = (nextStructCandidate != null) ? nextStructCandidate.address() : NULL;
-                    }
-                    if (!maintenance4FeatureBeingEnabledInChain && capabilities.isMaintenance4() && !temporarilyDisableMaintenance4) {
-                        Gdx.app.error(TAG, "CRITICAL WARNING: Maintenance4 is supported by caps and NOT temporarily disabled, but NOT being enabled in VkDeviceCreateInfo pNext chain!");
-                    } else if (maintenance4FeatureBeingEnabledInChain && temporarilyDisableMaintenance4) {
-                        Gdx.app.error(TAG, "DIAGNOSTIC WARNING: Maintenance4 IS being enabled in chain, but temporarilyDisableMaintenance4 was true. Check logic.");
-                    }
-                    if (foundV12FeaturesInChain && !v12ShaderNonUniformEnabledInChain && capabilities.isShaderSampledImageArrayNonUniformIndexing()) {
-                        Gdx.app.error(TAG, "CRITICAL WARNING: V1.2 features struct found in chain, but shaderSampledImageArrayNonUniformIndexing is FALSE in it, despite capabilities reporting TRUE!");
-                    } else if (!foundV12FeaturesInChain && capabilities.getApiVersion() >= VK_API_VERSION_1_2) {
-                        Gdx.app.error(TAG, "CRITICAL WARNING: VkPhysicalDeviceVulkan12Features struct NOT FOUND in pNext chain for vkCreateDevice, but API is >= 1.2!");
-                    }
-                    Gdx.app.log(TAG, "--------------------------------------");
-                }
-                // --- End Logging ---
-
 
                 VkDeviceCreateInfo createInfo = VkDeviceCreateInfo.calloc(stack)
-                        .sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO).pNext(features2.address())
-                        .pQueueCreateInfos(queueCreateInfos).ppEnabledExtensionNames(ppEnabledExtensionNames)
-                        .pEnabledFeatures(null);
+                        .sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)
+                        .pNext(features2.address())
+                        .pQueueCreateInfos(queueCreateInfos)
+                        .ppEnabledExtensionNames(ppEnabledExtensionNames);
 
                 PointerBuffer pDevice = stack.mallocPointer(1);
                 int vkResult = vkCreateDevice(physicalDevice, createInfo, null, pDevice);
                 if (vkResult != VK_SUCCESS) throw new GdxRuntimeException("Failed to create logical Vulkan device: " + vkResult);
                 long deviceHandleValue = pDevice.get(0);
+
                 VkDevice lwjglLogicalDevice = new VkDevice(deviceHandleValue, physicalDevice, createInfo, capabilities.getApiVersion());
+
 
                 PointerBuffer pGraphicsQueue = stack.mallocPointer(1);
                 vkGetDeviceQueue(lwjglLogicalDevice, graphicsQueueFamilyIndex, 0, pGraphicsQueue);

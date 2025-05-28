@@ -23,15 +23,25 @@ import static org.lwjgl.vulkan.VK10.*;
 
 public class VulkanShaderManager implements Disposable {
     private static final String TAG = "VulkanShaderManager";
-    private static final boolean DEBUG = false; // Set to true for verbose logging
+    private static final boolean DEBUG = true; // Set to true for verbose logging
 
-    private final VkDevice rawDevice;
-    private final Map<String, Long> shaderModuleCache;
+    private VkDevice rawDevice;
+    private Map<String, Long> shaderModuleCache;
 
-    private final long shadercCompiler;
-    private final long shadercOptions;
+    private long shadercCompiler;
+    private long shadercOptions;
+
+    public VulkanShaderManager() {
+        VulkanApplication vulkanApp = (VulkanApplication) Gdx.app;
+        VulkanDevice vulkanDevice = vulkanApp.getVulkanDevice();
+        initialize(vulkanDevice.getRawDevice());
+    }
 
     public VulkanShaderManager(VkDevice rawDevice) {
+        initialize(rawDevice);
+    }
+
+    public void initialize(VkDevice rawDevice){
         this.rawDevice = rawDevice;
         this.shaderModuleCache = new HashMap<>();
 
