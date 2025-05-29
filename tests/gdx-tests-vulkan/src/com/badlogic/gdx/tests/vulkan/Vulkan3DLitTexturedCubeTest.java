@@ -1,7 +1,7 @@
 package com.badlogic.gdx.tests.vulkan;
 
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.backend.vulkan.SimpleUnlitTextureShader;
+import com.badlogic.gdx.backend.vulkan.SimpleLitTextureShader;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
@@ -17,8 +17,8 @@ import com.badlogic.gdx.backend.vulkan.VulkanVertexAttributes;
 import com.badlogic.gdx.backend.vulkan.VulkanTexture;
 import com.badlogic.gdx.backend.vulkan.VulkanMaterial;
 
-public class Vulkan3DTexturedCubeTest extends GdxTest {
-    private static final String TAG = "Vulkan3DTexturedCubeTest";
+public class Vulkan3DLitTexturedCubeTest extends GdxTest {
+    private static final String TAG = "Vulkan3DLitTexturedCubeTest";
 
     private PerspectiveCamera camera;
     private CameraInputController cameraInputController;
@@ -27,7 +27,7 @@ public class Vulkan3DTexturedCubeTest extends GdxTest {
     private VulkanTexture cubeTexture;
     private VulkanMaterial cubeMaterial;
 
-    private SimpleUnlitTextureShader unlitTextureShader;
+    private SimpleLitTextureShader litTextureShader;
 
     private final Matrix4 modelMatrix = new Matrix4();
     private float rotationAngleDeg = 0f;
@@ -42,8 +42,8 @@ public class Vulkan3DTexturedCubeTest extends GdxTest {
         cubeMaterial.setDiffuseColor(Color.WHITE);
         cubeMaterial.setOpacity(1.0f);
 
-        unlitTextureShader = new SimpleUnlitTextureShader(cubeMesh.getVulkanVertexAttributes());
-        unlitTextureShader.setDiffuseTexture(cubeTexture);
+        litTextureShader = new SimpleLitTextureShader(cubeMesh.getVulkanVertexAttributes());
+        litTextureShader.setDiffuseTexture(cubeTexture);
 
         Gdx.input.setInputProcessor(cameraInputController);
         Gdx.app.log(TAG, "Vulkan3DTexturedCubeTest (User-Friendly) created.");
@@ -90,7 +90,7 @@ public class Vulkan3DTexturedCubeTest extends GdxTest {
 
     @Override
     public void render() {
-        if (unlitTextureShader == null || cubeMesh == null) {
+        if (litTextureShader == null || cubeMesh == null) {
             Gdx.app.error(TAG, "Render: essential resources not initialized.");
             return;
         }
@@ -102,7 +102,7 @@ public class Vulkan3DTexturedCubeTest extends GdxTest {
         modelMatrix.setToRotation(Vector3.Y, rotationAngleDeg);
 
         // Single call to the shader to render the mesh
-        unlitTextureShader.render(cubeMesh, modelMatrix, camera.view, camera.projection, cubeMaterial);
+        litTextureShader.render(cubeMesh, modelMatrix, camera.view, camera.projection, cubeMaterial);
     }
 
     @Override
@@ -116,7 +116,7 @@ public class Vulkan3DTexturedCubeTest extends GdxTest {
 
     @Override
     public void dispose() {
-        if (unlitTextureShader != null) unlitTextureShader.dispose();
+        if (litTextureShader != null) litTextureShader.dispose();
         if (cubeTexture != null) cubeTexture.dispose();
         if (cubeMesh != null) cubeMesh.dispose();
 

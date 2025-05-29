@@ -292,8 +292,10 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
 
         if (spritesInCurrentSubBatch >= maxSpritesInOneFlush ||
                 cpuBufferWritePositionFloats + (VERTICES_PER_SPRITE * COMPONENTS_PER_VERTEX) > vertices.capacity()) {
-            if (DEBUG) Gdx.app.debug(TAG, "Flushing in draw: spritesInSubBatch=" + spritesInCurrentSubBatch +
-                    ", cpuWritePos=" + cpuBufferWritePositionFloats + ", capacity=" + vertices.capacity());
+            if (DEBUG) {
+                //   Gdx.app.debug(TAG, "Flushing in draw: spritesInSubBatch=" + spritesInCurrentSubBatch +
+                //           ", cpuWritePos=" + cpuBufferWritePositionFloats + ", capacity=" + vertices.capacity());
+            }
             flush();
             // After flush, ensure the texture index is re-acquired/re-confirmed for the new sub-batch state
             // as textureBatcher.resetAndPrepareForFrame() isn't called by flush().
@@ -600,8 +602,10 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         long bytesInThisSubBatch = (long) spritesInCurrentSubBatch * BYTES_PER_VERTEX;
         long vmaFlushOffsetBytes = (long) currentBatchStartVertexIndex * BYTES_PER_VERTEX;
 
-        if (DEBUG) Gdx.app.debug(TAG, "Flushing: " + spritesInCurrentSubBatch + " sprites. VMA Flush Offset: " + vmaFlushOffsetBytes + ", Size: " + bytesInThisSubBatch +
-                ". Draw Vertex Offset: " + currentBatchStartVertexIndex + ". CPU Write Pos (floats): " + cpuBufferWritePositionFloats);
+        if (DEBUG) {
+            // Gdx.app.debug(TAG, "Flushing: " + spritesInCurrentSubBatch + " sprites. VMA Flush Offset: " + vmaFlushOffsetBytes + ", Size: " + bytesInThisSubBatch +
+            //         ". Draw Vertex Offset: " + currentBatchStartVertexIndex + ". CPU Write Pos (floats): " + cpuBufferWritePositionFloats);
+        }
 
         if (bytesInThisSubBatch > 0 && vertexBuffer.allocationHandle != VK_NULL_HANDLE && vmaAllocator != VK_NULL_HANDLE) {
             Vma.vmaFlushAllocation(vmaAllocator, vertexBuffer.allocationHandle, vmaFlushOffsetBytes, bytesInThisSubBatch);

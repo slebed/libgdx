@@ -154,7 +154,7 @@ public class VulkanApplication implements VulkanApplicationBase {
     private long primarySurface = VK_NULL_HANDLE; // For the first window
     private long debugMessenger;
     private long vmaAllocator = VK_NULL_HANDLE;
-    private int logLevel = LOG_INFO;
+    private int logLevel = LOG_DEBUG;
 
     private volatile boolean running = true;
     private volatile VulkanWindow currentWindow;

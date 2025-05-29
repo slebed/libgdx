@@ -45,8 +45,6 @@ import static org.lwjgl.vulkan.VK10.vkAllocateCommandBuffers;
 import static org.lwjgl.vulkan.VK10.vkBeginCommandBuffer;
 import static org.lwjgl.vulkan.VK10.vkCmdBeginRenderPass;
 import static org.lwjgl.vulkan.VK10.vkCmdEndRenderPass;
-import static org.lwjgl.vulkan.VK10.vkCmdSetScissor;
-import static org.lwjgl.vulkan.VK10.vkCmdSetViewport;
 import static org.lwjgl.vulkan.VK10.vkCreateCommandPool;
 import static org.lwjgl.vulkan.VK10.vkCreateFence;
 import static org.lwjgl.vulkan.VK10.vkCreateFramebuffer;
@@ -88,6 +86,7 @@ import org.lwjgl.glfw.GLFWWindowIconifyCallback;
 import org.lwjgl.glfw.GLFWWindowMaximizeCallback;
 import org.lwjgl.glfw.GLFWWindowRefreshCallback;
 import org.lwjgl.system.MemoryStack;
+import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VkAttachmentDescription;
 import org.lwjgl.vulkan.VkAttachmentReference;
 import org.lwjgl.vulkan.VkClearValue;
@@ -150,6 +149,8 @@ public class VulkanWindow implements Disposable {
     private List<Long> inFlightFences = new ArrayList<>(); // List of VkFence handles
     private int maxFramesInFlight = 1; // Example, configure as needed
     private int currentFrame = 0; // For sync object cycling
+
+    private com.badlogic.gdx.utils.viewport.Viewport viewportForVkCommands = null;
 
     private final GLFWWindowFocusCallback focusCallback = new GLFWWindowFocusCallback() {
         @Override
@@ -390,7 +391,7 @@ public class VulkanWindow implements Disposable {
             this.renderPass = pRenderPass.get(0);
 
             if (this.vulkanGraphics != null) {
-                ((VulkanGraphics)this.vulkanGraphics).setMainSwapchainRenderPass(this.renderPass); // Inform VulkanGraphics
+                ((VulkanGraphics) this.vulkanGraphics).setMainSwapchainRenderPass(this.renderPass); // Inform VulkanGraphics
             } else {
                 Gdx.app.error(TAG, "VulkanGraphics instance is null in VulkanWindow.create() after render pass creation.");
                 // This would be a critical setup error
@@ -508,6 +509,21 @@ public class VulkanWindow implements Disposable {
 
     public void setWindowListener(VulkanWindowListener listener) {
         this.windowListener = listener;
+    }
+
+    public void setViewportForVkCommands(com.badlogic.gdx.utils.viewport.Viewport viewport) {
+        this.viewportForVkCommands = viewport;
+        // Optional: Add a debug log here
+        if (Gdx.app != null && viewport != null) { // Check Gdx.app for safety
+            Gdx.app.debug(TAG, "setViewportForVkCommands: Viewport SET. Hash: " + viewport.hashCode() +
+                    ", Type: " + viewport.getClass().getSimpleName() +
+                    ", Window Hash: " + this.hashCode() +
+                    ", Viewport world W/H: " + viewport.getWorldWidth() + "/" + viewport.getWorldHeight() +
+                    ", Viewport screen X/Y: " + viewport.getScreenX() + "/" + viewport.getScreenY() +
+                    ", Viewport screen W/H: " + viewport.getScreenWidth() + "/" + viewport.getScreenHeight());
+        } else if (Gdx.app != null && viewport == null) {
+            Gdx.app.debug(TAG, "setViewportForVkCommands: Viewport CLEARED (set to null) for window " + this.hashCode());
+        }
     }
 
     /**
@@ -992,13 +1008,16 @@ public class VulkanWindow implements Disposable {
             vkCmdBeginRenderPass(commandBuffer, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
             // Set dynamic states
-            VkViewport.Buffer vkViewport = VkViewport.calloc(1, stack)
-                    .x(0.0f).y((float) extent.height()).width((float) extent.width())
-                    .height(-(float) extent.height()).minDepth(0.0f).maxDepth(1.0f);
+            updateDynamicStates(commandBuffer, stack, extent);
+            /*VkViewport.Buffer vkViewport = VkViewport.calloc(1, stack)
+                    .x(0.0f).y((float) extent.height())
+                    .width((float) extent.width()).height(-(float) extent.height())
+                    .minDepth(0.0f).maxDepth(1.0f);
             vkCmdSetViewport(commandBuffer, 0, vkViewport);
             VkRect2D.Buffer vkScissor = VkRect2D.calloc(1, stack)
-                    .offset(VkOffset2D.calloc(stack).set(0, 0)).extent(extent);
-            vkCmdSetScissor(commandBuffer, 0, vkScissor);
+                    .offset(VkOffset2D.calloc(stack).set(0, 0))
+                    .extent(extent);
+            vkCmdSetScissor(commandBuffer, 0, vkScissor);*/
 
             try {
                 if (listener != null) listener.render();
@@ -1085,6 +1104,120 @@ public class VulkanWindow implements Disposable {
         }
     }
 
+    @SuppressWarnings("DefaultLocale")
+    private void updateDynamicStates(VkCommandBuffer commandBuffer, MemoryStack stack, VkExtent2D swapchainExtent) {
+        // Initial logging
+        if (Gdx.app != null) {
+            Gdx.app.debug(TAG, "updateDynamicStates: ENTER for window " + this.hashCode() +
+                    ". SwapchainExtent: " + swapchainExtent.width() + "x" + swapchainExtent.height());
+            if (this.viewportForVkCommands != null) {
+                Gdx.app.debug(TAG, "updateDynamicStates: Initial check - viewportForVkCommands IS SET. Hash: " + this.viewportForVkCommands.hashCode() +
+                        ", Type: " + this.viewportForVkCommands.getClass().getSimpleName() +
+                        ", Screen X/Y: " + this.viewportForVkCommands.getScreenX() + "/" + this.viewportForVkCommands.getScreenY() +
+                        ", Screen W/H: " + this.viewportForVkCommands.getScreenWidth() + "/" + this.viewportForVkCommands.getScreenHeight() +
+                        ", World W/H: " + this.viewportForVkCommands.getWorldWidth() + "/" + this.viewportForVkCommands.getWorldHeight());
+            } else {
+                Gdx.app.debug(TAG, "updateDynamicStates: Initial check - viewportForVkCommands is NULL.");
+            }
+        }
+
+        // Variables to hold the dimensions that will actually be used for Vulkan commands
+        float actualVkTargetX;
+        float actualVkTargetY_libGDX; // Y-coordinate from LibGDX's perspective (bottom-left of window)
+        float actualVkTargetWidth;
+        float actualVkTargetHeight;
+
+        // --- Prioritize viewportForVkCommands ---
+        if (this.viewportForVkCommands != null) {
+            // Use the viewport explicitly registered by VulkanStage
+            actualVkTargetX = this.viewportForVkCommands.getScreenX();
+            actualVkTargetY_libGDX = this.viewportForVkCommands.getScreenY();
+            actualVkTargetWidth = this.viewportForVkCommands.getScreenWidth();
+            actualVkTargetHeight = this.viewportForVkCommands.getScreenHeight();
+            if (Gdx.app != null) {
+                Gdx.app.debug(TAG, "updateDynamicStates: USING EXPLICIT viewportForVkCommands. Screen X/Y: " + actualVkTargetX + "/" + actualVkTargetY_libGDX +
+                        ", Screen W/H: " + actualVkTargetWidth + "/" + actualVkTargetHeight);
+            }
+        } else if (this.listener instanceof com.badlogic.gdx.scenes.scene2d.Stage) {
+            // Fallback: if listener itself is a Stage (less common for full apps)
+            com.badlogic.gdx.scenes.scene2d.Stage stage = (com.badlogic.gdx.scenes.scene2d.Stage) this.listener;
+            com.badlogic.gdx.utils.viewport.Viewport stageViewport = stage.getViewport();
+            if (stageViewport != null) {
+                actualVkTargetX = stageViewport.getScreenX();
+                actualVkTargetY_libGDX = stageViewport.getScreenY();
+                actualVkTargetWidth = stageViewport.getScreenWidth();
+                actualVkTargetHeight = stageViewport.getScreenHeight();
+                if (Gdx.app != null) {
+                    Gdx.app.debug(TAG, "updateDynamicStates: FALLBACK to listener as Stage. Screen X/Y: " + actualVkTargetX + "/" + actualVkTargetY_libGDX +
+                            ", Screen W/H: " + actualVkTargetWidth + "/" + actualVkTargetHeight);
+                }
+            } else {
+                // Listener is a Stage, but its viewport is null - default to full extent
+                actualVkTargetX = 0.0f;
+                actualVkTargetY_libGDX = 0.0f;
+                actualVkTargetWidth = (float) swapchainExtent.width();
+                actualVkTargetHeight = (float) swapchainExtent.height();
+                if (Gdx.app != null) {
+                    Gdx.app.debug(TAG, "updateDynamicStates: Listener is Stage, but its viewport is NULL. Defaulting to full swapchain extent.");
+                }
+            }
+        }
+        // ELSE IF: You could add more sophisticated fallbacks here if needed,
+        // e.g., checking Game.getScreen() if it's a known type that holds a Stage,
+        // but setViewportForVkCommands() is the preferred explicit way.
+        else {
+            // Default: No specific viewport found, use full swapchain extent
+            actualVkTargetX = 0.0f;
+            actualVkTargetY_libGDX = 0.0f;
+            actualVkTargetWidth = (float) swapchainExtent.width();
+            actualVkTargetHeight = (float) swapchainExtent.height();
+            if (Gdx.app != null) {
+                Gdx.app.debug(TAG, "updateDynamicStates: NO suitable viewport found. Defaulting to full swapchain extent.");
+            }
+        }
+
+        // --- Set Vulkan Viewport ---
+        org.lwjgl.vulkan.VkViewport.Buffer vkViewportBuffer = org.lwjgl.vulkan.VkViewport.calloc(1, stack);
+        vkViewportBuffer.x(actualVkTargetX);
+        vkViewportBuffer.y(actualVkTargetY_libGDX + actualVkTargetHeight); // Y for top-left with negative height
+        vkViewportBuffer.width(actualVkTargetWidth);
+        vkViewportBuffer.height(-actualVkTargetHeight); // Negative height flips Y
+        vkViewportBuffer.minDepth(0.0f);
+        vkViewportBuffer.maxDepth(1.0f);
+
+        if (Gdx.app != null) {
+            Gdx.app.debug(TAG, String.format("updateDynamicStates: FINAL vkViewport PARAMS for window %d: x=%.1f, y=%.1f, width=%.1f, height=%.1f",
+                    this.hashCode(), vkViewportBuffer.x(), vkViewportBuffer.y(), vkViewportBuffer.width(), vkViewportBuffer.height()));
+        }
+        VK10.vkCmdSetViewport(commandBuffer, 0, vkViewportBuffer);
+
+        // --- Set Vulkan Scissor ---
+        VkRect2D.Buffer vkScissorBuffer = VkRect2D.calloc(1, stack);
+        int scissorX = (int) actualVkTargetX;
+        // Convert LibGDX bottom-up Y (actualVkTargetY_libGDX) to Vulkan top-down Y for scissor's top-left.
+        int scissorY_vulkanTopLeft = swapchainExtent.height() - ((int) actualVkTargetY_libGDX + (int) actualVkTargetHeight);
+        int scissorWidth = (int) actualVkTargetWidth;
+        int scissorHeight = (int) actualVkTargetHeight;
+
+        // Clamp scissor to be within framebuffer bounds
+        int clampedScissorX = Math.max(0, scissorX);
+        int clampedScissorY = Math.max(0, scissorY_vulkanTopLeft);
+        int clampedScissorWidth = Math.min(swapchainExtent.width() - clampedScissorX, scissorWidth);
+        int clampedScissorHeight = Math.min(swapchainExtent.height() - clampedScissorY, scissorHeight);
+        clampedScissorWidth = Math.max(0, clampedScissorWidth); // Ensure non-negative
+        clampedScissorHeight = Math.max(0, clampedScissorHeight); // Ensure non-negative
+
+
+        vkScissorBuffer.offset(VkOffset2D.calloc(stack).set(clampedScissorX, clampedScissorY));
+        vkScissorBuffer.extent(VkExtent2D.calloc(stack).set(clampedScissorWidth, clampedScissorHeight));
+
+        if (Gdx.app != null) {
+            Gdx.app.debug(TAG, String.format("updateDynamicStates: FINAL vkScissor PARAMS for window %d: x=%d, y=%d, width=%d, height=%d",
+                    this.hashCode(), vkScissorBuffer.offset().x(), vkScissorBuffer.offset().y(), vkScissorBuffer.extent().width(), vkScissorBuffer.extent().height()));
+        }
+        VK10.vkCmdSetScissor(commandBuffer, 0, vkScissorBuffer);
+    }
+
     private void ensureListenerCreatedAndResized() {
 
         // Check if initialization is needed and possible
@@ -1119,7 +1252,8 @@ public class VulkanWindow implements Disposable {
             }
         } else {
             // Condition failed, log the reason and skip initialization steps
-            if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Condition FAILED (listenerInitialized=" + listenerInitialized + ", listenerIsNull=" + (listener == null) + "), skipping create/resize.");
+            if (debug)
+                Gdx.app.log(TAG, "[" + this.hashCode() + "] Condition FAILED (listenerInitialized=" + listenerInitialized + ", listenerIsNull=" + (listener == null) + "), skipping create/resize.");
         }
     }
 

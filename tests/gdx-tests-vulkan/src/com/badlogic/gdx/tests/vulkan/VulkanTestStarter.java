@@ -14,7 +14,8 @@ import com.badlogic.gdx.assets.loaders.resolvers.InternalFileHandleResolver;
 import com.badlogic.gdx.backend.vulkan.VulkanApplication;
 import com.badlogic.gdx.backend.vulkan.VulkanApplicationConfiguration;
 import com.badlogic.gdx.backend.vulkan.VulkanDebugLogger;
-import com.badlogic.gdx.backend.vulkan.VulkanScreenViewport;
+import com.badlogic.gdx.backend.vulkan.VulkanFillViewport;
+import com.badlogic.gdx.backend.vulkan.VulkanFitViewport;
 
 import com.badlogic.gdx.backend.vulkan.VulkanStage;
 import com.badlogic.gdx.backend.vulkan.VulkanTexture;
@@ -117,7 +118,8 @@ public class VulkanTestStarter {
                 throw new GdxRuntimeException("Failed to load uiskin via AssetManager", e);
             }
 
-            Viewport viewport = new VulkanScreenViewport();
+            //Viewport viewport = new VulkanScreenViewport();
+            Viewport viewport = new VulkanFillViewport(640,480);
             stage = new VulkanStage(viewport);
             /*stage.addListener(new InputListener() {
                 @Override
@@ -177,7 +179,7 @@ public class VulkanTestStarter {
             stage.addActor(container);
             container.setFillParent(true);
             container.add(label).pad(10).row();
-            //stage.setDebugAll(true);
+            stage.setDebugAll(true);
             Table table = new Table();
 
             //ScrollPane scroll = new ScrollPane(table, skin);

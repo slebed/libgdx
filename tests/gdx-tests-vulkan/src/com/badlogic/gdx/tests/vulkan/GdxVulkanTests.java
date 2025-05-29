@@ -64,7 +64,8 @@ public class GdxVulkanTests {
                 VulkanSpriteBatchStressTest.class,
                 VulkanSpriteBatchTextureSwitchTest.class,
                 Vulkan3DCubeTest.class,
-                Vulkan3DTexturedCubeTest.class
+                Vulkan3DTexturedCubeTest.class,
+                Vulkan3DLitTexturedCubeTest.class
                 // @on
         );
 

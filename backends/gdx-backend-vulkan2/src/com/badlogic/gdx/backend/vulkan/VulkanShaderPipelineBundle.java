@@ -135,6 +135,17 @@ public class VulkanShaderPipelineBundle implements Disposable {
                 pSetLayoutArray.flip(); // Prepare for reading
             }
 
+            if (DEBUG) {
+                if (config.dynamicStates != null && config.dynamicStates.hasRemaining()) {
+                    StringBuilder dsString = new StringBuilder("Config provided dynamicStates: ");
+                    for (int i = 0; i < config.dynamicStates.limit(); i++) {
+                        dsString.append(config.dynamicStates.get(i)).append(" ");
+                    }
+                    Gdx.app.debug(TAG, dsString.toString() + "(Viewport=" + VK_DYNAMIC_STATE_VIEWPORT + ", Scissor=" + VK_DYNAMIC_STATE_SCISSOR + ")");
+                } else {
+                    Gdx.app.debug(TAG, "Config.dynamicStates is null or empty, defaulting to dynamic Viewport & Scissor.");
+                }
+            }
 
             LongBuffer pSetLayoutsForPipeline = null;
             if (!validLayoutHandles.isEmpty()) {

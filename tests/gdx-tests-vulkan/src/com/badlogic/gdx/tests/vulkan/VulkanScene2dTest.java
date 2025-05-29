@@ -117,7 +117,7 @@ public class VulkanScene2dTest extends GdxTest {
             //Gdx.app.log(TAG, "Actors added.");
 
             testTable.pack();
-
+testStage.setDebugAll(true);
             testStage.addActor(testTable);
 
 

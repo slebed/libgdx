@@ -1,6 +1,7 @@
 package com.badlogic.gdx.backend.vulkan; // Your package
 
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.utils.ObjectMap;
 import com.badlogic.gdx.utils.Pool.Poolable; // Optional: if you want to pool materials
 
@@ -94,45 +95,116 @@ public class VulkanMaterial implements Poolable { // Implementing Poolable is op
         // activeTextureFlags = 0;
     }
 
-
-    public Color getDiffuseColor(){
+    public Color getDiffuseColor() {
         return diffuseColor;
+    }
+
+    public VulkanTexture getDiffuseTexture() {
+        return diffuseTexture;
     }
 
     public float getOpacity() {
         return opacity;
     }
 
-    public Color getSpecularColor(){
+    public float getShininess() {
+        return shininess;
+    }
+
+    public Color getSpecularColor() {
         return specularColor;
     }
 
     // --- Fluent Setters ---
-    public VulkanMaterial setId(String id) { this.id = id; return this; }
+    public VulkanMaterial setId(String id) {
+        this.id = id;
+        return this;
+    }
 
-    public VulkanMaterial setDiffuseColor(float r, float g, float b, float a) { this.diffuseColor.set(r, g, b, a); return this; }
-    public VulkanMaterial setDiffuseColor(Color color) { this.diffuseColor.set(color); return this; }
-    public VulkanMaterial setDiffuseTexture(VulkanTexture texture) { this.diffuseTexture = texture; return this; }
+    public VulkanMaterial setDiffuseColor(float r, float g, float b, float a) {
+        this.diffuseColor.set(r, g, b, a);
+        return this;
+    }
 
-    public VulkanMaterial setSpecularColor(float r, float g, float b, float a) { this.specularColor.set(r, g, b, a); return this; }
-    public VulkanMaterial setSpecularColor(Color color) { this.specularColor.set(color); return this; }
-    public VulkanMaterial setSpecularTexture(VulkanTexture texture) { this.specularTexture = texture; return this; }
-    public VulkanMaterial setShininess(float shininess) { this.shininess = shininess; return this; }
+    public VulkanMaterial setDiffuseColor(Color color) {
+        this.diffuseColor.set(color);
+        return this;
+    }
 
-    public VulkanMaterial setEmissiveColor(float r, float g, float b, float a) { this.emissiveColor.set(r, g, b, a); return this; }
-    public VulkanMaterial setEmissiveColor(Color color) { this.emissiveColor.set(color); return this; }
-    public VulkanMaterial setEmissiveTexture(VulkanTexture texture) { this.emissiveTexture = texture; return this; }
+    public VulkanMaterial setDiffuseTexture(VulkanTexture texture) {
+        this.diffuseTexture = texture;
+        return this;
+    }
 
-    public VulkanMaterial setNormalTexture(VulkanTexture texture) { this.normalTexture = texture; return this; }
-    public VulkanMaterial setAmbientOcclusionTexture(VulkanTexture texture) { this.ambientOcclusionTexture = texture; return this; }
+    public VulkanMaterial setSpecularColor(float r, float g, float b, float a) {
+        this.specularColor.set(r, g, b, a);
+        return this;
+    }
 
-    public VulkanMaterial setOpacity(float opacity) { this.opacity = opacity; return this; }
+    public VulkanMaterial setSpecularColor(Color color) {
+        this.specularColor.set(color);
+        return this;
+    }
 
-    public VulkanMaterial setMetallic(float metallic) { this.metallic = metallic; return this; }
-    public VulkanMaterial setRoughness(float roughness) { this.roughness = roughness; return this; }
-    public VulkanMaterial setMetallicRoughnessTexture(VulkanTexture texture) { this.metallicRoughnessTexture = texture; return this; }
+    public VulkanMaterial setSpecularTexture(VulkanTexture texture) {
+        this.specularTexture = texture;
+        return this;
+    }
 
-    public VulkanMaterial setCustomAttribute(String alias, Object value) { this.customAttributes.put(alias, value); return this; }
+    public VulkanMaterial setShininess(float shininess) {
+        this.shininess = shininess;
+        return this;
+    }
+
+    public VulkanMaterial setEmissiveColor(float r, float g, float b, float a) {
+        this.emissiveColor.set(r, g, b, a);
+        return this;
+    }
+
+    public VulkanMaterial setEmissiveColor(Color color) {
+        this.emissiveColor.set(color);
+        return this;
+    }
+
+    public VulkanMaterial setEmissiveTexture(VulkanTexture texture) {
+        this.emissiveTexture = texture;
+        return this;
+    }
+
+    public VulkanMaterial setNormalTexture(VulkanTexture texture) {
+        this.normalTexture = texture;
+        return this;
+    }
+
+    public VulkanMaterial setAmbientOcclusionTexture(VulkanTexture texture) {
+        this.ambientOcclusionTexture = texture;
+        return this;
+    }
+
+    public VulkanMaterial setOpacity(float opacity) {
+        this.opacity = opacity;
+        return this;
+    }
+
+    public VulkanMaterial setMetallic(float metallic) {
+        this.metallic = metallic;
+        return this;
+    }
+
+    public VulkanMaterial setRoughness(float roughness) {
+        this.roughness = roughness;
+        return this;
+    }
+
+    public VulkanMaterial setMetallicRoughnessTexture(VulkanTexture texture) {
+        this.metallicRoughnessTexture = texture;
+        return this;
+    }
+
+    public VulkanMaterial setCustomAttribute(String alias, Object value) {
+        this.customAttributes.put(alias, value);
+        return this;
+    }
 
     public VulkanMaterial setPipelineBundle(VulkanShaderPipelineBundle bundle) { // Setter for the bundle
         this.pipelineBundle = bundle;
@@ -175,44 +247,77 @@ public class VulkanMaterial implements Poolable { // Implementing Poolable is op
         buffer.position(currentOffset);
 
         // Diffuse Color (vec4)
-        buffer.putFloat(diffuseColor.r); buffer.putFloat(diffuseColor.g); buffer.putFloat(diffuseColor.b); buffer.putFloat(diffuseColor.a);
+        buffer.putFloat(diffuseColor.r);
+        buffer.putFloat(diffuseColor.g);
+        buffer.putFloat(diffuseColor.b);
+        buffer.putFloat(diffuseColor.a);
         currentOffset += 4 * Float.BYTES;
 
         // Specular Color (vec4)
         buffer.position(currentOffset);
-        buffer.putFloat(specularColor.r); buffer.putFloat(specularColor.g); buffer.putFloat(specularColor.b); buffer.putFloat(specularColor.a);
+        buffer.putFloat(specularColor.r);
+        buffer.putFloat(specularColor.g);
+        buffer.putFloat(specularColor.b);
+        buffer.putFloat(specularColor.a);
         currentOffset += 4 * Float.BYTES;
 
         // Emissive Color (vec4)
         buffer.position(currentOffset);
-        buffer.putFloat(emissiveColor.r); buffer.putFloat(emissiveColor.g); buffer.putFloat(emissiveColor.b); buffer.putFloat(emissiveColor.a);
+        buffer.putFloat(emissiveColor.r);
+        buffer.putFloat(emissiveColor.g);
+        buffer.putFloat(emissiveColor.b);
+        buffer.putFloat(emissiveColor.a);
         currentOffset += 4 * Float.BYTES;
 
         // Shininess (float)
-        buffer.position(currentOffset); buffer.putFloat(shininess); currentOffset += Float.BYTES;
+        buffer.position(currentOffset);
+        buffer.putFloat(shininess);
+        currentOffset += Float.BYTES;
         // Opacity (float)
-        buffer.position(currentOffset); buffer.putFloat(opacity); currentOffset += Float.BYTES;
+        buffer.position(currentOffset);
+        buffer.putFloat(opacity);
+        currentOffset += Float.BYTES;
         // Metallic (float)
-        buffer.position(currentOffset); buffer.putFloat(metallic); currentOffset += Float.BYTES;
+        buffer.position(currentOffset);
+        buffer.putFloat(metallic);
+        currentOffset += Float.BYTES;
         // Roughness (float)
-        buffer.position(currentOffset); buffer.putFloat(roughness); currentOffset += Float.BYTES;
+        buffer.position(currentOffset);
+        buffer.putFloat(roughness);
+        currentOffset += Float.BYTES;
         // At this point, currentOffset = baseOffset + 16 (diff) + 16 (spec) + 16 (emis) + 4*4 (scalars) = baseOffset + 48 + 16 = baseOffset + 64
 
         // Texture presence flags (as floats 0.0 or 1.0)
-        buffer.position(currentOffset); buffer.putFloat(diffuseTexture != null ? 1.0f : 0.0f); currentOffset += Float.BYTES;
-        buffer.position(currentOffset); buffer.putFloat(normalTexture != null ? 1.0f : 0.0f); currentOffset += Float.BYTES;
-        buffer.position(currentOffset); buffer.putFloat(specularTexture != null ? 1.0f : 0.0f); currentOffset += Float.BYTES;
-        buffer.position(currentOffset); buffer.putFloat(emissiveTexture != null ? 1.0f : 0.0f); currentOffset += Float.BYTES;
+        buffer.position(currentOffset);
+        buffer.putFloat(diffuseTexture != null ? 1.0f : 0.0f);
+        currentOffset += Float.BYTES;
+        buffer.position(currentOffset);
+        buffer.putFloat(normalTexture != null ? 1.0f : 0.0f);
+        currentOffset += Float.BYTES;
+        buffer.position(currentOffset);
+        buffer.putFloat(specularTexture != null ? 1.0f : 0.0f);
+        currentOffset += Float.BYTES;
+        buffer.position(currentOffset);
+        buffer.putFloat(emissiveTexture != null ? 1.0f : 0.0f);
+        currentOffset += Float.BYTES;
         // currentOffset = baseOffset + 64 + 16 = baseOffset + 80
 
-        buffer.position(currentOffset); buffer.putFloat(ambientOcclusionTexture != null ? 1.0f : 0.0f); currentOffset += Float.BYTES;
-        buffer.position(currentOffset); buffer.putFloat(metallicRoughnessTexture != null ? 1.0f : 0.0f); currentOffset += Float.BYTES;
+        buffer.position(currentOffset);
+        buffer.putFloat(ambientOcclusionTexture != null ? 1.0f : 0.0f);
+        currentOffset += Float.BYTES;
+        buffer.position(currentOffset);
+        buffer.putFloat(metallicRoughnessTexture != null ? 1.0f : 0.0f);
+        currentOffset += Float.BYTES;
         // currentOffset = baseOffset + 80 + 8 = baseOffset + 88
 
         // Add padding to ensure UBO size is a multiple of 16 (vec4 alignment for std140 blocks)
         // Current size is 88 bytes. Next multiple of 16 is 96. Need 8 bytes of padding (2 floats).
-        buffer.position(currentOffset); buffer.putFloat(0.0f); currentOffset += Float.BYTES; // Padding
-        buffer.position(currentOffset); buffer.putFloat(0.0f); currentOffset += Float.BYTES; // Padding
+        buffer.position(currentOffset);
+        buffer.putFloat(0.0f);
+        currentOffset += Float.BYTES; // Padding
+        buffer.position(currentOffset);
+        buffer.putFloat(0.0f);
+        currentOffset += Float.BYTES; // Padding
         // Total bytes written = currentOffset - baseOffset (should be 96)
 
         return currentOffset - baseOffset;
@@ -225,13 +330,20 @@ public class VulkanMaterial implements Poolable { // Implementing Poolable is op
      */
     public boolean hasTexture(int textureFlag) {
         switch (textureFlag) {
-            case TextureFlags.DIFFUSE: return diffuseTexture != null;
-            case TextureFlags.SPECULAR: return specularTexture != null;
-            case TextureFlags.NORMAL: return normalTexture != null;
-            case TextureFlags.EMISSIVE: return emissiveTexture != null;
-            case TextureFlags.OCCLUSION: return ambientOcclusionTexture != null;
-            case TextureFlags.METALLIC_ROUGHNESS: return metallicRoughnessTexture != null;
-            default: return false;
+            case TextureFlags.DIFFUSE:
+                return diffuseTexture != null;
+            case TextureFlags.SPECULAR:
+                return specularTexture != null;
+            case TextureFlags.NORMAL:
+                return normalTexture != null;
+            case TextureFlags.EMISSIVE:
+                return emissiveTexture != null;
+            case TextureFlags.OCCLUSION:
+                return ambientOcclusionTexture != null;
+            case TextureFlags.METALLIC_ROUGHNESS:
+                return metallicRoughnessTexture != null;
+            default:
+                return false;
         }
     }
 
