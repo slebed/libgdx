@@ -35,6 +35,7 @@ public class Vulkan3DLitTexturedCubeTest extends GdxTest {
     @Override
     public void create() {
         setupCamera();
+
         this.cubeMesh = setupCubeMeshInternal();
         loadCubeTexture();
 

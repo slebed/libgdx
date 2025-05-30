@@ -37,7 +37,7 @@ import static org.lwjgl.vulkan.VK10.*;
 public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Disposable {
 
     private static final String TAG = "VkSpriteBatchStreaming"; // Updated Tag
-    private static final boolean DEBUG = true; // Enable for verbose logging
+    private static final boolean DEBUG = false; // Enable for verbose logging
 
     public static final int POSITION_COMPONENTS = 2;
     public static final int COLOR_COMPONENTS = 1; // Represents 1 float for packed color

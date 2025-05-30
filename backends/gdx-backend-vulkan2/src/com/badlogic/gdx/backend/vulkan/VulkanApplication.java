@@ -352,6 +352,23 @@ public class VulkanApplication implements VulkanApplicationBase {
 
         this.clipboard = new VulkanClipboard();
 
+        Gdx.gl20 = Gdx.graphics.getGL20();
+        Gdx.gl = Gdx.gl20; // Gdx.gl is usually an alias for Gdx.gl20
+
+        // Verification logging:
+        if (Gdx.gl20 == null) {
+            String errorMsg = "FATAL: Gdx.gl20 is NULL after assignment from Gdx.graphics.getGL20()! Check VulkanGraphics.getGL20() implementation and ensure VulkanGL20Impl is created.";
+            Gdx.app.error(TAG, errorMsg); // Gdx.app should be available here
+            throw new GdxRuntimeException(errorMsg);
+        } else {
+            Gdx.app.log(TAG, "Gdx.gl20 initialized successfully with: " + Gdx.gl20.getClass().getName());
+        }
+        if (Gdx.gl == null) { // Should be redundant if Gdx.gl20 is not null and Gdx.gl = Gdx.gl20
+            Gdx.app.error(TAG, "FATAL: Gdx.gl is NULL after assignment!");
+            throw new GdxRuntimeException("Gdx.gl is NULL after assignment!");
+        } else {
+            Gdx.app.log(TAG, "Gdx.gl initialized successfully with: " + Gdx.gl.getClass().getName());
+        }
 
         window.create(windowHandle);
 

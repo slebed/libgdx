@@ -55,8 +55,8 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     private final VulkanDevice vulkanDevice;
     private final long vmaAllocator;
 
-    private VulkanPipelineManager pipelineManager;
-    private VulkanDescriptorManager descriptorManager;
+    private final VulkanPipelineManager pipelineManager;
+    private final VulkanDescriptorManager descriptorManager;
     private VkCommandBuffer currentRecordingCommandBuffer = null;
     private BufferFormat bufferFormat;
     private volatile int backBufferWidth;
@@ -78,6 +78,8 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     private long mainSwapchainRenderPass = VK_NULL_HANDLE;
     private final List<VulkanFrameResourcePreparer> frameResourcePreparers = new CopyOnWriteArrayList<>(); // Use thread-safe list if needed, or ArrayList if access is synchronized
 
+    private final VulkanGL20Impl vulkanGL20Instance;
+
     public VulkanGraphics(long windowHandle, VulkanApplicationConfiguration config, VulkanApplication app, VulkanDevice device, long vmaAllocatorHandle, VulkanPipelineManager pipelineManager, VulkanDescriptorManager descriptorManager) {
         this.windowHandle = windowHandle; // Store handle of the first window
         this.config = config;
@@ -86,6 +88,10 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         this.vmaAllocator = vmaAllocatorHandle;
         this.pipelineManager = pipelineManager;
         this.descriptorManager = descriptorManager;
+
+        this.vulkanGL20Instance = new VulkanGL20Impl(this);
+        if (Gdx.app != null) Gdx.app.log(TAG, "VulkanGL20Impl instance created and assigned in VulkanGraphics constructor.");
+        else System.out.println(TAG + ": VulkanGL20Impl instance created and assigned in VulkanGraphics constructor.");
 
         int initialBackBufferWidth;
         int initialBackBufferHeight;
@@ -265,9 +271,15 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     @Override
     public GL20 getGL20() {
-        System.out.println("INVOKING getGL20() - exiting");
-        System.exit(0);
-        return null;
+        if (this.vulkanGL20Instance == null) {
+            String errorMsg = "CRITICAL ERROR: vulkanGL20Instance is null in getGL20(). It should have been created in the VulkanGraphics constructor.";
+            if (Gdx.app != null) Gdx.app.error(TAG, errorMsg);
+            else System.err.println(TAG + ": " + errorMsg);
+            throw new IllegalStateException("VulkanGL20Impl not initialized!");
+        }
+        // String logMsg = "VulkanGraphics.getGL20() returning VulkanGL20Impl instance.";
+        // if (Gdx.app != null) Gdx.app.log(TAG, logMsg); else System.out.println(TAG + ": " + logMsg);
+        return this.vulkanGL20Instance;
     }
 
     @Override
@@ -406,6 +418,17 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     @Override
     public int getSafeInsetRight() {
         return 0;
+    }
+
+    public VkCommandBuffer getCurrentVkCommandBuffer() {
+        return this.currentRecordingCommandBuffer;
+    }
+
+    public VulkanWindow getCurrentWindow() {
+        if (app != null) {
+            return app.getCurrentWindow(); // Assumes VulkanApplication has a getCurrentWindow() method
+        }
+        return null;
     }
 
     private void storeCurrentWindowPositionAndDisplayMode() {

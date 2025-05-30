@@ -1107,17 +1107,18 @@ public class VulkanWindow implements Disposable {
     @SuppressWarnings("DefaultLocale")
     private void updateDynamicStates(VkCommandBuffer commandBuffer, MemoryStack stack, VkExtent2D swapchainExtent) {
         // Initial logging
-        if (Gdx.app != null) {
-            Gdx.app.debug(TAG, "updateDynamicStates: ENTER for window " + this.hashCode() +
-                    ". SwapchainExtent: " + swapchainExtent.width() + "x" + swapchainExtent.height());
-            if (this.viewportForVkCommands != null) {
-                Gdx.app.debug(TAG, "updateDynamicStates: Initial check - viewportForVkCommands IS SET. Hash: " + this.viewportForVkCommands.hashCode() +
-                        ", Type: " + this.viewportForVkCommands.getClass().getSimpleName() +
-                        ", Screen X/Y: " + this.viewportForVkCommands.getScreenX() + "/" + this.viewportForVkCommands.getScreenY() +
-                        ", Screen W/H: " + this.viewportForVkCommands.getScreenWidth() + "/" + this.viewportForVkCommands.getScreenHeight() +
-                        ", World W/H: " + this.viewportForVkCommands.getWorldWidth() + "/" + this.viewportForVkCommands.getWorldHeight());
-            } else {
-                Gdx.app.debug(TAG, "updateDynamicStates: Initial check - viewportForVkCommands is NULL.");
+        if (debug) {
+            if (Gdx.app != null) {
+                Gdx.app.debug(TAG, "updateDynamicStates: ENTER for window " + this.hashCode() + ". SwapchainExtent: " + swapchainExtent.width() + "x" + swapchainExtent.height());
+                if (this.viewportForVkCommands != null) {
+                    Gdx.app.debug(TAG, "updateDynamicStates: Initial check - viewportForVkCommands IS SET. Hash: " + this.viewportForVkCommands.hashCode() +
+                            ", Type: " + this.viewportForVkCommands.getClass().getSimpleName() +
+                            ", Screen X/Y: " + this.viewportForVkCommands.getScreenX() + "/" + this.viewportForVkCommands.getScreenY() +
+                            ", Screen W/H: " + this.viewportForVkCommands.getScreenWidth() + "/" + this.viewportForVkCommands.getScreenHeight() +
+                            ", World W/H: " + this.viewportForVkCommands.getWorldWidth() + "/" + this.viewportForVkCommands.getWorldHeight());
+                } else {
+                    Gdx.app.debug(TAG, "updateDynamicStates: Initial check - viewportForVkCommands is NULL.");
+                }
             }
         }
 
@@ -1134,9 +1135,8 @@ public class VulkanWindow implements Disposable {
             actualVkTargetY_libGDX = this.viewportForVkCommands.getScreenY();
             actualVkTargetWidth = this.viewportForVkCommands.getScreenWidth();
             actualVkTargetHeight = this.viewportForVkCommands.getScreenHeight();
-            if (Gdx.app != null) {
-                Gdx.app.debug(TAG, "updateDynamicStates: USING EXPLICIT viewportForVkCommands. Screen X/Y: " + actualVkTargetX + "/" + actualVkTargetY_libGDX +
-                        ", Screen W/H: " + actualVkTargetWidth + "/" + actualVkTargetHeight);
+            if (Gdx.app != null && debug) {
+                Gdx.app.debug(TAG, "updateDynamicStates: USING EXPLICIT viewportForVkCommands. Screen X/Y: " + actualVkTargetX + "/" + actualVkTargetY_libGDX + ", Screen W/H: " + actualVkTargetWidth + "/" + actualVkTargetHeight);
             }
         } else if (this.listener instanceof com.badlogic.gdx.scenes.scene2d.Stage) {
             // Fallback: if listener itself is a Stage (less common for full apps)
@@ -1147,9 +1147,8 @@ public class VulkanWindow implements Disposable {
                 actualVkTargetY_libGDX = stageViewport.getScreenY();
                 actualVkTargetWidth = stageViewport.getScreenWidth();
                 actualVkTargetHeight = stageViewport.getScreenHeight();
-                if (Gdx.app != null) {
-                    Gdx.app.debug(TAG, "updateDynamicStates: FALLBACK to listener as Stage. Screen X/Y: " + actualVkTargetX + "/" + actualVkTargetY_libGDX +
-                            ", Screen W/H: " + actualVkTargetWidth + "/" + actualVkTargetHeight);
+                if (Gdx.app != null && debug) {
+                    Gdx.app.debug(TAG, "updateDynamicStates: FALLBACK to listener as Stage. Screen X/Y: " + actualVkTargetX + "/" + actualVkTargetY_libGDX + ", Screen W/H: " + actualVkTargetWidth + "/" + actualVkTargetHeight);
                 }
             } else {
                 // Listener is a Stage, but its viewport is null - default to full extent
@@ -1157,7 +1156,7 @@ public class VulkanWindow implements Disposable {
                 actualVkTargetY_libGDX = 0.0f;
                 actualVkTargetWidth = (float) swapchainExtent.width();
                 actualVkTargetHeight = (float) swapchainExtent.height();
-                if (Gdx.app != null) {
+                if (Gdx.app != null && debug) {
                     Gdx.app.debug(TAG, "updateDynamicStates: Listener is Stage, but its viewport is NULL. Defaulting to full swapchain extent.");
                 }
             }
@@ -1171,7 +1170,7 @@ public class VulkanWindow implements Disposable {
             actualVkTargetY_libGDX = 0.0f;
             actualVkTargetWidth = (float) swapchainExtent.width();
             actualVkTargetHeight = (float) swapchainExtent.height();
-            if (Gdx.app != null) {
+            if (Gdx.app != null && debug) {
                 Gdx.app.debug(TAG, "updateDynamicStates: NO suitable viewport found. Defaulting to full swapchain extent.");
             }
         }
@@ -1185,7 +1184,7 @@ public class VulkanWindow implements Disposable {
         vkViewportBuffer.minDepth(0.0f);
         vkViewportBuffer.maxDepth(1.0f);
 
-        if (Gdx.app != null) {
+        if (Gdx.app != null && debug) {
             Gdx.app.debug(TAG, String.format("updateDynamicStates: FINAL vkViewport PARAMS for window %d: x=%.1f, y=%.1f, width=%.1f, height=%.1f",
                     this.hashCode(), vkViewportBuffer.x(), vkViewportBuffer.y(), vkViewportBuffer.width(), vkViewportBuffer.height()));
         }
@@ -1211,7 +1210,7 @@ public class VulkanWindow implements Disposable {
         vkScissorBuffer.offset(VkOffset2D.calloc(stack).set(clampedScissorX, clampedScissorY));
         vkScissorBuffer.extent(VkExtent2D.calloc(stack).set(clampedScissorWidth, clampedScissorHeight));
 
-        if (Gdx.app != null) {
+        if (Gdx.app != null && debug) {
             Gdx.app.debug(TAG, String.format("updateDynamicStates: FINAL vkScissor PARAMS for window %d: x=%d, y=%d, width=%d, height=%d",
                     this.hashCode(), vkScissorBuffer.offset().x(), vkScissorBuffer.offset().y(), vkScissorBuffer.extent().width(), vkScissorBuffer.extent().height()));
         }

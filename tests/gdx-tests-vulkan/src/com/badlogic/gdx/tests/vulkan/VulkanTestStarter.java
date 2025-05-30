@@ -27,6 +27,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
@@ -41,10 +42,14 @@ public class VulkanTestStarter {
     static CommandLineOptions options;
 
     public static void main(String[] argv) {
+
+        int windowWidth = 640;
+        int windowHeight = 480;
+
         options = new CommandLineOptions(argv);
         VulkanApplicationConfiguration vkConfig = new VulkanApplicationConfiguration();
         vkConfig.setTitle("Vulkan Test"); // Default title
-        vkConfig.setWindowedMode(640, 480);
+        vkConfig.setWindowedMode(windowWidth, windowHeight);
         vkConfig.enableValidationLayers(true, null);
         vkConfig.setPresentationMode(VulkanApplicationConfiguration.SwapchainPresentMode.FIFO);
 
@@ -119,48 +124,8 @@ public class VulkanTestStarter {
             }
 
             //Viewport viewport = new VulkanScreenViewport();
-            Viewport viewport = new VulkanFillViewport(640,480);
+            Viewport viewport = new VulkanFillViewport(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             stage = new VulkanStage(viewport);
-            /*stage.addListener(new InputListener() {
-                @Override
-                public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-                    int screenX = Gdx.input.getX(pointer); // Get raw screen X
-                    int screenY = Gdx.input.getY(pointer); // Get raw screen Y
-                    String firstTestName = GdxVulkanTests.getNames().get(0);
-                    Gdx.app.log("StageInputDebug", "touchDown Listener Coords (Screen): (" + screenX + ", " + screenY + ") " + firstTestName);
-
-                    // Unproject manually using the stage's viewport
-                    Vector2 stageCoords = new Vector2();
-                    // Ensure stage and its viewport are not null here for safety
-                    if (stage != null && stage.getViewport() != null) {
-                        stage.getViewport().unproject(stageCoords.set(screenX, screenY));
-                        Gdx.app.log("StageInputDebug", "touchDown Unprojected Coords: (" + stageCoords.x + ", " + stageCoords.y + ")");
-
-                        // Optionally, test hit detection directly here
-                        TextButton testButton = stage.getRoot().findActor(firstTestName);
-                        if (testButton != null) {
-                            boolean hit = (testButton.hit(stageCoords.x, stageCoords.y, true) != null);
-                            Gdx.app.log("StageInputDebug", "Hit test on '" + testButton.getName() + "' with unprojected coords: " + hit);
-                        } else {
-                            Gdx.app.log("StageInputDebug", "Could not find test button for hit test.");
-                        }
-
-                    } else {
-                        Gdx.app.log("StageInputDebug", "Stage or Viewport is null, cannot unproject.");
-                    }
-
-
-                    Gdx.app.log("StageInputDebug", "touchDown Screen Coords: (" + screenX + ", " + screenY + ")");
-                    Gdx.app.log("StageInputDebug", "touchDown Listener Coords (Stage): (" + x + ", " + y + ")");
-
-                    return false;
-                }
-
-                @Override
-                public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
-                    Gdx.app.log("StageInputDebug", "touchUp Stage Coords: (" + x + ", " + y + ")");
-                }
-            });*/
 
             if (Gdx.input != null) {
                 Gdx.app.log("VulkanTestChooser", "Setting InputProcessor on Gdx.input instance hash: " + Gdx.input.hashCode());
@@ -179,20 +144,19 @@ public class VulkanTestStarter {
             stage.addActor(container);
             container.setFillParent(true);
             container.add(label).pad(10).row();
-            stage.setDebugAll(true);
+
             Table table = new Table();
 
-            //ScrollPane scroll = new ScrollPane(table, skin);
-            //scroll.setSmoothScrolling(false);
-            //scroll.setFadeScrollBars(false);
-            //stage.setScrollFocus(scroll);
+            ScrollPane scroll = new ScrollPane(table, skin);
+            scroll.setSmoothScrolling(false);
+            scroll.setFadeScrollBars(false);
 
             int tableSpace = 4;
             table.pad(10).defaults().expandX().space(tableSpace);
             Gdx.app.log(TAG, "Adding " + GdxVulkanTests.getNames().size() + " tests to container...");
             for (final String testName : GdxVulkanTests.getNames()) {
                 final TextButton testButton = new TextButton(testName, skin);
-                //testButton.setDisabled(!options.isTestCompatible(testName));
+
                 testButton.setName(testName);
                 table.add(testButton).fillX();
                 table.row();
@@ -212,10 +176,11 @@ public class VulkanTestStarter {
                     }
                 });
             }
-            //Gdx.app.log(TAG, "Adding scroll pane to container...");
-            container.add(table).grow();
-            //container.add(scroll).grow();
+
+            container.add(scroll).grow();
             container.row();
+
+            stage.setDebugAll(false);
 
             lastClickedTestButton = table.findActor(prefs.getString("LastTest"));
             if (lastClickedTestButton != null) {
@@ -334,4 +299,39 @@ public class VulkanTestStarter {
             Gdx.app.log(TAG, "Chooser disposed.");
         }
     }
+
+    public static class LoggingScrollPane extends com.badlogic.gdx.scenes.scene2d.ui.ScrollPane {
+        public LoggingScrollPane(com.badlogic.gdx.scenes.scene2d.Actor widget, com.badlogic.gdx.scenes.scene2d.ui.Skin skin) {
+            super(widget, skin);
+        }
+
+        @Override
+        public void draw(com.badlogic.gdx.graphics.g2d.Batch batch, float parentAlpha) {
+            float realX = getX();
+            float realY = getY();
+            float realWidth = getWidth();
+            float realHeight = getHeight();
+
+            com.badlogic.gdx.Gdx.app.log("LoggingScrollPane", "Pre-draw dimensions: x=" + realX + ", y=" + realY +
+                    ", width=" + realWidth + ", height=" + realHeight);
+            if (realWidth < 1 || realHeight < 1) {
+                com.badlogic.gdx.Gdx.app.error("LoggingScrollPane", "ScrollPane has zero/negative width or height before drawing!");
+            }
+            super.draw(batch, parentAlpha);
+        }
+
+        // This is the clipBegin variant ScrollPane typically uses.
+        @Override
+        public boolean clipBegin() {
+            boolean result = super.clipBegin();
+            com.badlogic.gdx.Gdx.app.log("LoggingScrollPane", "internal clipBegin() returned " + result +
+                    ". Current ScrollPane bounds: x=" + getX() + ", y=" + getY() +
+                    ", w=" + getWidth() + ", h=" + getHeight());
+            if (!result && getWidget() != null) {
+                com.badlogic.gdx.Gdx.app.error("LoggingScrollPane", "clipBegin() returned false! Widget (Table) will NOT be drawn.");
+            }
+            return result;
+        }
+    }
+
 }
