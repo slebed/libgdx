@@ -1,0 +1,159 @@
+// Inside libgdx/tests/gdx-tests-vulkan/build.gradle
+
+// Use the shared assets directory (Assuming this is correct)
+sourceSets.main.resources.srcDirs = ["../gdx-tests-android/assets"]
+
+// Apply Java version settings (Ensure 'versions.javaLwjgl3' is defined in your root project)
+if (JavaVersion.current().isJava9Compatible()) {
+	compileJava {
+		options.release = versions.javaLwjgl3 // Or appropriate version like 11, 17 etc.
+	}
+}
+sourceCompatibility = versions.javaLwjgl3 // Or appropriate version
+targetCompatibility = versions.javaLwjgl3 // Or appropriate version
+
+dependencies {
+	implementation project(":tests:gdx-tests") // Depend on common tests
+	implementation project(":backends:gdx-backend-vulkan") // Depend on your backend
+	// Natives needed for running the tests (Ensure 'testnatives' config exists in dependencies.gradle)
+	implementation testnatives.desktop
+	// Ensure 'libraries.lwjgl3' config exists in dependencies.gradle
+	implementation libraries.lwjgl3
+
+	//api "org.lwjgl.lwjgl:lwjgl-shaderc:$versions.lwjgl3"
+}
+
+// Task to launch the main test starter AND log necessary info for RenderDoc setup
+tasks.register('runVulkanTestAndLogClasspath', JavaExec) {
+	// Ensure dependencies are built before running
+	dependsOn classes
+	// If tests directly use classes from gdx-tests (not just through JAR)
+	// dependsOn project(':tests:gdx-tests').classes
+
+	group = "Execution" // Set task group in IDE
+	description = "Runs VulkanTestStarter and logs info needed for RenderDoc"
+
+	mainClass = "com.badlogic.gdx.tests.vulkan.VulkanTestStarter" // Your main starter class
+	classpath = sourceSets.main.runtimeClasspath // Use the runtime classpath
+	// Use the assets directory determined relative to the gdx-tests-android project
+	workingDir = project(':tests:gdx-tests-android').file("assets")
+
+	// --- Print info needed for RenderDoc ---
+	/*doFirst {
+		println "\n------------------------------------------------------------"
+		println ">>> RenderDoc Launch Info for :tests:gdx-tests-vulkan <<<"
+		println "------------------------------------------------------------"
+		// Gradle's 'executable' property usually holds the full path to java.exe
+		println "1. Java Executable Path: ${executable}"
+		println "2. Working Directory: ${workingDir.absolutePath}"
+		println "3. Main Class: ${mainClass.get()}"
+		// .asPath generates the platform-specific classpath string (e.g., semicolon-separated on Windows)
+		println "4. Classpath String (for RenderDoc -cp argument):\nSTART_CLASSPATH\n${classpath.asPath}\nEND_CLASSPATH"
+		println "------------------------------------------------------------"
+		println ">>> Copy the paths above into RenderDoc's Launch Application tab. <<<"
+		println ">>> Use '-cp \"<Classpath String>\" ${mainClass.get()}' for Command-line Arguments. <<<"
+		println "------------------------------------------------------------\n"
+	}*/
+	// -------------------------------------------------
+
+	// Keep standard input enabled so the app can run normally if needed
+	standardInput = System.in
+	// Set to true to prevent Gradle failing if the Java app exits with non-zero code
+	ignoreExitValue = true
+
+	// Optional: Keep LWJGL debug flags if helpful during development
+	// Remove these if they cause issues or are not needed
+	/*jvmArgs = [
+			"-Dorg.lwjgl.util.Debug=true",
+			"-Dorg.lwjgl.util.DebugLoader=true"
+	]*/
+}
+
+// Removed the older 'launchTestsVulkan' and commented-out 'dist' tasks for clarity.
+
+
+
+
+
+
+
+
+
+
+//// Inside libgdx/tests/gdx-tests-vulkan/build.gradle
+//
+//ext {
+//	// IMPORTANT: Set this to the fully qualified name of your Vulkan test starter class
+//	mainTestClass = "com.badlogic.gdx.tests.vulkan.VulkanTestStarter"
+//}
+//// Use the shared assets directory
+//sourceSets.main.resources.srcDirs = ["../gdx-tests-android/assets"]
+//
+//// Apply Java version settings (copy from gdx-tests-lwjgl3 if unsure)
+//if (JavaVersion.current().isJava9Compatible()) {
+//	compileJava {
+//		options.release = versions.javaLwjgl3 // Or appropriate version
+//	}
+//}
+//sourceCompatibility = versions.javaLwjgl3 // Or appropriate version
+//targetCompatibility = versions.javaLwjgl3 // Or appropriate version
+//
+//dependencies {
+//	implementation project(":tests:gdx-tests") // Depend on common tests
+//	implementation project(":backends:gdx-backend-vulkan2") // Depend on your backend
+//	// Natives needed for running the tests (includes core gdx natives)
+//	implementation testnatives.desktop
+//	implementation libraries.lwjgl3
+//	//implementation project(':backends') // Check dependencies.gradle if this name is correct
+//}
+//
+//// Task to launch tests (adapt from gdx-tests-lwjgl3)
+//tasks.register('launchTestsVulkan', JavaExec) {
+//	dependsOn classes
+//	mainClass = mainTestClass
+//	classpath = sourceSets.main.runtimeClasspath
+//	standardInput = System.in
+//	workingDir = new File("../gdx-tests-android/assets") // Ensure correct working dir
+//	ignoreExitValue = true
+//	// Add any necessary JVM args for Vulkan (e.g., validation layers) if needed
+//	// jvmArgs = ["-D..."]
+//}
+//configure (launchTestsVulkan) {
+//	group "LibGDX"
+//	description = "Run the Vulkan tests"
+//}
+//
+//// Optional: Distributable JAR task (adapt from gdx-tests-lwjgl3)
+//tasks.register('dist', Jar) {
+//	// ... (copy contents from gdx-tests-lwjgl3/build.gradle if needed) ...
+//}
+//
+//tasks.register('runVulkanTest', JavaExec) {
+//	dependsOn classes
+//	dependsOn project(':tests:gdx-tests').classes
+//	group = "Vulkan Tests"
+//	description = "Runs VulkanQuadTest using the Vulkan backend"
+//	mainClass = "com.badlogic.gdx.tests.vulkan.VulkanTestStarter"
+//	// Assign the classpath to the task property
+//	classpath = sourceSets.main.runtimeClasspath
+//	workingDir = project(':tests:gdx-tests-android').file("assets")
+//	args = ["VulkanQuadTest"]
+//
+//	// --- Add doFirst block to PRINT the classpath ---
+//	doFirst {
+//		//println "-----------------------------------------------------"
+//		println "Runtime Classpath for :tests:gdx-tests-vulkan task:"
+//		classpath.each { File file -> println file.absolutePath }
+//		println "-----------------------------------------------------"
+//	}
+//	// -------------------------------------------------
+//
+//	// Keep JVM args for LWJGL debugging ONLY
+//	jvmArgs = [
+//		"-Dorg.lwjgl.util.Debug=true",
+//		"-Dorg.lwjgl.util.DebugLoader=true"
+//	]
+//
+//	standardInput = System.in
+//	ignoreExitValue = true
+//}

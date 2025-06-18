@@ -1,0 +1,73 @@
+// Apply necessary plugins
+plugins {
+    id 'java-library'
+}
+
+// Top of your build.gradle (outside dependencies block, usually near plugins/java blocks)
+import org.gradle.internal.os.OperatingSystem // Import the necessary class
+
+// Determine the LWJGL natives classifier based on the OS and Arch
+String lwjglNativesClassifier = ""
+OperatingSystem os = OperatingSystem.current()
+String arch = System.getProperty("os.arch") // Get architecture (e.g., "amd64", "aarch64")
+
+if (os.isWindows()) {
+    lwjglNativesClassifier = arch.equals("amd64") ? "natives-windows" : "natives-windows-x86"
+} else if (os.isLinux()) {
+    if (arch.equals("aarch64")) {
+        lwjglNativesClassifier = "natives-linux-arm64"
+    } else if (arch.equals("arm") || arch.equals("arm32")) {
+        lwjglNativesClassifier = "natives-linux-arm32"
+    } else { // Assume x64 otherwise for Linux
+        lwjglNativesClassifier = "natives-linux"
+    }
+    // Add riscv64 check if needed: else if (arch.equals("riscv64")) { lwjglNativesClassifier = "natives-linux-riscv64" }
+} else if (os.isMacOsX()) {
+    lwjglNativesClassifier = arch.equals("aarch64") ? "natives-macos-arm64" : "natives-macos"
+} else {
+    // Handle unknown OS or throw error if preferred
+    throw new GradleException("Unsupported OS for LWJGL natives: " + os.getName())
+}
+println "Detected LWJGL Natives Classifier: " + lwjglNativesClassifier // Optional: Log detected classifier
+
+
+java {
+    sourceCompatibility JavaVersion.VERSION_11
+    targetCompatibility JavaVersion.VERSION_11
+}
+dependencies {
+    // Core :gdx dependency should come from ../build.gradle's configure block
+
+    // LWJGL dependencies
+    api "org.lwjgl:lwjgl:$versions.lwjgl3"
+    api "org.lwjgl:lwjgl-glfw:$versions.lwjgl3"
+    api "org.lwjgl:lwjgl-vulkan:$versions.lwjgl3"
+    api "org.lwjgl:lwjgl-openal:$versions.lwjgl3"
+    api "org.lwjgl:lwjgl-stb:$versions.lwjgl3"
+    api "org.lwjgl:lwjgl-jemalloc:$versions.lwjgl3"
+    api "org.lwjgl:lwjgl-shaderc:$versions.lwjgl3"
+    // VMA Binding
+    api "org.lwjgl:lwjgl-vma:$versions.lwjgl3"
+
+    // Audio dependencies
+    api "com.badlogicgames.jlayer:jlayer:$versions.jlayer"
+    api "org.jcraft:jorbis:$versions.jorbis"
+
+    // Desktop natives dependency (keep if it provides core gdx natives)
+    api gdxnatives.desktop
+
+    // ***** USE THE DEFINED VARIABLE FOR VMA NATIVES *****
+    // Add explicit VMA natives using the classifier determined above
+    runtimeOnly "org.lwjgl:lwjgl-vma::$lwjglNativesClassifier"
+    runtimeOnly "org.lwjgl:lwjgl-shaderc::$lwjglNativesClassifier"
+
+    // You might want to add other natives explicitly too for clarity,
+    // using the same lwjglNativesClassifier variable:
+    // runtimeOnly "org.lwjgl:lwjgl::$lwjglNativesClassifier"
+    // runtimeOnly "org.lwjgl:lwjgl-glfw::$lwjglNativesClassifier"
+    // runtimeOnly "org.lwjgl:lwjgl-vulkan::$lwjglNativesClassifier" // <-- Add Vulkan Natives explicitly!
+    // runtimeOnly "org.lwjgl:lwjgl-jemalloc::$lwjglNativesClassifier"
+    // runtimeOnly "org.lwjgl:lwjgl-openal::$lwjglNativesClassifier"
+    // runtimeOnly "org.lwjgl:lwjgl-stb::$lwjglNativesClassifier"
+
+}
