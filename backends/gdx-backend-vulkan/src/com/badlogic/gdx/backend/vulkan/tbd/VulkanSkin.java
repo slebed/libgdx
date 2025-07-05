@@ -1,7 +1,8 @@
 
-package com.badlogic.gdx.backend.vulkan; // Example package, adjust as needed
+package com.badlogic.gdx.backend.vulkan.tbd; // Example package, adjust as needed
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.backend.vulkan.VulkanDevice;
 import com.badlogic.gdx.files.FileHandle;
 // Needed for casting
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;

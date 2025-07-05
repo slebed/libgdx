@@ -2,7 +2,7 @@ package com.badlogic.gdx.tests.vulkan;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input; // Added for potential exit key
-import com.badlogic.gdx.backend.vulkan.VulkanGraphics; // To get command buffer
+import com.badlogic.gdx.backend.vulkan.VulkanGraphics;
 import com.badlogic.gdx.backend.vulkan.VulkanSpriteBatch;
 import com.badlogic.gdx.backend.vulkan.VulkanTexture;
 // BitmapFont will likely NOT work out-of-the-box with VulkanSpriteBatch

@@ -1,7 +1,9 @@
 
-package com.badlogic.gdx.backend.vulkan;
+package com.badlogic.gdx.backend.vulkan.tbd;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.backend.vulkan.VkMemoryUtil;
+import com.badlogic.gdx.backend.vulkan.VulkanDevice;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import org.lwjgl.system.MemoryStack;

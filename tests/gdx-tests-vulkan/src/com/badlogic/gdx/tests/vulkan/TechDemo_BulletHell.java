@@ -6,8 +6,6 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.backend.vulkan.VulkanDevice;
 import com.badlogic.gdx.backend.vulkan.VulkanGraphics;
 import com.badlogic.gdx.backend.vulkan.VulkanPixmapPacker;
-import com.badlogic.gdx.backend.vulkan.VulkanSpriteBatch;
-import com.badlogic.gdx.backend.vulkan.VulkanSpriteBatchInstanced;
 import com.badlogic.gdx.backend.vulkan.VulkanTexture;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;

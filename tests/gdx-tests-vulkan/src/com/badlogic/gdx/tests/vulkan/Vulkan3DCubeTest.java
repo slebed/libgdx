@@ -1,6 +1,7 @@
 package com.badlogic.gdx.tests.vulkan; // Or your preferred test package
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.backend.vulkan.VulkanGraphics;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.g3d.utils.CameraInputController;
@@ -13,7 +14,6 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
 // Your Vulkan backend classes
 import com.badlogic.gdx.backend.vulkan.VulkanApplication;
 import com.badlogic.gdx.backend.vulkan.VulkanDevice;
-import com.badlogic.gdx.backend.vulkan.VulkanGraphics;
 import com.badlogic.gdx.backend.vulkan.VulkanMesh;
 import com.badlogic.gdx.backend.vulkan.VulkanShaderManager;
 import com.badlogic.gdx.backend.vulkan.VulkanPipelineManager;

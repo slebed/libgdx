@@ -108,19 +108,19 @@ public class VkResultDecoder {
 		}
 	}
 
-	public static String decodePresentMode(int presentMode) {
+	public static String decodePresentMode (int presentMode) {
 		switch (presentMode) {
-			case KHRSurface.VK_PRESENT_MODE_IMMEDIATE_KHR:
-				return "IMMEDIATE_KHR (" + presentMode + ")";
-			case KHRSurface.VK_PRESENT_MODE_MAILBOX_KHR:
-				return "MAILBOX_KHR (" + presentMode + ")";
-			case KHRSurface.VK_PRESENT_MODE_FIFO_KHR:
-				return "FIFO_KHR (" + presentMode + ")"; // VSync
-			case KHRSurface.VK_PRESENT_MODE_FIFO_RELAXED_KHR:
-				return "FIFO_RELAXED_KHR (" + presentMode + ")";
-			// Add cases for other modes like SHARED_DEMAND_REFRESH / SHARED_CONTINUOUS_REFRESH if needed
-			default:
-				return "Unknown Present Mode (" + presentMode + ")";
+		case KHRSurface.VK_PRESENT_MODE_IMMEDIATE_KHR:
+			return "IMMEDIATE_KHR (" + presentMode + ")";
+		case KHRSurface.VK_PRESENT_MODE_MAILBOX_KHR:
+			return "MAILBOX_KHR (" + presentMode + ")";
+		case KHRSurface.VK_PRESENT_MODE_FIFO_KHR:
+			return "FIFO_KHR (" + presentMode + ")"; // VSync
+		case KHRSurface.VK_PRESENT_MODE_FIFO_RELAXED_KHR:
+			return "FIFO_RELAXED_KHR (" + presentMode + ")";
+		// Add cases for other modes like SHARED_DEMAND_REFRESH / SHARED_CONTINUOUS_REFRESH if needed
+		default:
+			return "Unknown Present Mode (" + presentMode + ")";
 		}
 	}
 

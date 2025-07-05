@@ -34,7 +34,7 @@ import java.nio.FloatBuffer;
  * @author badlogic, Xoppa */
 public abstract class GLTexture implements Disposable {
 	/** The target of this texture, used when binding the texture, e.g. GL_TEXTURE_2D */
-	public final int glTarget;
+	public int glTarget;
 	protected int glHandle;
 	protected TextureFilter minFilter = TextureFilter.Nearest;
 	protected TextureFilter magFilter = TextureFilter.Nearest;

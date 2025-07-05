@@ -1,3 +1,4 @@
+/*
 package com.badlogic.gdx.tests.vulkan;
 
 import com.badlogic.gdx.ApplicationListener;
@@ -14,6 +15,7 @@ import com.badlogic.gdx.backend.vulkan.VulkanTextureAtlasLoader;
 import com.badlogic.gdx.backend.vulkan.VulkanTextureLoader;
 import com.badlogic.gdx.graphics.Color;
 // Need Texture for AssetManager key
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage; // Use Stage as type, VulkanStage is implementation
@@ -25,11 +27,13 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
 // Use core ScreenViewport
 import com.badlogic.gdx.utils.viewport.Viewport;
 
+*/
 /**
  * A minimal Vulkan backend test case rendering a single Scene2D TextButton.
  * Helps isolate rendering loop issues.
  * Assumes uiskin assets are in a 'data' folder accessible to the application.
- */
+ *//*
+
 public class VulkanMinimalTest implements ApplicationListener {
 
     private final String TAG = "VulkanMinimalTest";
@@ -50,7 +54,7 @@ public class VulkanMinimalTest implements ApplicationListener {
 
         // Register loaders for Vulkan types
         // NOTE: Adjust package names if necessary for your backend structure
-        assetManager.setLoader(VulkanTexture.class, new VulkanTextureLoader(resolver));
+        assetManager.setLoader(Texture.class, new VulkanTextureLoader(resolver));
         assetManager.setLoader(TextureAtlas.class, new VulkanTextureAtlasLoader(resolver));
         // TextureAtlasLoader requires TextureAtlas.AtlasData, Texture.class might be needed implicitly
 
@@ -204,4 +208,4 @@ public class VulkanMinimalTest implements ApplicationListener {
             System.exit(1); // Exit if application creation fails critically
         }
     }
-}
+}*/

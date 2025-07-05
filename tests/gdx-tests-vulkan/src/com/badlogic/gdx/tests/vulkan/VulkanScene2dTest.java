@@ -28,6 +28,7 @@ import com.badlogic.gdx.backend.vulkan.VulkanTexture;
 import com.badlogic.gdx.backend.vulkan.VulkanTextureAtlasLoader;
 import com.badlogic.gdx.backend.vulkan.VulkanTextureLoader;
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 
@@ -58,7 +59,7 @@ public class VulkanScene2dTest extends GdxTest {
 
             Gdx.app.log(TAG, "Creating AssetManager...");
             assetManager = new AssetManager(resolver);
-            assetManager.setLoader(VulkanTexture.class, new VulkanTextureLoader(resolver));
+            //assetManager.setLoader(Texture.class, new VulkanTextureLoader(resolver));
             assetManager.setLoader(TextureAtlas.class, new VulkanTextureAtlasLoader(resolver));
 
             String skinPath = "data/uiskin.json";

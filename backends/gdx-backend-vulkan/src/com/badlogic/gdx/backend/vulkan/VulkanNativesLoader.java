@@ -19,24 +19,24 @@ package com.badlogic.gdx.backend.vulkan;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 
 public final class VulkanNativesLoader {
-    private static final String TAG = "VulkanNativesLoader";
-    private static final boolean debug = false;
+	private static final String TAG = "VulkanNativesLoader";
+	private static final boolean debug = false;
 
-    static public boolean loadCalled = false;
+	static public boolean loadCalled = false;
 
-    static public synchronized void load() {
-        if (loadCalled) {
-            if (debug) System.out.println(TAG + " load() already called."); // Log if called again
-            return;
-        }
-        if (debug) System.out.println(TAG + " load() called. Attempting GdxNativesLoader.load()..."); // Log entry
-        loadCalled = true;
-        try {
-            GdxNativesLoader.load();
-            if (debug) System.out.println(TAG + " GdxNativesLoader.load() completed WITHOUT throwing."); // Log success
-        } catch (Throwable t) {
-            System.err.println(TAG + " GdxNativesLoader.load() THREW an exception!"); // Log failure
-            throw t; // Re-throw original error
-        }
-    }
+	static public synchronized void load () {
+		if (loadCalled) {
+			if (debug) System.out.println(TAG + " load() already called."); // Log if called again
+			return;
+		}
+		if (debug) System.out.println(TAG + " load() called. Attempting GdxNativesLoader.load()..."); // Log entry
+		loadCalled = true;
+		try {
+			GdxNativesLoader.load();
+			if (debug) System.out.println(TAG + " GdxNativesLoader.load() completed WITHOUT throwing."); // Log success
+		} catch (Throwable t) {
+			System.err.println(TAG + " GdxNativesLoader.load() THREW an exception!"); // Log failure
+			throw t; // Re-throw original error
+		}
+	}
 }

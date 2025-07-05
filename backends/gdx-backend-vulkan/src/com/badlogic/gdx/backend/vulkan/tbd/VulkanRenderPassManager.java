@@ -1,6 +1,7 @@
 
-package com.badlogic.gdx.backend.vulkan; // Or your preferred package
+package com.badlogic.gdx.backend.vulkan.tbd; // Or your preferred package
 
+import com.badlogic.gdx.backend.vulkan.VulkanSwapchain;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import org.lwjgl.system.MemoryStack;
@@ -28,7 +29,8 @@ public class VulkanRenderPassManager {
 	 * @param swapchain The VulkanSwapchain providing render pass, framebuffer, and extent info.
 	 * @param imageIndex The index of the current swapchain image/framebuffer to use.
 	 * @param clearColor The color to clear the attachment with (if null, uses default). */
-	public void beginSwapchainRenderPass (VkCommandBuffer commandBuffer, VulkanSwapchain swapchain, int imageIndex,		Color clearColor) {
+	public void beginSwapchainRenderPass (VkCommandBuffer commandBuffer, VulkanSwapchain swapchain, int imageIndex,
+                                          Color clearColor) {
 		if (commandBuffer == null) {
 			throw new GdxRuntimeException("CommandBuffer cannot be null for beginSwapchainRenderPass");
 		}
@@ -42,7 +44,7 @@ public class VulkanRenderPassManager {
 				throw new GdxRuntimeException("RenderPass handle is null in VulkanSwapchain");
 			}
 
-			long framebufferHandle = 0l;//swapchain.getFramebuffer(imageIndex); // getFramebuffer handles index check
+			long framebufferHandle = 0l;// swapchain.getFramebuffer(imageIndex); // getFramebuffer handles index check
 			VkExtent2D currentExtent = swapchain.getExtent();
 			if (currentExtent == null) {
 				throw new GdxRuntimeException("Swapchain extent is null");

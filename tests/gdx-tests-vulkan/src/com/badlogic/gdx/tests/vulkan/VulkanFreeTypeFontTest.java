@@ -1,9 +1,9 @@
 package com.badlogic.gdx.tests.vulkan;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.backend.vulkan.VulkanSpriteBatch;
 import com.badlogic.gdx.backend.vulkan.VulkanGraphics;
 import com.badlogic.gdx.backend.vulkan.VulkanPixmapPacker;
-import com.badlogic.gdx.backend.vulkan.VulkanSpriteBatchInstanced;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
@@ -22,8 +22,8 @@ public class VulkanFreeTypeFontTest extends GdxTest {
     @Override
     public void create() {
         gfx = (VulkanGraphics) Gdx.graphics;
+        batch = new VulkanSpriteBatch();
         font = createFont("data/DroidSerif-Regular.ttf", 24);
-        //batch = new VulkanSpriteBatchInstanced(gfx, 1024);
     }
 
     private BitmapFont createFont(String fontName, int size) {
