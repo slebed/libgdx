@@ -15,7 +15,7 @@ import java.text.DecimalFormat;
 import java.util.Random;
 
 public class VulkanSpriteBatchStressTest extends GdxTest implements InputProcessor {
-    private static final String TAG = "VkStressTestSwitch";
+    private static final String TAG = "VulkanSpriteBatchStressTest";
     DecimalFormat df = new DecimalFormat("0.00");
 
     int SPRITES = 50000; // Adjusted for potentially more demanding instanced setup initially, can be increased

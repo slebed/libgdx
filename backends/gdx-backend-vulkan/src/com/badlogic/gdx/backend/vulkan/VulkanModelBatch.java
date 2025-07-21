@@ -4,7 +4,9 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
@@ -17,7 +19,6 @@ import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Objects;
 
 import static org.lwjgl.util.vma.Vma.VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
@@ -27,13 +28,13 @@ import static org.lwjgl.vulkan.VK10.*;
 
 public class VulkanModelBatch implements Disposable {
     private static final String TAG = "VulkanModelBatch";
-    private static final boolean DEBUG = true;
+    private static final boolean DEBUG = false;
 
-    private final VulkanDevice vulkanDevice;
-    private final VkDevice rawDevice;
-    private final VulkanDescriptorManager descriptorManager;
-    private final long vmaAllocator;
-    private final VulkanGraphics vulkanGraphics; // To get currentFrameIndex
+    private VulkanDevice vulkanDevice;
+    private VkDevice rawDevice;
+    private VulkanDescriptorManager descriptorManager;
+    private long vmaAllocator;
+    private VulkanGraphics vulkanGraphics; // To get currentFrameIndex
 
     private Camera camera;
     private VkCommandBuffer currentCommandBuffer;
@@ -49,17 +50,32 @@ public class VulkanModelBatch implements Disposable {
     private VulkanTexture defaultDiffuseTexture;
 
     // Descriptor Sets (per frame-in-flight)
-    private final long[] perFrameGlobalDescriptorSets;     // For Set 0 (GlobalUBO)
-    private final long[] perFrameObjectMaterialDescriptorSets; // For Set 1 (ObjectUBO, MaterialUBO, Textures)
-    private final int maxFramesInFlight;
-    private int currentFrameIndex = 0; // Current frame index for selecting DS
+    private long[] perFrameGlobalDescriptorSets;
+    private long[] perFrameObjectMaterialDescriptorSets;
+    private int maxFramesInFlight;
+    private int currentFrameIndex = 0;
 
     private long lastBoundPipelineHandle = VK_NULL_HANDLE;
-    private long lastBoundPipelineLayoutHandle = VK_NULL_HANDLE; // Stored from bundle
 
-    public int renderCallsThisFrame = 0;
+    // --- PROFILING COUNTERS ---
+    public int renderCalls = 0;
+    public int shaderSwitches = 0;
+    public int numVertices = 0;
+    // ---
+
+    public VulkanModelBatch() {
+        VulkanApplication app = (VulkanApplication) Gdx.app;
+        VulkanDevice device = app.getVkDevice();
+        VulkanDescriptorManager descriptorManager = app.getDescriptorManager();
+        VulkanGraphics graphics = (VulkanGraphics) app.getGraphics();
+        init(device, descriptorManager, graphics, app.getVmaAllocator());
+    }
 
     public VulkanModelBatch(VulkanDevice device, VulkanDescriptorManager descriptorManager, VulkanGraphics graphics, long vmaAllocator) {
+        init(device, descriptorManager, graphics, vmaAllocator);
+    }
+
+    private void init(VulkanDevice device, VulkanDescriptorManager descriptorManager, VulkanGraphics graphics, long vmaAllocator) {
         this.vulkanDevice = Objects.requireNonNull(device, "VulkanDevice cannot be null.");
         this.rawDevice = device.getLogicalDevice();
         this.descriptorManager = Objects.requireNonNull(descriptorManager, "VulkanDescriptorManager cannot be null.");
@@ -83,12 +99,7 @@ public class VulkanModelBatch implements Disposable {
         Pixmap pixmap = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
         pixmap.setColor(Color.WHITE);
         pixmap.fill();
-        try {
-            this.defaultDiffuseTexture = new VulkanTexture(pixmap);
-        } catch (Exception e) {
-            pixmap.dispose();
-            throw new GdxRuntimeException("Failed to create default diffuse texture for ModelBatch", e);
-        }
+        this.defaultDiffuseTexture = new VulkanTexture(pixmap);
         pixmap.dispose();
         if (DEBUG && Gdx.app != null) Gdx.app.log(TAG, "Default diffuse texture created.");
     }
@@ -99,35 +110,37 @@ public class VulkanModelBatch implements Disposable {
                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
                 VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
         this.globalUboMapped = this.globalUbo.getMappedByteBuffer();
-        if (this.globalUboMapped == null) throw new GdxRuntimeException("Global UBO mapped buffer is null.");
 
         long objectUboSize = 1 * 16 * Float.BYTES; // Model Matrix
         this.objectUbo = VulkanResourceUtil.createManagedBuffer(vmaAllocator, objectUboSize,
                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
                 VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
         this.objectUboMapped = this.objectUbo.getMappedByteBuffer();
-        if (this.objectUboMapped == null) throw new GdxRuntimeException("Object UBO mapped buffer is null.");
 
         long materialUboSize = 256; // Ensure fits VulkanMaterial.writeToUbo()
         this.materialUbo = VulkanResourceUtil.createManagedBuffer(vmaAllocator, materialUboSize,
                 VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
                 VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
         this.materialUboMapped = this.materialUbo.getMappedByteBuffer();
-        if (this.materialUboMapped == null) throw new GdxRuntimeException("Material UBO mapped buffer is null.");
     }
 
-    public void begin(Camera camera, VkCommandBuffer commandBuffer) {
+    public void begin(Camera camera) {
         this.camera = Objects.requireNonNull(camera, "Camera cannot be null.");
-        this.currentCommandBuffer = Objects.requireNonNull(commandBuffer, "VkCommandBuffer cannot be null.");
+        this.currentCommandBuffer = Objects.requireNonNull(vulkanGraphics.getCurrentCommandBuffer(), "VkCommandBuffer cannot be null.");
         this.lastBoundPipelineHandle = VK_NULL_HANDLE;
-        this.renderCallsThisFrame = 0;
-        this.currentFrameIndex = vulkanGraphics.getCurrentFrameIndex(); // Get current frame for DS selection
+        this.currentFrameIndex = vulkanGraphics.getCurrentFrameIndex();
 
+        /*// Update and prepare Global UBO (Set 0)
+        globalUboMapped.position(0);
+        FloatBuffer globalFb = globalUboMapped.asFloatBuffer();
+        camera.view.get(globalFb);
+        globalFb.position(16);
+        camera.projection.get(globalFb);*/
         // Update and prepare Global UBO (Set 0)
         globalUboMapped.position(0);
         FloatBuffer globalFb = globalUboMapped.asFloatBuffer();
         globalFb.put(camera.view.val);
-        globalFb.position(16);
+        globalFb.position(16); // Move position by 16 floats (size of a 4x4 matrix)
         globalFb.put(camera.projection.val);
         Vma.vmaFlushAllocation(vmaAllocator, globalUbo.getAllocationHandle(), 0, globalUbo.getSize());
 
@@ -135,49 +148,61 @@ public class VulkanModelBatch implements Disposable {
     }
 
     public void render(VulkanModelInstance instance) {
-        if (instance == null || instance.model == null) { /* ... error ... */
-            return;
-        }
-        if (camera == null || currentCommandBuffer == null) { /* ... throw GdxRuntimeException ... */ }
+        render(instance, null);
+    }
+
+    public void render(VulkanModelInstance instance, Environment environment) {
+        if (instance == null || instance.model == null) return;
+        if (camera == null || currentCommandBuffer == null) throw new GdxRuntimeException("begin() must be called before render()");
 
         for (VulkanMeshPart meshPart : instance.model.meshParts) {
-            renderMeshPart(instance.transform, meshPart);
+            renderMeshPart(instance.transform, meshPart, environment);
         }
     }
 
-    private void renderMeshPart(Matrix4 modelWorldTransform, VulkanMeshPart meshPart) {
+    public void render(Array<VulkanModelInstance> instances) {
+        render(instances, null);
+    }
+
+    public void render(Array<VulkanModelInstance> instances, Environment environment) {
+        for (VulkanModelInstance instance : instances) {
+            render(instance, environment);
+        }
+    }
+
+    private void renderMeshPart(Matrix4 modelWorldTransform, VulkanMeshPart meshPart, Environment environment) {
         VulkanMesh mesh = meshPart.mesh;
         VulkanMaterial material = meshPart.material;
-        if (mesh == null || material == null || material.pipelineBundle == null) { /* ... error ... */
+        if (mesh == null || material == null) return;
+
+        if (material.pipelineBundle == null) {
+            Gdx.app.error(TAG, "Cannot render mesh part '" + meshPart.id + "', its material has no pipeline bundle assigned.");
             return;
         }
 
         VulkanShaderPipelineBundle bundle = material.pipelineBundle;
         long pipelineToBind = bundle.getGraphicsPipeline();
-        long currentPipelineLayout  = bundle.getPipelineLayout(); // Layout for binding BOTH sets
+        long currentPipelineLayout = bundle.getPipelineLayout();
 
-        if (pipelineToBind == VK_NULL_HANDLE || currentPipelineLayout  == VK_NULL_HANDLE) { /* ... error ... */
-            return;
-        }
+        if (pipelineToBind == VK_NULL_HANDLE || currentPipelineLayout == VK_NULL_HANDLE) return;
 
         if (pipelineToBind != lastBoundPipelineHandle) {
             vkCmdBindPipeline(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineToBind);
             lastBoundPipelineHandle = pipelineToBind;
+            shaderSwitches++; // Increment shader switch count
         }
 
         // --- Prepare Set 0: Global UBO (View, Projection) ---
-        // This set should ideally be bound once per frame if Begin() handles it and if the bundle's
-        // pipelineLayout allows for it. Here, we assume the pipelineLayout expects set 0 and set 1.
-        long dslSet0 = bundle.getDescriptorSetLayoutHandle(0); // Assumes bundle exposes this
+        long dslSet0 = bundle.getDescriptorSetLayoutHandle(0);
         if (perFrameGlobalDescriptorSets[currentFrameIndex] == VK_NULL_HANDLE) {
             perFrameGlobalDescriptorSets[currentFrameIndex] = descriptorManager.allocateSet(dslSet0);
         }
         long globalSet = perFrameGlobalDescriptorSets[currentFrameIndex];
         VulkanDescriptorManager.updateUniformBuffer(rawDevice, globalSet, 0, globalUbo.getBufferHandle(), 0, globalUbo.getSize());
 
-
-        // --- Prepare Set 1: Object UBO (Model), Material UBO, Diffuse Sampler ---
+        // --- Prepare Set 1: Object UBO, Material UBO, Texture ---
         objectUboMapped.position(0);
+        //modelWorldTransform.get(objectUboMapped.asFloatBuffer());
         objectUboMapped.asFloatBuffer().put(modelWorldTransform.val);
         Vma.vmaFlushAllocation(vmaAllocator, objectUbo.getAllocationHandle(), 0, objectUbo.getSize());
 
@@ -187,60 +212,69 @@ public class VulkanModelBatch implements Disposable {
             Vma.vmaFlushAllocation(vmaAllocator, materialUbo.getAllocationHandle(), 0, materialBytesWritten);
         }
 
-        long dslSet1 = bundle.getDescriptorSetLayoutHandle(1); // Assumes bundle exposes this
+        long dslSet1 = bundle.getDescriptorSetLayoutHandle(1);
         if (perFrameObjectMaterialDescriptorSets[currentFrameIndex] == VK_NULL_HANDLE) {
             perFrameObjectMaterialDescriptorSets[currentFrameIndex] = descriptorManager.allocateSet(dslSet1);
         }
         long objectMaterialSet = perFrameObjectMaterialDescriptorSets[currentFrameIndex];
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkWriteDescriptorSet.Buffer descriptorWritesSet1 = VkWriteDescriptorSet.calloc(3, stack);
+            VkWriteDescriptorSet.Buffer descriptorWrites = VkWriteDescriptorSet.calloc(3, stack);
 
-            VkDescriptorBufferInfo.Buffer objectBI = VkDescriptorBufferInfo.calloc(1, stack)
-                    .buffer(objectUbo.getBufferHandle()).offset(0).range(objectUbo.getSize());
-            descriptorWritesSet1.get(0).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET).dstSet(objectMaterialSet)
-                    .dstBinding(0).descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(1).pBufferInfo(objectBI);
+            // Object UBO
+            VkDescriptorBufferInfo.Buffer objectBI = VkDescriptorBufferInfo.calloc(1, stack).buffer(objectUbo.getBufferHandle()).offset(0).range(objectUbo.getSize());
+            descriptorWrites.get(0).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET).dstSet(objectMaterialSet).dstBinding(0).descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(1).pBufferInfo(objectBI);
 
-            VkDescriptorBufferInfo.Buffer materialBI = VkDescriptorBufferInfo.calloc(1, stack)
-                    .buffer(materialUbo.getBufferHandle()).offset(0).range(materialBytesWritten > 0 ? materialBytesWritten : materialUbo.getSize());
-            descriptorWritesSet1.get(1).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET).dstSet(objectMaterialSet)
-                    .dstBinding(1).descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(1).pBufferInfo(materialBI);
+            // Material UBO
+            VkDescriptorBufferInfo.Buffer materialBI = VkDescriptorBufferInfo.calloc(1, stack).buffer(materialUbo.getBufferHandle()).offset(0).range(materialUbo.getSize());
+            descriptorWrites.get(1).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET).dstSet(objectMaterialSet).dstBinding(1).descriptorType(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER).descriptorCount(1).pBufferInfo(materialBI);
 
+            // Diffuse Texture
             VulkanTexture diffuseTex = material.diffuseTexture != null ? material.diffuseTexture : this.defaultDiffuseTexture;
-            if (diffuseTex == null || diffuseTex.getImageViewHandle() == VK_NULL_HANDLE) throw new GdxRuntimeException("No valid diffuse texture.");
-            VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack)
-                    .imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-                    .imageView(diffuseTex.getImageViewHandle())
-                    .sampler(diffuseTex.getSamplerHandle());
-            descriptorWritesSet1.get(2).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET)
-                    .dstSet(objectMaterialSet)
-                    .dstBinding(2)
-                    .descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
-                    .descriptorCount(1)
-                    .pImageInfo(imageInfo);
+            VkDescriptorImageInfo.Buffer imageInfo = VkDescriptorImageInfo.calloc(1, stack).imageLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL).imageView(diffuseTex.getImageViewHandle()).sampler(diffuseTex.getSamplerHandle());
+            descriptorWrites.get(2).sType(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET).dstSet(objectMaterialSet).dstBinding(2).descriptorType(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER).descriptorCount(1).pImageInfo(imageInfo);
 
-            vkUpdateDescriptorSets(rawDevice, descriptorWritesSet1, null);
+            vkUpdateDescriptorSets(rawDevice, descriptorWrites, null);
 
-            // Bind both descriptor sets
             LongBuffer pSets = stack.longs(globalSet, objectMaterialSet);
-            vkCmdBindDescriptorSets(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, currentPipelineLayout , 0, pSets, null);
+            vkCmdBindDescriptorSets(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, currentPipelineLayout, 0, pSets, null);
         }
 
         // --- Bind Buffers and Draw ---
-        try (MemoryStack stack = MemoryStack.stackPush()) { /* ... bind vertex/index buffers ... */ }
-        // ... (draw call as before) ...
-        if (mesh.isIndexed()) {
-            vkCmdDrawIndexed(currentCommandBuffer, meshPart.numIndices, 1, meshPart.indexOffset, 0, 0);
-        } else {
-            vkCmdDraw(currentCommandBuffer, meshPart.numIndices, 1, meshPart.indexOffset, 0);
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            // Get the VulkanBuffer object first, then its handle
+            LongBuffer pBuffers = stack.longs(mesh.getVertexBuffer().getBufferHandle());
+            LongBuffer pOffsets = stack.longs(0);
+            vkCmdBindVertexBuffers(currentCommandBuffer, 0, pBuffers, pOffsets);
+
+            if (mesh.isIndexed()) {
+                // Get the VulkanBuffer object first, then its handle
+                vkCmdBindIndexBuffer(currentCommandBuffer, mesh.getIndexBuffer().getBufferHandle(), 0, VK_INDEX_TYPE_UINT16);
+                // Use the 'size' and 'offset' fields from the corrected VulkanMeshPart
+                vkCmdDrawIndexed(currentCommandBuffer, meshPart.size, 1, meshPart.offset, 0, 0);
+                numVertices += meshPart.size;
+            } else {
+                // Use the 'size' and 'offset' fields from the corrected VulkanMeshPart
+                vkCmdDraw(currentCommandBuffer, meshPart.size, 1, meshPart.offset, 0);
+                numVertices += meshPart.size;
+            }
+            renderCalls++;
         }
-        renderCallsThisFrame++;
     }
 
     public void end() {
         this.camera = null;
         this.currentCommandBuffer = null;
-        if (DEBUG) Gdx.app.debug(TAG, "End. Total render calls this batch cycle: " + renderCallsThisFrame);
+        if (DEBUG) Gdx.app.debug(TAG, "End. Total render calls this batch cycle: " + renderCalls);
+    }
+
+    /**
+     * Resets the profiling counters. Called by the test.
+     */
+    public void resetCounts() {
+        renderCalls = 0;
+        shaderSwitches = 0;
+        numVertices = 0;
     }
 
     @Override
@@ -250,22 +284,10 @@ public class VulkanModelBatch implements Disposable {
             vkDeviceWaitIdle(vulkanDevice.getLogicalDevice());
         }
 
-        if (globalUbo != null) {
-            globalUbo.dispose();
-            globalUbo = null;
-        }
-        if (objectUbo != null) {
-            objectUbo.dispose();
-            objectUbo = null;
-        }
-        if (materialUbo != null) {
-            materialUbo.dispose();
-            materialUbo = null;
-        }
-        if (defaultDiffuseTexture != null) {
-            defaultDiffuseTexture.dispose();
-            defaultDiffuseTexture = null;
-        }
+        if (globalUbo != null) globalUbo.dispose();
+        if (objectUbo != null) objectUbo.dispose();
+        if (materialUbo != null) materialUbo.dispose();
+        if (defaultDiffuseTexture != null) defaultDiffuseTexture.dispose();
 
         if (descriptorManager != null) {
             ArrayList<Long> allSetsToFree = new ArrayList<>();
@@ -273,9 +295,5 @@ public class VulkanModelBatch implements Disposable {
             for (long setHandle : perFrameObjectMaterialDescriptorSets) if (setHandle != VK_NULL_HANDLE) allSetsToFree.add(setHandle);
             if (!allSetsToFree.isEmpty()) descriptorManager.freeSets(allSetsToFree);
         }
-        Arrays.fill(perFrameGlobalDescriptorSets, VK_NULL_HANDLE);
-        Arrays.fill(perFrameObjectMaterialDescriptorSets, VK_NULL_HANDLE);
-
-        if (DEBUG) Gdx.app.log(TAG, "ModelBatchVulkan disposed.");
     }
 }

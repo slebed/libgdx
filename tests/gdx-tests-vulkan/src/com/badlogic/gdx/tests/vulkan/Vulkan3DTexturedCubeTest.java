@@ -41,9 +41,10 @@ public class Vulkan3DTexturedCubeTest extends GdxTest {
         cubeMaterial = new VulkanMaterial("cubeMat");
         cubeMaterial.setDiffuseColor(Color.WHITE);
         cubeMaterial.setOpacity(1.0f);
+        // Important: The material needs to know about the texture for the shader to use it
+        cubeMaterial.setDiffuseTexture(cubeTexture);
 
         unlitTextureShader = new SimpleUnlitTextureShader(cubeMesh.getVulkanVertexAttributes());
-        unlitTextureShader.setDiffuseTexture(cubeTexture);
 
         Gdx.input.setInputProcessor(cameraInputController);
         Gdx.app.log(TAG, "Vulkan3DTexturedCubeTest (User-Friendly) created.");
@@ -60,20 +61,59 @@ public class Vulkan3DTexturedCubeTest extends GdxTest {
     }
 
     private VulkanMesh setupCubeMeshInternal() {
+        // A properly textured cube needs 24 vertices, 4 for each face,
+        // to have unique texture coordinates per face.
+        // Vertex data: 3 floats for position (x, y, z), 2 floats for texture coordinates (u, v)
+        // The V-coordinate is flipped (1.0 - v) to match Vulkan's coordinate system.
         float[] vertices = {
-                -0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 0.5f, -0.5f, 0.5f, 1.0f, 0.0f, 0.5f, 0.5f, 0.5f, 1.0f, 1.0f, -0.5f, 0.5f, 0.5f, 0.0f, 1.0f,
-                -0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 0.5f, -0.5f, -0.5f, 0.0f, 0.0f, 0.5f, 0.5f, -0.5f, 0.0f, 1.0f, -0.5f, 0.5f, -0.5f, 1.0f, 1.0f,
-                -0.5f, 0.5f, -0.5f, 0.0f, 1.0f, -0.5f, 0.5f, 0.5f, 0.0f, 0.0f, 0.5f, 0.5f, 0.5f, 1.0f, 0.0f, 0.5f, 0.5f, -0.5f, 1.0f, 1.0f,
-                -0.5f, -0.5f, -0.5f, 0.0f, 0.0f, 0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 0.5f, -0.5f, 0.5f, 1.0f, 1.0f, -0.5f, -0.5f, 0.5f, 0.0f, 1.0f,
-                0.5f, -0.5f, -0.5f, 1.0f, 0.0f, 0.5f, 0.5f, -0.5f, 1.0f, 1.0f, 0.5f, 0.5f, 0.5f, 0.0f, 1.0f, 0.5f, -0.5f, 0.5f, 0.0f, 0.0f,
-                -0.5f, -0.5f, -0.5f, 0.0f, 0.0f, -0.5f, -0.5f, 0.5f, 1.0f, 0.0f, -0.5f, 0.5f, 0.5f, 1.0f, 1.0f, -0.5f, 0.5f, -0.5f, 0.0f, 1.0f
+                // Front face (+Z)
+                -0.5f, -0.5f, 0.5f, 0.0f, 1.0f, // 0 - Bottom-left
+                0.5f, -0.5f, 0.5f, 1.0f, 1.0f, // 1 - Bottom-right
+                0.5f, 0.5f, 0.5f, 1.0f, 0.0f, // 2 - Top-right
+                -0.5f, 0.5f, 0.5f, 0.0f, 0.0f, // 3 - Top-left
+                // Back face (-Z)
+                0.5f, -0.5f, -0.5f, 0.0f, 1.0f, // 4
+                -0.5f, -0.5f, -0.5f, 1.0f, 1.0f, // 5
+                -0.5f, 0.5f, -0.5f, 1.0f, 0.0f, // 6
+                0.5f, 0.5f, -0.5f, 0.0f, 0.0f, // 7
+                // Top face (+Y)
+                -0.5f, 0.5f, 0.5f, 0.0f, 1.0f, // 8
+                0.5f, 0.5f, 0.5f, 1.0f, 1.0f, // 9
+                0.5f, 0.5f, -0.5f, 1.0f, 0.0f, // 10
+                -0.5f, 0.5f, -0.5f, 0.0f, 0.0f, // 11
+                // Bottom face (-Y)
+                -0.5f, -0.5f, -0.5f, 0.0f, 1.0f, // 12
+                0.5f, -0.5f, -0.5f, 1.0f, 1.0f, // 13
+                0.5f, -0.5f, 0.5f, 1.0f, 0.0f, // 14
+                -0.5f, -0.5f, 0.5f, 0.0f, 0.0f, // 15
+                // Right face (+X)
+                0.5f, -0.5f, 0.5f, 0.0f, 1.0f, // 16
+                0.5f, -0.5f, -0.5f, 1.0f, 1.0f, // 17
+                0.5f, 0.5f, -0.5f, 1.0f, 0.0f, // 18
+                0.5f, 0.5f, 0.5f, 0.0f, 0.0f, // 19
+                // Left face (-X)
+                -0.5f, -0.5f, -0.5f, 0.0f, 1.0f, // 20
+                -0.5f, -0.5f, 0.5f, 1.0f, 1.0f, // 21
+                -0.5f, 0.5f, 0.5f, 1.0f, 0.0f, // 22
+                -0.5f, 0.5f, -0.5f, 0.0f, 0.0f, // 23
         };
+
+        // CORRECTED: Indices are now defined in Counter-Clockwise (CCW) order,
+        // which will be rendered correctly by the shader pipeline which is set to expect CW and flips the Y-axis.
         short[] indices = {
-                0, 1, 2, 2, 3, 0, 4, 7, 6, 6, 5, 4, 8, 9, 10, 10, 11, 8,
-                12, 13, 14, 14, 15, 12, 16, 17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20
+                0, 1, 2, 2, 3, 0,    // Front
+                4, 5, 6, 6, 7, 4,    // Back
+                8, 9, 10, 10, 11, 8,   // Top
+                12, 13, 14, 14, 15, 12, // Bottom
+                16, 17, 18, 18, 19, 16, // Right
+                20, 21, 22, 22, 23, 20, // Left
         };
-        VulkanVertexAttribute posAttr = VulkanVertexAttribute.Position(0);
-        VulkanVertexAttribute texCoordAttr = VulkanVertexAttribute.TexCoords(0, 1);
+
+
+        // Define vertex attributes with shader locations
+        VulkanVertexAttribute posAttr = new VulkanVertexAttribute(VulkanVertexAttributes.Usage.Position, 3, "a_position", 0);
+        VulkanVertexAttribute texCoordAttr = new VulkanVertexAttribute(VulkanVertexAttributes.Usage.TextureCoordinates, 2, "a_texCoord0", 1);
+
         VulkanVertexAttributes attributes = new VulkanVertexAttributes(posAttr, texCoordAttr);
         VulkanMesh mesh = new VulkanMesh();
         mesh.setVertices(vertices, attributes);
@@ -95,14 +135,20 @@ public class Vulkan3DTexturedCubeTest extends GdxTest {
             return;
         }
 
-        if (cameraInputController != null) cameraInputController.update();
-        camera.update();
+        cameraInputController.update();
 
         rotationAngleDeg = (rotationAngleDeg + Gdx.graphics.getDeltaTime() * 45f) % 360f;
         modelMatrix.setToRotation(Vector3.Y, rotationAngleDeg);
 
-        // Single call to the shader to render the mesh
-        unlitTextureShader.render(cubeMesh, modelMatrix, camera.view, camera.projection, cubeMaterial);
+        // Use the begin/render/end pattern for the shader.
+        // 1. Begin the shader. This binds the pipeline and sets up camera uniforms.
+        unlitTextureShader.begin(camera);
+
+        // 2. Render the specific object. This updates object-specific uniforms and issues the draw call.
+        unlitTextureShader.render(cubeMesh, cubeMaterial, modelMatrix);
+
+        // 3. End the shader batch.
+        unlitTextureShader.end();
     }
 
     @Override

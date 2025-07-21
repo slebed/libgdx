@@ -180,6 +180,7 @@ public class VulkanApplication implements VulkanApplicationBase {
     private final IntBuffer tmpBuffer = org.lwjgl.BufferUtils.createIntBuffer(1);
     private final IntBuffer tmpBuffer2 = BufferUtils.createIntBuffer(1);
     private VulkanPipelineManager pipelineManager;
+    private VulkanShaderManager shaderManager;
     private VulkanDescriptorManager descriptorManager;
     private Graphics.BufferFormat bufferFormat;
     final Array<VulkanWindow> windows = new Array<>();
@@ -408,12 +409,14 @@ public class VulkanApplication implements VulkanApplicationBase {
         if (this.vulkanDevice == null || this.vulkanDevice.getLogicalDevice() == null) { // Check logical device from wrapper
             throw new GdxRuntimeException("VulkanDevice or its logical device is null in initializePipeline!");
         }
-        this.pipelineManager = new VulkanPipelineManager(this.vulkanDevice, new VulkanShaderManager(this.vulkanDevice.getLogicalDevice()));
+        this.shaderManager = new VulkanShaderManager(this.vulkanDevice.getLogicalDevice());
+        this.pipelineManager = new VulkanPipelineManager(this.vulkanDevice,this.shaderManager);
     }
 
     private VulkanGraphics initializeGraphics(long windowHandle) {
         return new VulkanGraphics(
                 windowHandle,
+                0L,
                 this.appConfig,
                 this,
                 this.vulkanDevice,
@@ -1556,6 +1559,10 @@ public class VulkanApplication implements VulkanApplicationBase {
 
     public VulkanDescriptorManager getDescriptorManager() {
         return descriptorManager;
+    }
+
+    public VulkanShaderManager getShaderManager() {
+        return shaderManager;
     }
 
     public static class QueueFamilyIndices {

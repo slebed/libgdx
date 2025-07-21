@@ -8,7 +8,7 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
 
 public class VulkanModelInstance {
 	public final VulkanModel model; // The model data this instance refers to
-	public final Matrix4 transform = new Matrix4(); // Instance-specific world transform, initialized to identity
+	public Matrix4 transform = new Matrix4(); // Instance-specific world transform, initialized to identity
 	public String id; // Optional identifier for this instance
 
 	// Future:

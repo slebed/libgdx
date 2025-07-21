@@ -75,7 +75,7 @@ public abstract class ModelLoader<P extends ModelLoader.ModelParameters> extends
 		ModelData data = loadModelData(file, parameters);
 		if (data == null) return deps;
 
-		ObjectMap.Entry<String, ModelData> item = new ObjectMap.Entry<String, ModelData>();
+		ObjectMap.Entry<String, ModelData> item = new ObjectMap.Entry<>();
 		item.key = fileName;
 		item.value = data;
 		synchronized (items) {

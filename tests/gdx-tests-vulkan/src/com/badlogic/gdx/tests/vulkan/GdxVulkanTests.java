@@ -61,15 +61,16 @@ public class GdxVulkanTests {
                 // @off
                 //VulkanClearScreenTest.class,
                 VulkanScene2dTest.class,
-                VulkanSpriteBatchPerformanceTest.class,
+                //VulkanSpriteBatchPerformanceTest.class,
                 VulkanSpriteBatchPerformanceTest2.class,
                 VulkanSpriteBatchTest.class,
                 VulkanSpriteBatchStressTest.class,
-                VulkanSpriteBatchTextureSwitchTest.class,
+                //VulkanSpriteBatchTextureSwitchTest.class,
                 Vulkan3DCubeTest.class,
                 Vulkan3DTexturedCubeTest.class,
                 VulkanFreeTypeFontTest.class,
-                Vulkan3DLitTexturedCubeTest.class
+                VulkanBenchmark3dTest.class
+                //Vulkan3DLitTexturedCubeTest.class
                 // @on
         );
 

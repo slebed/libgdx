@@ -345,14 +345,14 @@ public class SimpleLitTextureShader implements Disposable {
                     pipelineBundle.getPipelineLayout(), 0, stack.longs(descriptorSet0), null);
         }
 
-        try (MemoryStack stack = MemoryStack.stackPush()) {
+        /*try (MemoryStack stack = MemoryStack.stackPush()) {
             LongBuffer pVertexBuffers = stack.longs(mesh.getVertexBufferHandle());
             LongBuffer pOffsets = stack.longs(0L);
             vkCmdBindVertexBuffers(commandBuffer, 0, pVertexBuffers, pOffsets);
         }
         if (mesh.isIndexed()) {
             vkCmdBindIndexBuffer(commandBuffer, mesh.getIndexBufferHandle(), 0, VK_INDEX_TYPE_UINT16);
-        }
+        }*/
 
         if (mesh.isIndexed()) {
             vkCmdDrawIndexed(commandBuffer, mesh.getNumIndices(), 1, 0, 0, 0);

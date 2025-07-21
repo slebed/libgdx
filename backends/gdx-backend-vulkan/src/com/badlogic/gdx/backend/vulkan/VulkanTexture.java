@@ -42,6 +42,9 @@ public class VulkanTexture extends Texture {
     private TextureWrap currentUWrap = TextureWrap.ClampToEdge;
     private TextureWrap currentVWrap = TextureWrap.ClampToEdge;
 
+    private static final java.util.concurrent.atomic.AtomicInteger handleCounter = new java.util.concurrent.atomic.AtomicInteger(1);
+    private final int textureHandle;
+
     /** Constructor that automatically retrieves Vulkan context from Gdx.graphics. Assumes Vulkan backend is initialized and
      * active.
      *
@@ -150,6 +153,8 @@ public class VulkanTexture extends Texture {
             this.height = texHeight;
             this.format = vkFormat;
 
+            this.textureHandle = handleCounter.getAndIncrement(); // Assign a unique ID
+
             if (debug) Gdx.app.log(TAG, "VulkanTexture created successfully from " + file.path());
 
         } catch (Exception e) {
@@ -174,6 +179,8 @@ public class VulkanTexture extends Texture {
     private VulkanTexture(VulkanDevice device, VulkanImage vulkanImage, long imageViewHandle, long samplerHandle) {
         super(); // <<< CORRECTED: Call the protected no-op Texture() constructor
 
+        this.textureHandle = handleCounter.getAndIncrement(); // Assign a unique ID
+
         // Initialize fields AFTER super() call
         this.device = device;
         this.vulkanImage = vulkanImage;
@@ -195,6 +202,8 @@ public class VulkanTexture extends Texture {
         if (pixmap == null || pixmap.isDisposed()) {
             throw new GdxRuntimeException("Pixmap cannot be null and must not be disposed.");
         }
+
+        this.textureHandle = handleCounter.getAndIncrement(); // Assign a unique ID
 
         if (debug) Gdx.app.log(TAG, "(Constructor) Creating texture from Pixmap (" + pixmap.getWidth() + "x" + pixmap.getHeight() + ")");
 
@@ -586,17 +595,18 @@ public class VulkanTexture extends Texture {
 
     @Override
     public int getTextureObjectHandle() {
-        return 0;
+        return this.textureHandle;
     }
 
     @Override
     public void bind() {
-
+        bind(0);
     }
 
     @Override
     public void bind(int unit) {
-
+        Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0 + unit);
+        Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, this.textureHandle);
     }
 
     @Override

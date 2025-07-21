@@ -52,6 +52,7 @@ import static org.lwjgl.vulkan.VK10.VK_VERTEX_INPUT_RATE_VERTEX;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
+import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.utils.Collections;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
@@ -99,7 +100,7 @@ public final class VulkanVertexAttributes implements Iterable<VulkanVertexAttrib
     private VkVertexInputAttributeDescription.Buffer attributeDescriptions;
 
     /** Constructor, sets the vertex attributes in a specific order */
-    public VulkanVertexAttributes (VulkanVertexAttribute... attributes) {
+   /* public VulkanVertexAttributes (VulkanVertexAttribute... attributes) {
         if (attributes.length == 0) throw new IllegalArgumentException("attributes must be >= 1");
 
         VulkanVertexAttribute[] list = new VulkanVertexAttribute[attributes.length];
@@ -109,6 +110,47 @@ public final class VulkanVertexAttributes implements Iterable<VulkanVertexAttrib
         this.attributes = list;
         vertexSize = calculateOffsets();
         generateVertexInputDescriptions();
+    }*/
+
+    /**
+     * Primary constructor, takes backend-specific attributes.
+     * @param attributes The Vulkan-specific vertex attributes.
+     */
+    public VulkanVertexAttributes (VulkanVertexAttribute... attributes) {
+        if (attributes.length == 0) throw new IllegalArgumentException("attributes must be >= 1");
+
+        VulkanVertexAttribute[] list = new VulkanVertexAttribute[attributes.length];
+        System.arraycopy(attributes, 0, list, 0, attributes.length);
+
+        this.attributes = list;
+        vertexSize = calculateOffsets();
+        generateVertexInputDescriptions();
+    }
+
+    /**
+     * Convenience constructor to create VulkanVertexAttributes from the generic libGDX VertexAttribute array.
+     * This is the primary way to create attributes when loading models.
+     * It automatically assigns shader locations based on the attribute's index.
+     * @param gdxAttributes The generic VertexAttribute array from model data.
+     */
+    public VulkanVertexAttributes(VertexAttribute... gdxAttributes) {
+        this(convert(gdxAttributes));
+    }
+
+    /**
+     * Helper method to perform the conversion from generic to Vulkan-specific attributes.
+     */
+    private static VulkanVertexAttribute[] convert(VertexAttribute... gdxAttributes) {
+        if (gdxAttributes.length == 0) {
+            throw new IllegalArgumentException("attributes must be >= 1");
+        }
+        VulkanVertexAttribute[] vulkanList = new VulkanVertexAttribute[gdxAttributes.length];
+        for (int i = 0; i < gdxAttributes.length; i++) {
+            VertexAttribute attr = gdxAttributes[i];
+            // Assign shader location based on the attribute's index in the array
+            vulkanList[i] = new VulkanVertexAttribute(attr.usage, attr.numComponents, attr.alias, i);
+        }
+        return vulkanList;
     }
 
     /** Returns the offset for the first VertexAttribute with the specified usage.

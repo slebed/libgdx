@@ -424,14 +424,14 @@ public class Vulkan3DCubeTest extends GdxTest {
 
         // 8. Bind Vertex Buffer(s)
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            LongBuffer pVertexBuffers = stack.longs(cubeMesh.getVertexBufferHandle());
+            LongBuffer pVertexBuffers = stack.longs(cubeMesh.getVertexBuffer().bufferHandle);
             LongBuffer pOffsets = stack.longs(0L); // Vertex buffer offset is 0
             vkCmdBindVertexBuffers(commandBuffer, 0, pVertexBuffers, pOffsets); // Binding 0
         }
 
         // 9. Bind Index Buffer (if using indexed drawing)
         if (cubeMesh.isIndexed()) {
-            vkCmdBindIndexBuffer(commandBuffer, cubeMesh.getIndexBufferHandle(), 0, VK_INDEX_TYPE_UINT16);
+            vkCmdBindIndexBuffer(commandBuffer, cubeMesh.getIndexBuffer().bufferHandle, 0, VK_INDEX_TYPE_UINT16);
         }
 
         // 10. Bind Descriptor Sets (for UBOs, textures, etc.)

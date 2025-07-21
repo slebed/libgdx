@@ -1,93 +1,78 @@
-/*******************************************************************************
- * Copyright 2011 See AUTHORS file.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- ******************************************************************************/
 package com.badlogic.gdx.backend.vulkan;
 
-
-import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
-import com.badlogic.gdx.scenes.scene2d.utils.Cullable;
 import com.badlogic.gdx.scenes.scene2d.utils.ScissorStack;
 import com.badlogic.gdx.utils.Null;
 import com.badlogic.gdx.utils.Pools;
+import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 
-/**
- * A Vulkan-specific ScrollPane that provides custom clipping logic via {@link ScissorStack}
- * required for the Vulkan backend. It otherwise functions identically to the standard
- * {@link com.badlogic.gdx.scenes.scene2d.ui.ScrollPane} and uses its {@link ScrollPaneStyle}.
- * @author mzechner
- * @author Nathan Sweet
- */
 public class VulkanScrollPane extends ScrollPane {
-    private final Rectangle actorCullingArea = new Rectangle();
 
-    public VulkanScrollPane (@Null Actor actor) {
-        super(actor);
-    }
+    public VulkanScrollPane(@Null Actor actor) { super(actor); }
+    public VulkanScrollPane(@Null Actor actor, Skin skin) { super(actor, skin); }
+    public VulkanScrollPane(@Null Actor actor, Skin skin, String styleName) { super(actor, skin, styleName); }
+    public VulkanScrollPane(@Null Actor actor, ScrollPaneStyle style) { super(actor, style); }
 
-    public VulkanScrollPane (@Null Actor actor, Skin skin) {
-        super(actor, skin);
-    }
+    /**
+     * Called by VulkanStage to handle the debug rendering of this widget and its children.
+     */
+    public void drawDebug (VulkanStage stage, Batch batch) {
+        // Draw the border of the scroll pane itself.
+        //stage.drawLocalRect(this, batch);
 
-    public VulkanScrollPane (@Null Actor actor, Skin skin, String styleName) {
-        super(actor, skin, styleName);
-    }
+        // Calculate the clipping area using public methods.
+        validate();
+        Drawable bg = getStyle().background;
+        float areaX = (bg == null) ? 0 : bg.getLeftWidth();
+        float areaY = (bg == null) ? 0 : bg.getBottomHeight();
+        float areaWidth = getScrollWidth();
+        float areaHeight = getScrollHeight();
 
-    public VulkanScrollPane (@Null Actor actor, ScrollPaneStyle style) {
-        super(actor, style);
-    }
+        // Apply clipping.
+        if (clipBegin(areaX, areaY, areaWidth, areaHeight)) {
+            Actor actor = getActor();
+            if (actor != null) {
+                // This is the critical change:
+                // We calculate the child's scrolled position using the same formula as the real draw pass.
+                float x = areaX - (isScrollX() ? (int)getVisualScrollX() : 0);
+                float y = areaY - (int)(isScrollY() ? getMaxY() - getVisualScrollY() : getMaxY());
 
-    @Override
-    public void layout () {
-        super.layout();
-        final Actor actor = getActor();
-        if (actor instanceof Cullable) {
-            actorCullingArea.x = -actor.getX() + getScrollX();
-            actorCullingArea.y = -actor.getY() + getScrollY();
-            actorCullingArea.width = getScrollWidth();
-            actorCullingArea.height = getScrollHeight();
-            ((Cullable)actor).setCullingArea(actorCullingArea);
+                // We create a temporary transform for the child, apply it, and then recurse.
+                actor.setPosition(x, y); // Temporarily set the correct position for the debug renderer.
+                //stage.drawDebugRecursive(actor, batch);
+            }
+            clipEnd();
         }
     }
 
-
-    /** Overridden to use the Vulkan-compatible ScissorStack for clipping. */
     @Override
-    public boolean clipBegin (float x, float y, float width, float height) {
-        if (width <= 0 || height <= 0) return false;
+    public boolean clipBegin(float x, float y, float width, float height) {
         Stage stage = getStage();
-        if (stage == null) return false;
-        Rectangle tableBounds = Rectangle.tmp;
-        tableBounds.x = x;
-        tableBounds.y = y;
-        tableBounds.width = width;
-        tableBounds.height = height;
+        if (stage == null || width <= 0 || height <= 0) return false;
+
+        Rectangle localBounds = Pools.obtain(Rectangle.class).set(x, y, width, height);
         Rectangle scissorBounds = Pools.obtain(Rectangle.class);
-        stage.calculateScissors(tableBounds, scissorBounds);
+        stage.calculateScissors(localBounds, scissorBounds);
+        Pools.free(localBounds);
+
+        if (stage.getBatch() != null) stage.getBatch().flush();
         if (ScissorStack.pushScissors(scissorBounds)) return true;
+
         Pools.free(scissorBounds);
         return false;
     }
 
-    /** Overridden to use the Vulkan-compatible ScissorStack for clipping. */
     @Override
-    public void clipEnd () {
+    public void clipEnd() {
+        Stage stage = getStage();
+        if (stage != null && stage.getBatch() != null) {
+            stage.getBatch().flush();
+        }
         Pools.free(ScissorStack.popScissors());
     }
 }

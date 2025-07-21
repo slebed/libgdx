@@ -1346,14 +1346,7 @@ public class VulkanWindow implements Disposable {
         final boolean useGdxLog = (Gdx.app != null && Gdx.app.getApplicationLogger() != null);
         logInfo(TAG, "[" + this.hashCode() + "] Disposing window " + windowHandle, useGdxLog);
 
-        VkDevice device = null;
-        VkInstance instance = null;
-        if (application != null && application.getVulkanDevice() != null) {
-            device = application.getVulkanDevice().getRawDevice();
-            instance = application.getVulkanInstance().getRawInstance();
-        } else {
-            logInfo(TAG, "[" + this.hashCode() + "] Warning: Cannot get Vulkan device/instance for proper cleanup.", useGdxLog);
-        }
+        VkDevice device = application.getVulkanDevice().getLogicalDevice();
 
         // Wait for idle before destroying window-specific resources
         if (device != null) {
@@ -1385,7 +1378,6 @@ public class VulkanWindow implements Disposable {
         if (vulkanGraphics != null) {
             vulkanGraphics.dispose(); // Dispose this window's graphics instance
             logInfo(TAG, "[" + this.hashCode() + "] VulkanGraphics instance disposed.", useGdxLog);
-            // this.vulkanGraphics = null; // Not needed if field is final
         }
 
         // Dispose Input Handler (which frees its callback objects)
@@ -1407,13 +1399,13 @@ public class VulkanWindow implements Disposable {
         }
 
         // Free Window Callback Instances (Input ones freed by input.dispose())
-        if (focusCallback != null) focusCallback.free();
-        if (iconifyCallback != null) iconifyCallback.free();
-        if (maximizeCallback != null) maximizeCallback.free();
-        if (closeCallback != null) closeCallback.free();
-        if (dropCallback != null) dropCallback.free();
-        if (refreshCallback != null) refreshCallback.free();
-        if (resizeCallback != null) resizeCallback.free();
+        focusCallback.free();
+        iconifyCallback.free();
+        maximizeCallback.free();
+        closeCallback.free();
+        dropCallback.free();
+        refreshCallback.free();
+        resizeCallback.free();
         logInfo(TAG, "[" + this.hashCode() + "] Window callback instances freed.", useGdxLog);
 
         logInfo(TAG, "[" + this.hashCode() + "] dispose() finished.", useGdxLog);
@@ -1462,7 +1454,7 @@ public class VulkanWindow implements Disposable {
         }
         // --- End Step 3 Resource Cleanup ---
 
-
+        cleanupSwapchainDependents();
         // --- Dispose Step 2 Resources ---
         if (swapchain != null) {
             swapchain.dispose();
@@ -1475,6 +1467,14 @@ public class VulkanWindow implements Disposable {
             surface = VK_NULL_HANDLE;
         }
         // --- End Step 2 Resources ---
+    }
+
+    private void cleanupSwapchainDependents() {
+        VkDevice device = application.getVulkanDevice().getLogicalDevice();
+        for (long framebuffer : framebuffers) {
+            vkDestroyFramebuffer(device, framebuffer, null);
+        }
+        framebuffers.clear();
     }
 
     // Helper method for consistent logging during cleanup

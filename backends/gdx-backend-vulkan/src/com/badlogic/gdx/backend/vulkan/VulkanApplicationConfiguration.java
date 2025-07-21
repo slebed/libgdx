@@ -74,6 +74,8 @@ public class VulkanApplicationConfiguration extends VulkanWindowConfiguration {
     boolean preferSrgbFramebuffer = true; // Request sRGB swapchain format if available
     boolean debugLog = false;
 
+    public boolean useInstancing = true;
+
     public enum SwapchainPresentMode {
         /**
          * Standard VSync, waits for vertical blank. Guaranteed to be available. Maps to VK_PRESENT_MODE_FIFO_KHR.

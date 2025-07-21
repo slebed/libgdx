@@ -18,6 +18,8 @@ public class VulkanGL20Impl implements GL20 {
 
     private final boolean debug = false;
     private final VulkanGraphics graphics; // To access VulkanGraphics' state/helpers
+    private int activeTextureUnit = 0;
+    private final int[] boundTextureHandles = new int[32];
 
     public VulkanGL20Impl(VulkanGraphics graphics) {
         if (graphics == null) {
@@ -135,8 +137,8 @@ public class VulkanGL20Impl implements GL20 {
     @Override
     public void glViewport(int x, int y, int width, int height) {
         String msg = "glViewport called: x=" + x + ", y=" + y + ", w=" + width + ", h=" + height;
-        if (Gdx.app != null && debug) Gdx.app.log("VulkanGL20Impl", msg);
-        else System.out.println("VulkanGL20Impl: " + msg);
+        //if (Gdx.app != null && debug) Gdx.app.log("VulkanGL20Impl", msg);
+        //else System.out.println("VulkanGL20Impl: " + msg);
         // TODO: Implement vkCmdSetViewport if this method should control viewport for FBOs etc.
         // Be careful not to conflict with VulkanWindow.updateDynamicStates() for the main swapchain viewport.
     }
@@ -739,8 +741,8 @@ public class VulkanGL20Impl implements GL20 {
     @Override
     public void glClearColor(float red, float green, float blue, float alpha) {
         String msg = "glClearColor: " + red + "," + green + "," + blue + "," + alpha;
-        if (Gdx.app != null) Gdx.app.log("VulkanGL20Impl", msg);
-        else System.out.println("VulkanGL20Impl: " + msg);
+        //if (Gdx.app != null) Gdx.app.log("VulkanGL20Impl", msg);
+        //else System.out.println("VulkanGL20Impl: " + msg);
         VulkanWindow currentWin = graphics.getCurrentWindow(); // Add getCurrentWindow() to VulkanGraphics
         if (currentWin != null) {
             currentWin.getConfig().initialBackgroundColor.set(red, green, blue, alpha);
@@ -765,8 +767,8 @@ public class VulkanGL20Impl implements GL20 {
     @Override
     public void glClear(int mask) {
         String msg = "glClear: mask=" + mask;
-        if (Gdx.app != null) Gdx.app.log("VulkanGL20Impl", msg);
-        else System.out.println("VulkanGL20Impl: " + msg);
+        //if (Gdx.app != null) Gdx.app.log("VulkanGL20Impl", msg);
+        //else System.out.println("VulkanGL20Impl: " + msg);
         // Actual clear is part of render pass loadOp. This is a hint.
     }
 
@@ -787,7 +789,13 @@ public class VulkanGL20Impl implements GL20 {
 
     @Override
     public void glBindTexture(int target, int textureHandle) {
-        notImplemented("glBindTexture");
+        // The `target` (e.g., GL_TEXTURE_2D) can often be ignored in a basic
+        // Vulkan backend that only supports 2D textures.
+
+        // Store the provided handle in the array at the currently active unit's index.
+        if (activeTextureUnit >= 0 && activeTextureUnit < boundTextureHandles.length) {
+            boundTextureHandles[activeTextureUnit] = textureHandle;
+        }
     }
 
     @Override
