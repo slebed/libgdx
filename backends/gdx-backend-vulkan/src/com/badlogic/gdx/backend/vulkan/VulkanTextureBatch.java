@@ -11,7 +11,6 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDevice;
 
-import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 
@@ -21,40 +20,42 @@ public class VulkanTextureBatch implements Disposable {
     private static final String TAG = "VulkanTextureBatch";
     private static final boolean DEBUG = false;
 
-    private final VulkanDescriptorManager descriptorManager;
-    private final VkDevice rawDevice;
+    private VulkanDescriptorManager descriptorManager;
+    private VkDevice rawDevice;
     private final VulkanGraphics vulkanGraphics;
 
-    private final Array<VulkanTexture> uniqueTexturesForCurrentDrawCycle;
-    private final ObjectIntMap<VulkanTexture> textureToDeviceIndexMap;
+    private Array<VulkanTexture> uniqueTexturesForCurrentDrawCycle;
+    private ObjectIntMap<VulkanTexture> textureToDeviceIndexMap;
     private int nextDeviceIndex;
 
     private long descriptorSetLayout = VK_NULL_HANDLE;
-    private final long[] frameDescriptorSets;
-    private final int maxFramesInFlight;
+    private long[] frameDescriptorSets;
+    private int maxFramesInFlight;
     private VulkanTexture defaultTexture;
 
-    final int maxTexturesInLayout;
+    private int maxTexturesInLayout;
     private long activeFrameDescriptorSet = VK_NULL_HANDLE;
 
     private boolean activeFrameSetPopulated;
 
-    public VulkanTextureBatch(VulkanDescriptorManager descriptorManager, int maxTextures, VulkanGraphics gfx) {
-        this.descriptorManager = descriptorManager;
-        this.rawDevice = descriptorManager.getDevice();
+    public VulkanTextureBatch(int maxTextures){
+        this.vulkanGraphics = (VulkanGraphics) Gdx.app.getGraphics();
+        init(maxTextures);
+    }
+
+    public VulkanTextureBatch(int maxTextures, VulkanGraphics gfx) {
         this.vulkanGraphics = gfx;
-        this.maxFramesInFlight = vulkanGraphics.config.MAX_FRAMES_IN_FLIGHT;
-        if (this.maxFramesInFlight <= 0) {
-            throw new GdxRuntimeException("MAX_FRAMES_IN_FLIGHT must be positive.");
-        }
+        init(maxTextures);
+    }
 
-        this.maxTexturesInLayout = maxTextures;
-        if (DEBUG) Gdx.app.log(TAG, "Initializing with maxTexturesInLayout: " + this.maxTexturesInLayout + ", maxFramesInFlight: " + this.maxFramesInFlight);
-
+    private void init(int maxTextures){
+        this.descriptorManager = vulkanGraphics.getDescriptorManager();
+        this.rawDevice = descriptorManager.getDevice();
         this.uniqueTexturesForCurrentDrawCycle = new Array<>(false, Math.max(16, maxTextures));
         this.textureToDeviceIndexMap = new ObjectIntMap<>(Math.max(16, maxTextures));
+        this.maxFramesInFlight = vulkanGraphics.config.MAX_FRAMES_IN_FLIGHT;
         this.frameDescriptorSets = new long[this.maxFramesInFlight];
-
+        this.maxTexturesInLayout = maxTextures;
         createDefaultTexture();
         createDescriptorSetLayout();
         allocateDescriptorSets();

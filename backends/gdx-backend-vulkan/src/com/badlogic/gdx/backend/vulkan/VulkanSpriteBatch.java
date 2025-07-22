@@ -57,7 +57,6 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
             new VertexAttribute(VertexAttributes.Usage.Generic, TEXINDEX_COMPONENTS, GL20.GL_FLOAT, false, "in_texArrayIndex")
     );
 
-    private final VkDevice rawDevice;
     private final long vmaAllocator;
     private final VulkanPipelineManager pipelineManager;
     private final VulkanDescriptorManager descriptorManager;
@@ -77,7 +76,6 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
     private float colorPacked = Color.WHITE_FLOAT_BITS;
 
     private final int maxSpritesInOneFlush; // Max sprites per individual draw call
-    // private final int totalVertexBufferCapacityInSprites; // For reference, actual capacity is in vertices.capacity()
 
     // State for managing the large streaming vertex buffer
     private int cpuBufferWritePositionFloats = 0; // Current write index in 'vertices' FloatBuffer (in floats)
@@ -116,7 +114,6 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         }
 
         this.maxSpritesInOneFlush = flushTriggerSpriteCount;
-        // this.totalVertexBufferCapacityInSprites = totalBufferCapacityInSprites; // Store for reference if needed
 
         this.singleSpriteVertices = new float[VERTICES_PER_SPRITE * COMPONENTS_PER_VERTEX];
 
@@ -132,10 +129,10 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
         if (device == null || vmaAllocator == VK_NULL_HANDLE || pipelineManager == null || descriptorManager == null) {
             throw new GdxRuntimeException("Failed to retrieve necessary Vulkan managers!");
         }
-        this.rawDevice = device.getRawDevice();
+        //this.rawDevice = device.getRawDevice();
 
         int maxTexturesForTextureBatcher = 256; // Example, make configurable if needed
-        this.textureBatcher = new VulkanTextureBatch(descriptorManager, maxTexturesForTextureBatcher, gfx);
+        this.textureBatcher = new VulkanTextureBatch(maxTexturesForTextureBatcher,gfx);//descriptorManager, maxTexturesForTextureBatcher, gfx);
 
         long vertexBufferSizeBytes = (long) totalBufferCapacityInSprites * VERTICES_PER_SPRITE * BYTES_PER_VERTEX;
         this.vertexBuffer = VulkanResourceUtil.createManagedBuffer(

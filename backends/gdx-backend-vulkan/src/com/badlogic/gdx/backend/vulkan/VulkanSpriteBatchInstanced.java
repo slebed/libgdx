@@ -119,8 +119,8 @@ public class VulkanSpriteBatchInstanced implements Batch, VulkanFrameResourcePre
         this.maxInstancesPerBatch = maxSpritesInFlight;
 
         int maxTexturesForBatcher = 256;
-        maxTexturesForBatcher = Math.min(maxTexturesForBatcher, 1024);
-        this.textureBatcher = new VulkanTextureBatch(descriptorManager, maxTexturesForBatcher, gfx);
+        //maxTexturesForBatcher = Math.min(maxTexturesForBatcher, 1024);
+        this.textureBatcher = new VulkanTextureBatch(maxTexturesForBatcher);//descriptorManager, maxTexturesForBatcher, gfx);
 
         createBaseQuadMesh(device);
 
