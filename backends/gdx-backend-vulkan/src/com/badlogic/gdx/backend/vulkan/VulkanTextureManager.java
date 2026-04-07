@@ -36,7 +36,9 @@ public class VulkanTextureManager implements Disposable {
                 this.hashCode(), newVulkanTexture.hashCode(), handle
         ));
 
-        managedTextures.put(handle, newVulkanTexture);
+        synchronized (managedTextures) {
+            managedTextures.put(handle, newVulkanTexture);
+        }
         return handle;
     }
 
@@ -44,7 +46,10 @@ public class VulkanTextureManager implements Disposable {
      * Retrieves a managed VulkanTexture by its GL handle.
      */
     public VulkanTexture getTexture(int handle) {
-        VulkanTexture foundTexture = managedTextures.get(handle);
+        VulkanTexture foundTexture;
+        synchronized (managedTextures) {
+            foundTexture = managedTextures.get(handle);
+        }
 
         // --- Diagnostic Logging ---
         Gdx.app.log(TAG, String.format(
@@ -61,7 +66,10 @@ public class VulkanTextureManager implements Disposable {
     public void deleteTexture(int handle) {
         if (handle == 0) return;
 
-        VulkanTexture texture = managedTextures.remove(handle);
+        VulkanTexture texture;
+        synchronized (managedTextures) {
+            texture = managedTextures.remove(handle);
+        }
         if (texture != null) {
             texture.dispose();
             Gdx.app.log(TAG, "Disposed and unregistered texture with handle: " + handle);
@@ -89,17 +97,21 @@ public class VulkanTextureManager implements Disposable {
 
     @Override
     public void dispose() {
-        Gdx.app.log(TAG, "Disposing all managed textures (" + managedTextures.size + ")...");
-        for (VulkanTexture texture : managedTextures.values()) {
-            if (texture != null) {
-                texture.dispose();
+        synchronized (managedTextures) {
+            Gdx.app.log(TAG, "Disposing all managed textures (" + managedTextures.size + ")...");
+            for (VulkanTexture texture : managedTextures.values()) {
+                if (texture != null) {
+                    texture.dispose();
+                }
             }
+            managedTextures.clear();
         }
-        managedTextures.clear();
         Gdx.app.log(TAG, "VulkanTextureManager disposed.");
     }
 
     public boolean isTexture(int texture) {
-        return managedTextures.containsKey(texture);
+        synchronized (managedTextures) {
+            return managedTextures.containsKey(texture);
+        }
     }
 }

@@ -42,15 +42,6 @@ public class VkMemoryUtil {
 		}
 	}
 
-	/** Safely destroys a Vulkan object if it's not already destroyed.
-	 *
-	 * @param device The Vulkan device associated with the object. */
-	// public static void safeDestroy(long handle, org.lwjgl.vulkan.VulkanDevice device) {
-	// if (handle != VK_NULL_HANDLE) {
-	// vkDestroyDevice(device, null);
-	// }
-	// }
-
 	public static void safeDestroyRenderPass (long renderPassHandle, org.lwjgl.vulkan.VkDevice device) {
 		if (renderPassHandle != VK_NULL_HANDLE) {
 			vkDestroyRenderPass(device, renderPassHandle, null);

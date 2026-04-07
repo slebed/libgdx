@@ -571,22 +571,19 @@ public class VulkanTexture extends Texture {
         }
 
         // Destroy view and sampler FIRST
-        if (imageViewHandle != VK_NULL_HANDLE) { // Check required if field isn't nulled below
+        if (imageViewHandle != VK_NULL_HANDLE) {
             if (debug) Gdx.app.log(TAG, "Destroying image view: " + imageViewHandle);
             vkDestroyImageView(rawDevice, imageViewHandle, null);
-            // imageViewHandle = VK_NULL_HANDLE; // Cannot do if final
         }
 
-        if (samplerHandle != VK_NULL_HANDLE) { // Check required if field isn't nulled below
+        if (samplerHandle != VK_NULL_HANDLE) {
             if (debug) Gdx.app.log(TAG, "Destroying sampler: " + samplerHandle);
             vkDestroySampler(rawDevice, samplerHandle, null);
-            // samplerHandle = VK_NULL_HANDLE; // Cannot do if final
         }
 
         // Dispose the underlying VulkanImage
         if (vulkanImage != null) {
-            vulkanImage.dispose(); // VulkanImage.dispose needs to be idempotent too!
-            // vulkanImage = null; // Cannot do if final
+            vulkanImage.dispose();
         }
 
         disposed = true; // --- Mark as disposed ---

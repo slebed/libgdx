@@ -76,6 +76,9 @@ public class VulkanApplicationConfiguration extends VulkanWindowConfiguration {
 
     public boolean useInstancing = true;
 
+    /** Preferred Vulkan API version for the instance. 0 means default to VK_API_VERSION_1_2. */
+    public int preferredVulkanApiVersion = 0;
+
     public enum SwapchainPresentMode {
         /**
          * Standard VSync, waits for vertical blank. Guaranteed to be available. Maps to VK_PRESENT_MODE_FIFO_KHR.
@@ -145,6 +148,7 @@ public class VulkanApplicationConfiguration extends VulkanWindowConfiguration {
         gpuPreference = config.gpuPreference;
         enableValidationLayers = config.enableValidationLayers;
         validationLayerMessageStream = config.validationLayerMessageStream;
+        preferredVulkanApiVersion = config.preferredVulkanApiVersion;
     }
 
     /**

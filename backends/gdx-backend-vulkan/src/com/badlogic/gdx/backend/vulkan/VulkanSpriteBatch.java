@@ -95,6 +95,8 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
     private int blendDstFuncAlpha = GL20.GL_ONE_MINUS_SRC_ALPHA;
     private boolean blendFuncSeparate = false;
 
+    private boolean disposed = false;
+
     private final float[] singleSpriteVertices; // Temp array for calculating one sprite's vertices
 
     public VulkanSpriteBatch() {
@@ -120,51 +122,60 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
 
         this.singleSpriteVertices = new float[VERTICES_PER_SPRITE * COMPONENTS_PER_VERTEX];
 
-        VulkanApplication app = (VulkanApplication) Gdx.app;
-        VulkanGraphics gfx = (VulkanGraphics) app.getGraphics();
-        if (gfx == null) throw new GdxRuntimeException("VulkanGraphics instance cannot be null!");
-        gfx.registerFrameResourcePreparer(this);
-
-        VulkanDevice device = gfx.getVulkanDevice();
-        this.vmaAllocator = gfx.getVmaAllocator();
-        this.pipelineManager = gfx.getPipelineManager();
-        this.descriptorManager = gfx.getDescriptorManager();
-        if (device == null || vmaAllocator == VK_NULL_HANDLE || pipelineManager == null || descriptorManager == null) {
-            throw new GdxRuntimeException("Failed to retrieve necessary Vulkan managers!");
-        }
-        this.rawDevice = device.getRawDevice();
-
-        int maxTexturesForTextureBatcher = 256; // Example, make configurable if needed
-        this.textureBatcher = new VulkanTextureBatch(descriptorManager, maxTexturesForTextureBatcher, gfx);
-
-        long vertexBufferSizeBytes = (long) totalBufferCapacityInSprites * VERTICES_PER_SPRITE * BYTES_PER_VERTEX;
-        this.vertexBuffer = VulkanResourceUtil.createManagedBuffer(
-                vmaAllocator, vertexBufferSizeBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                VMA_MEMORY_USAGE_AUTO, // Should resolve to CPU_TO_GPU or similar with HOST_ACCESS
-                VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
-        PointerBuffer pDataVB = MemoryUtil.memAllocPointer(1);
+        boolean initSuccess = false;
         try {
-            vkCheck(vmaMapMemory(vmaAllocator, vertexBuffer.allocationHandle, pDataVB), "VMA Failed to map vertex buffer");
-            this.mappedVertexByteBuffer = MemoryUtil.memByteBuffer(pDataVB.get(0), (int) vertexBufferSizeBytes);
-            this.vertices = this.mappedVertexByteBuffer.asFloatBuffer();
-            if (DEBUG) Gdx.app.log(TAG, "Vertex buffer created/mapped. Floats capacity: " + this.vertices.capacity() +
-                    " (enough for " + (this.vertices.capacity() / (VERTICES_PER_SPRITE * COMPONENTS_PER_VERTEX)) + " sprites).");
+            VulkanApplication app = (VulkanApplication) Gdx.app;
+            VulkanGraphics gfx = (VulkanGraphics) app.getGraphics();
+            if (gfx == null) throw new GdxRuntimeException("VulkanGraphics instance cannot be null!");
+            gfx.registerFrameResourcePreparer(this);
+
+            VulkanDevice device = gfx.getVulkanDevice();
+            this.vmaAllocator = gfx.getVmaAllocator();
+            this.pipelineManager = gfx.getPipelineManager();
+            this.descriptorManager = gfx.getDescriptorManager();
+            if (device == null || vmaAllocator == VK_NULL_HANDLE || pipelineManager == null || descriptorManager == null) {
+                throw new GdxRuntimeException("Failed to retrieve necessary Vulkan managers!");
+            }
+            this.rawDevice = device.getRawDevice();
+
+            int maxTexturesForTextureBatcher = 256; // Example, make configurable if needed
+            this.textureBatcher = new VulkanTextureBatch(descriptorManager, maxTexturesForTextureBatcher, gfx);
+
+            long vertexBufferSizeBytes = (long) totalBufferCapacityInSprites * VERTICES_PER_SPRITE * BYTES_PER_VERTEX;
+            this.vertexBuffer = VulkanResourceUtil.createManagedBuffer(
+                    vmaAllocator, vertexBufferSizeBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                    VMA_MEMORY_USAGE_AUTO, // Should resolve to CPU_TO_GPU or similar with HOST_ACCESS
+                    VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+            PointerBuffer pDataVB = MemoryUtil.memAllocPointer(1);
+            try {
+                vkCheck(vmaMapMemory(vmaAllocator, vertexBuffer.allocationHandle, pDataVB), "VMA Failed to map vertex buffer");
+                this.mappedVertexByteBuffer = MemoryUtil.memByteBuffer(pDataVB.get(0), (int) vertexBufferSizeBytes);
+                this.vertices = this.mappedVertexByteBuffer.asFloatBuffer();
+                if (DEBUG) Gdx.app.log(TAG, "Vertex buffer created/mapped. Floats capacity: " + this.vertices.capacity() +
+                        " (enough for " + (this.vertices.capacity() / (VERTICES_PER_SPRITE * COMPONENTS_PER_VERTEX)) + " sprites).");
+            } finally {
+                MemoryUtil.memFree(pDataVB);
+            }
+
+            createIndexBuffer(device, this.maxSpritesInOneFlush); // Index buffer sized for one flush trigger
+
+            long uboSize = 16 * Float.BYTES; // For one Matrix4
+            this.projMatrixUbo = VulkanResourceUtil.createManagedBuffer(
+                    vmaAllocator, uboSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                    VMA_MEMORY_USAGE_AUTO, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
+
+            this.batchPipelineLayout = pipelineManager.getOrCreatePipelineLayout(textureBatcher.getDescriptorSetLayout());
+            if (this.batchPipelineLayout == VK_NULL_HANDLE) {
+                throw new GdxRuntimeException("Failed to get/create pipeline layout from TextureBatcher.");
+            }
+            if (DEBUG) Gdx.app.log(TAG, "VulkanSpriteBatch Initialization complete.");
+            initSuccess = true;
         } finally {
-            MemoryUtil.memFree(pDataVB);
+            if (!initSuccess) {
+                Gdx.app.error(TAG, "VulkanSpriteBatch initialization failed, cleaning up partially created resources.");
+                dispose();
+            }
         }
-
-        createIndexBuffer(device, this.maxSpritesInOneFlush); // Index buffer sized for one flush trigger
-
-        long uboSize = 16 * Float.BYTES; // For one Matrix4
-        this.projMatrixUbo = VulkanResourceUtil.createManagedBuffer(
-                vmaAllocator, uboSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                VMA_MEMORY_USAGE_AUTO, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT);
-
-        this.batchPipelineLayout = pipelineManager.getOrCreatePipelineLayout(textureBatcher.getDescriptorSetLayout());
-        if (this.batchPipelineLayout == VK_NULL_HANDLE) {
-            throw new GdxRuntimeException("Failed to get/create pipeline layout from TextureBatcher.");
-        }
-        if (DEBUG) Gdx.app.log(TAG, "VulkanSpriteBatch Initialization complete.");
     }
 
     private void createIndexBuffer(VulkanDevice device, int numSpritesForIndexBuffer) {
@@ -198,6 +209,7 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
 
     @Override
     public void begin() {
+        if (disposed) throw new GdxRuntimeException("Cannot begin a disposed VulkanSpriteBatch.");
         if (drawing) throw new IllegalStateException("Batch.end must be called before begin.");
         drawing = true;
         renderCalls = 0;
@@ -731,6 +743,8 @@ public class VulkanSpriteBatch implements Batch, VulkanFrameResourcePreparer, Di
 
     @Override
     public void dispose() {
+        if (disposed) return;
+        disposed = true;
         if (DEBUG) Gdx.app.log(TAG, "Disposing VulkanSpriteBatch...");
         if (Gdx.app instanceof VulkanApplication) {
             VulkanGraphics gfx = (VulkanGraphics) Gdx.app.getGraphics();

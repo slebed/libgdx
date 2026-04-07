@@ -114,6 +114,18 @@ import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
 
+/**
+ * Represents a single GLFW window backed by a Vulkan swapchain and render pass.
+ *
+ * <h3>Threading model</h3>
+ * <ul>
+ *   <li>All public methods must be called from the <b>main (GLFW) thread</b> unless documented
+ *       otherwise.</li>
+ *   <li>Dimension queries ({@link #getBackBufferWidth()}, {@link #getLogicalWidth()}, etc.)
+ *       call GLFW directly and are therefore main-thread-only.</li>
+ *   <li>The {@code runnables} queue is drained on the main thread inside {@link #update()}.</li>
+ * </ul>
+ */
 public class VulkanWindow implements Disposable {
     private static final String TAG = "VulkanWindow";
     private static final boolean debug = false;

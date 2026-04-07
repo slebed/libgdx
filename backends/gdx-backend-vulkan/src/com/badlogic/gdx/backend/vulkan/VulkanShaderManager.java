@@ -239,7 +239,7 @@ public class VulkanShaderManager implements Disposable {
     }
 
     @Override
-    public void dispose() {
+    public synchronized void dispose() {
         if (DEBUG) Gdx.app.log(TAG, "Disposing VulkanShaderManager...");
         if (DEBUG) Gdx.app.log(TAG, "Cleaning up cached shader modules (" + shaderModuleCache.size() + ")...");
 

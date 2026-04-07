@@ -13,6 +13,8 @@ public class VulkanBuffer implements Disposable {
     private static final String TAG = "VulkanBuffer";
     private static final boolean DEBUG = true; // Changed to DEBUG for consistency if you use this elsewhere
 
+    private boolean disposed = false;
+
     public final long bufferHandle;
     public final long allocationHandle; // This is VmaAllocation handle
     public final long size;
@@ -95,8 +97,14 @@ public class VulkanBuffer implements Disposable {
         return size;
     }
 
+    public boolean isDisposed() {
+        return disposed;
+    }
+
     @Override
     public void dispose() {
+        if (disposed) return;
+        disposed = true;
         // Use VMA to destroy buffer AND free allocation
         // Check against VK_NULL_HANDLE for Vulkan handles and VMA handles if they are long
         if (allocatorHandle != VK_NULL_HANDLE &&

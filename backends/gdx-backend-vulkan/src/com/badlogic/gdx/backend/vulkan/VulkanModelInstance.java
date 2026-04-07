@@ -4,17 +4,11 @@ package com.badlogic.gdx.backend.vulkan;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.GdxRuntimeException;
-// import com.badlogic.gdx.utils.ObjectMap; // For material overrides later
 
 public class VulkanModelInstance {
 	public final VulkanModel model; // The model data this instance refers to
 	public Matrix4 transform = new Matrix4(); // Instance-specific world transform, initialized to identity
 	public String id; // Optional identifier for this instance
-
-	// Future:
-	// public ObjectMap<String, VulkanMaterial> materialOverrides; // Key: meshPart.id or material.id
-	// public AnimationController animationController;
-	// public Object userData;
 
 	/** Creates an instance of the
 	 *

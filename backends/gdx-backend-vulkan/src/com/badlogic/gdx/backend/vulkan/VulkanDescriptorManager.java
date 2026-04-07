@@ -31,8 +31,11 @@ public class VulkanDescriptorManager implements Disposable {
     private static final int MAX_UBOS_PER_POOL = 1000;
     private static final int MAX_SAMPLERS_PER_POOL = 4000;
 
+    private boolean disposed = false;
+
     private final VkDevice device;
     private final VkPhysicalDeviceLimits limits;
+    private final VulkanDeviceCapabilities capabilities;
     private final Map<String, Long> layoutCache = new HashMap<>();
 
     private long descriptorPool;
@@ -44,10 +47,12 @@ public class VulkanDescriptorManager implements Disposable {
      * @param device The Vulkan logical device handle.
      * @param physicalDeviceLimits The limits of the physical device.
      * @param maxFramesInFlight Number of frames for synchronization.
+     * @param capabilities The device capabilities for runtime feature checks (may be null).
      */
-    public VulkanDescriptorManager(VkDevice device, VkPhysicalDeviceLimits physicalDeviceLimits, int maxFramesInFlight) {
+    public VulkanDescriptorManager(VkDevice device, VkPhysicalDeviceLimits physicalDeviceLimits, int maxFramesInFlight, VulkanDeviceCapabilities capabilities) {
         this.device = Objects.requireNonNull(device, "VkDevice cannot be null");
         this.limits = Objects.requireNonNull(physicalDeviceLimits, "VkPhysicalDeviceLimits cannot be null");
+        this.capabilities = capabilities;
         this.maxFramesInFlight = maxFramesInFlight;
         if (maxFramesInFlight <= 0) {
             throw new IllegalArgumentException("maxFramesInFlight must be positive.");
@@ -136,6 +141,7 @@ public class VulkanDescriptorManager implements Disposable {
     }
 
     public long allocateSet(long layoutHandle) {
+        if (disposed) throw new GdxRuntimeException("Cannot allocate from disposed descriptor manager");
         if (layoutHandle == VK_NULL_HANDLE) {
             throw new IllegalArgumentException("Cannot allocate descriptor set with VK_NULL_HANDLE layout.");
         }
@@ -261,6 +267,8 @@ public class VulkanDescriptorManager implements Disposable {
 
     @Override
     public void dispose() {
+        if (disposed) return;
+        disposed = true;
         if (DEBUG) Gdx.app.log(TAG, "Disposing VulkanDescriptorManager...");
 
         for (long layoutHandle : layoutCache.values()) {
@@ -286,6 +294,10 @@ public class VulkanDescriptorManager implements Disposable {
         return device;
     }
 
+    public boolean isPartiallyBoundSupported() {
+        return capabilities != null && capabilities.isDescriptorBindingPartiallyBound();
+    }
+
     /**
      * Creates or retrieves a cached descriptor set layout suitable for a UBO at binding 0
      * and a bindless-like texture array at binding 1.
@@ -298,8 +310,24 @@ public class VulkanDescriptorManager implements Disposable {
      * @return The handle to the VkDescriptorSetLayout.
      */
     public long getOrCreateBindlessLikeTextureArrayLayout(int textureCount, boolean allowPartiallyBound, boolean allowUpdateAfterBind) {
+        // Runtime capability checks: downgrade requested flags if hardware doesn't support them
+        boolean effectivePartiallyBound = allowPartiallyBound;
+        boolean effectiveUpdateAfterBind = allowUpdateAfterBind;
+
+        if (allowPartiallyBound && (capabilities == null || !capabilities.isDescriptorBindingPartiallyBound())) {
+            Gdx.app.log(TAG, "WARNING: PARTIALLY_BOUND requested but not supported by device. Disabling.");
+            effectivePartiallyBound = false;
+        }
+        if (allowUpdateAfterBind && (capabilities == null || !capabilities.isDescriptorBindingSampledImageUpdateAfterBind())) {
+            Gdx.app.log(TAG, "WARNING: UPDATE_AFTER_BIND requested but not supported by device. Disabling.");
+            effectiveUpdateAfterBind = false;
+        }
+
+        final boolean usePartiallyBound = effectivePartiallyBound;
+        final boolean useUpdateAfterBind = effectiveUpdateAfterBind;
+
         // Generate a unique key based on parameters
-        String key = String.format("UBO0_TexArray1_Count%d_Partial%b_Update%b", textureCount, allowPartiallyBound, allowUpdateAfterBind);
+        String key = String.format("UBO0_TexArray1_Count%d_Partial%b_Update%b", textureCount, usePartiallyBound, useUpdateAfterBind);
 
         return layoutCache.computeIfAbsent(key, k -> {
             if (DEBUG) Gdx.app.log(TAG, "Creating Descriptor Set Layout: " + k);
@@ -327,14 +355,11 @@ public class VulkanDescriptorManager implements Disposable {
                 bindingFlags.put(0, 0); // Binding 0 (UBO) has no special flags
 
                 int samplerFlags = 0;
-                if (allowPartiallyBound) {
+                if (usePartiallyBound) {
                     samplerFlags |= VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
                 }
-                if (allowUpdateAfterBind) {
+                if (useUpdateAfterBind) {
                     samplerFlags |= VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
-                    // TODO: Ensure the descriptor pool supports UPDATE_AFTER_BIND if this flag is used.
-                    // Might require recreating the pool if it wasn't created with the flag initially.
-                    // Consider adding a check or ensuring the pool is created correctly based on usage.
                 }
                 bindingFlags.put(1, samplerFlags); // Set flags for Binding 1 (Sampler Array)
                 bindingFlags.flip();
@@ -350,7 +375,7 @@ public class VulkanDescriptorManager implements Disposable {
                 layoutInfo.pNext(flagsInfo.address()); // Chain the flags struct
 
                 // Add layout flag if updateAfterBind is used for any binding
-                if (allowUpdateAfterBind) {
+                if (useUpdateAfterBind) {
                     layoutInfo.flags(VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
                 }
 

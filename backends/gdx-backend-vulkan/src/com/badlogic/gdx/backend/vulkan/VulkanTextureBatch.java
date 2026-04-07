@@ -35,14 +35,17 @@ public class VulkanTextureBatch implements Disposable {
     private VulkanTexture defaultTexture;
 
     final int maxTexturesInLayout;
+    private final boolean partiallyBoundEnabled;
     private long activeFrameDescriptorSet = VK_NULL_HANDLE;
 
+    private boolean disposed = false;
     private boolean activeFrameSetPopulated;
 
     public VulkanTextureBatch(VulkanDescriptorManager descriptorManager, int maxTextures, VulkanGraphics gfx) {
         this.descriptorManager = descriptorManager;
         this.rawDevice = descriptorManager.getDevice();
         this.vulkanGraphics = gfx;
+        this.partiallyBoundEnabled = descriptorManager.isPartiallyBoundSupported();
         this.maxFramesInFlight = vulkanGraphics.config.MAX_FRAMES_IN_FLIGHT;
         if (this.maxFramesInFlight <= 0) {
             throw new GdxRuntimeException("MAX_FRAMES_IN_FLIGHT must be positive.");
@@ -55,9 +58,18 @@ public class VulkanTextureBatch implements Disposable {
         this.textureToDeviceIndexMap = new ObjectIntMap<>(Math.max(16, maxTextures));
         this.frameDescriptorSets = new long[this.maxFramesInFlight];
 
-        createDefaultTexture();
-        createDescriptorSetLayout();
-        allocateDescriptorSets();
+        boolean initSuccess = false;
+        try {
+            createDefaultTexture();
+            createDescriptorSetLayout();
+            allocateDescriptorSets();
+            initSuccess = true;
+        } finally {
+            if (!initSuccess) {
+                Gdx.app.error(TAG, "VulkanTextureBatch initialization failed, cleaning up partially created resources.");
+                dispose();
+            }
+        }
     }
 
     private void createDefaultTexture() {
@@ -72,7 +84,7 @@ public class VulkanTextureBatch implements Disposable {
     private void createDescriptorSetLayout() {
         this.descriptorSetLayout = descriptorManager.getOrCreateBindlessLikeTextureArrayLayout(
                 maxTexturesInLayout,
-                true,  // allowPartiallyBound
+                partiallyBoundEnabled,  // allowPartiallyBound - based on device capabilities
                 false  // allowUpdateAfterBind is false
         );
         if (this.descriptorSetLayout == VK_NULL_HANDLE) {
@@ -211,6 +223,8 @@ public class VulkanTextureBatch implements Disposable {
 
     @Override
     public void dispose() {
+        if (disposed) return;
+        disposed = true;
         if (DEBUG) Gdx.app.log(TAG, "Disposing VulkanTextureBatch.");
         if (defaultTexture != null) {
             defaultTexture.dispose();

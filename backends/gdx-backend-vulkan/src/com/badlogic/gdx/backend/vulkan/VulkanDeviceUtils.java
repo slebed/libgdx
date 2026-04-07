@@ -13,16 +13,10 @@ import static org.lwjgl.vulkan.KHRSurface.vkGetPhysicalDeviceSurfaceFormatsKHR;
 import static org.lwjgl.vulkan.KHRSurface.vkGetPhysicalDeviceSurfacePresentModesKHR;
 import static org.lwjgl.vulkan.KHRSurface.vkGetPhysicalDeviceSurfaceSupportKHR;
 import static org.lwjgl.vulkan.VK10.*;
-// Assuming DEVICE_EXTENSIONS and primarySurface are accessible in this context
-// For a standalone method, these would need to be passed as parameters or accessed differently.
 
-public class VulkanDeviceUtils { // Changed class name for a utility context
+public class VulkanDeviceUtils {
 
-    private static final String TAG = "VulkanDeviceUtils"; // For logging
-    // DEVICE_EXTENSIONS would typically be a static final Set<String> in VulkanApplication
-    // For this standalone method, let's assume it's passed or defined if needed.
-    // private static final Set<String> DEVICE_EXTENSIONS = Collections.singleton(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-
+    private static final String TAG = "VulkanDeviceUtils";
 
     // Inner class to hold queue family indices
     public static class QueueFamilyIndices {
@@ -65,21 +59,9 @@ public class VulkanDeviceUtils { // Changed class name for a utility context
             SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device, stack, surface);
             swapChainAdequate = swapChainSupport.formats != null && swapChainSupport.formats.limit() > 0 &&
                     swapChainSupport.presentModes != null && swapChainSupport.presentModes.limit() > 0;
-        } else if (surface == VK_NULL_HANDLE) {
-            // If no surface is provided, we might skip swapchain adequacy check or define suitability differently.
-            // For typical rendering applications, swapchain is essential.
-            // Gdx.app.log(TAG, "No surface provided to isDeviceSuitable, skipping swapchain adequacy check.");
-            // swapChainAdequate = true; // Or false, depending on requirements without a surface
         }
 
-
-        // 4. Optionally, check for specific features (if VulkanDeviceCapabilities is available and initialized for 'device')
-        // Example:
-        // VulkanDeviceCapabilities tempCaps = new VulkanDeviceCapabilities(device);
-        // boolean featuresSupported = tempCaps.isSamplerAnisotropy(); // And other critical features
-        // tempCaps.free(); // If it allocates heap resources
-        // For this standalone method, feature checking would require passing VulkanDeviceCapabilities or querying here.
-        boolean featuresSupported = true; // Placeholder; implement actual feature checks if needed
+        boolean featuresSupported = true;
 
         return indices.isComplete() && extensionsSupported && swapChainAdequate && featuresSupported;
     }
@@ -117,20 +99,12 @@ public class VulkanDeviceUtils { // Changed class name for a utility context
                 if (pPresentSupport.get(0) == VK_TRUE) {
                     indices.presentFamily = i;
                 }
-            } else {
-                // If no surface, presentFamily might remain null, or be set to graphicsFamily if combined queues are acceptable.
-                // For now, it remains null, and isComplete() will reflect this.
             }
 
-            // If a surface is expected and both families are found, or if no surface and graphics is found.
             if (surface != VK_NULL_HANDLE && indices.isComplete()) {
                 break;
             } else if (surface == VK_NULL_HANDLE && indices.graphicsFamily != null) {
-                // If no surface, we might only care about graphics.
-                // Or, presentFamily could be set to graphicsFamily if that's an acceptable fallback.
-                // For simplicity, we break if graphics is found and no surface is given.
-                // indices.presentFamily = indices.graphicsFamily; // Optional: assume combined queue
-                // if(indices.isComplete()) break;
+                break;
             }
         }
         return indices;

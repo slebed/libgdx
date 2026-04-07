@@ -1,17 +1,13 @@
-package com.badlogic.gdx.backend.vulkan; // Your package
+package com.badlogic.gdx.backend.vulkan;
 
 import com.badlogic.gdx.graphics.Color;
-import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.utils.ObjectMap;
-import com.badlogic.gdx.utils.Pool.Poolable; // Optional: if you want to pool materials
+import com.badlogic.gdx.utils.Pool.Poolable;
 
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
-// Assuming VulkanTexture is in the same package or imported
-// import com.badlogic.gdx.backend.vulkan.VulkanTexture;
-
-public class VulkanMaterial implements Poolable { // Implementing Poolable is optional
+public class VulkanMaterial implements Poolable {
 
     public String id;
 
@@ -57,7 +53,6 @@ public class VulkanMaterial implements Poolable { // Implementing Poolable is op
         public static final int OCCLUSION = 1 << 4;
         public static final int METALLIC_ROUGHNESS = 1 << 5;
     }
-    // public int activeTextureFlags = 0; // Calculated based on set textures
 
     /**
      * Generic attribute storage for custom shader properties.
@@ -92,7 +87,6 @@ public class VulkanMaterial implements Poolable { // Implementing Poolable is op
         metallicRoughnessTexture = null;
         customAttributes.clear();
         pipelineBundle = null;
-        // activeTextureFlags = 0;
     }
 
     public Color getDiffuseColor() {

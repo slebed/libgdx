@@ -170,13 +170,6 @@ public class VulkanVertexData implements VertexData {
 			Gdx.app.error(logTag, "Cannot update static vertex data.");
 			return;
 		}
-		if (!isDirty && targetOffset == 0 && count == cpuBuffer.capacity()) {
-			// If not explicitly marked dirty, but doing a full update, mark it
-			// TODO: This logic might need refinement depending on how updates are triggered.
-			// For now, assume if update is called, we should try to upload.
-			// isDirty = true;
-		}
-
 		// TODO: Implement partial updates using staging buffer + vkCmdCopyBuffer with offsets.
 		// For now, we re-upload the *entire* CPU buffer content if dirty (simple but slow).
 		if (isDirty) {

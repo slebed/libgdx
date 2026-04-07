@@ -120,6 +120,19 @@ import org.lwjgl.vulkan.VkQueueFamilyProperties;
 import org.lwjgl.vulkan.VkSurfaceCapabilitiesKHR;
 import org.lwjgl.vulkan.VkSurfaceFormatKHR;
 
+/**
+ * Main Vulkan application entry point, analogous to Lwjgl3Application.
+ *
+ * <h3>Threading model</h3>
+ * <ul>
+ *   <li>The GLFW event loop and all {@code ApplicationListener} callbacks run on the <b>main thread</b>.</li>
+ *   <li>Dimension state ({@code backBufferWidth}, {@code logicalWidth}, etc.) is published via a
+ *       single volatile {@link DimensionSnapshot} so that any thread may read a consistent set of
+ *       values without synchronization.</li>
+ *   <li>Window-surface map ({@code windowSurfaces}) uses {@code ConcurrentHashMap} for safe
+ *       cross-thread access.</li>
+ * </ul>
+ */
 public class VulkanApplication implements VulkanApplicationBase {
     private static final String TAG = "VulkanApplication";
     private static final boolean debug = true; // Enabled debug for more verbose logging during init
@@ -167,10 +180,15 @@ public class VulkanApplication implements VulkanApplicationBase {
     int frameId;
     int fps;
 
-    private volatile int backBufferWidth;
-    private volatile int backBufferHeight;
-    private volatile int logicalWidth;
-    private volatile int logicalHeight;
+    /** Immutable snapshot of window dimension state, enabling tear-free reads from any thread. */
+    private static final class DimensionSnapshot {
+        final int backBufferWidth, backBufferHeight, logicalWidth, logicalHeight;
+        DimensionSnapshot(int bbW, int bbH, int lW, int lH) {
+            this.backBufferWidth = bbW; this.backBufferHeight = bbH;
+            this.logicalWidth = lW; this.logicalHeight = lH;
+        }
+    }
+    private volatile DimensionSnapshot dimensions = new DimensionSnapshot(0, 0, 0, 0);
     private int windowPosXBeforeFullscreen;
     private int windowPosYBeforeFullscreen;
     private int windowWidthBeforeFullscreen;
@@ -206,11 +224,13 @@ public class VulkanApplication implements VulkanApplicationBase {
             List<String> requiredExtensions = getRequiredInstanceExtensions(stack);
             List<String> validationLayers = getValidationLayers();
 
+            int requestedApiVersion = appConfig.preferredVulkanApiVersion != 0
+                    ? appConfig.preferredVulkanApiVersion : VK_API_VERSION_1_2;
             this.vulkanInstance = new VulkanInstance.Builder()
                     .setApplicationName(appConfig.title)
                     .setRequiredExtensions(requiredExtensions)
                     .setValidationLayers(validationLayers)
-                    .setApiVersion(VK_API_VERSION_1_2)
+                    .setApiVersion(requestedApiVersion)
                     .build();
             if (debug) Gdx.app.log(TAG, "Vulkan Instance created.");
 
@@ -402,7 +422,7 @@ public class VulkanApplication implements VulkanApplicationBase {
         if (this.vulkanDevice == null || this.vulkanDevice.getLogicalDevice() == null) { // Check logical device from wrapper
             throw new GdxRuntimeException("VulkanDevice or its logical device is null in initializeDescriptor!");
         }
-        this.descriptorManager = new VulkanDescriptorManager(this.vulkanDevice.getLogicalDevice(), limits, this.appConfig.getMaxFramesInFlight());
+        this.descriptorManager = new VulkanDescriptorManager(this.vulkanDevice.getLogicalDevice(), limits, this.appConfig.getMaxFramesInFlight(), this.deviceCapabilities);
     }
 
     private void initializePipeline() {
@@ -1652,8 +1672,9 @@ public class VulkanApplication implements VulkanApplicationBase {
         } else {
             windowPosXBeforeFullscreen = 0;
             windowPosYBeforeFullscreen = 0;
-            windowWidthBeforeFullscreen = logicalWidth; // Use app-level cache
-            windowHeightBeforeFullscreen = logicalHeight; // Use app-level cache
+            DimensionSnapshot snap = this.dimensions;
+            windowWidthBeforeFullscreen = snap.logicalWidth; // Use app-level cache
+            windowHeightBeforeFullscreen = snap.logicalHeight; // Use app-level cache
             Gdx.app.error(TAG, "Could not get primary window to store position/size before fullscreen. Using cached logical dimensions.");
         }
         displayModeBeforeFullscreen = getDisplayMode(getMonitor());
@@ -1710,16 +1731,14 @@ public class VulkanApplication implements VulkanApplicationBase {
 
     public void updateFramebufferInfo(int backBufferWidth, int backBufferHeight, int logicalWidth, int logicalHeight) {
         if (debug) Gdx.app.log(TAG, "updateFramebufferInfo called with: BB=" + backBufferWidth + " x " + backBufferHeight + ", Logical=" + logicalWidth + " x " + logicalHeight);
-        this.backBufferWidth = backBufferWidth;
-        this.backBufferHeight = backBufferHeight;
-        this.logicalWidth = logicalWidth;
-        this.logicalHeight = logicalHeight;
+        this.dimensions = new DimensionSnapshot(backBufferWidth, backBufferHeight, logicalWidth, logicalHeight);
         if (appConfig != null) {
             bufferFormat = new Graphics.BufferFormat(appConfig.r, appConfig.g, appConfig.b, appConfig.a, appConfig.depth, appConfig.stencil, appConfig.samples, false);
         } else {
             Gdx.app.error(TAG, "Config is null during updateFramebufferInfo, cannot update bufferFormat.");
         }
-        if (debug) Gdx.app.log(TAG, "Cached dimensions updated: BB=" + this.backBufferWidth + " x " + this.backBufferHeight + ", Logical=" + this.logicalWidth + " x " + this.logicalHeight);
+        DimensionSnapshot snap = this.dimensions;
+        if (debug) Gdx.app.log(TAG, "Cached dimensions updated: BB=" + snap.backBufferWidth + " x " + snap.backBufferHeight + ", Logical=" + snap.logicalWidth + " x " + snap.logicalHeight);
     }
 
     public boolean setWindowedMode(int width, int height) {
