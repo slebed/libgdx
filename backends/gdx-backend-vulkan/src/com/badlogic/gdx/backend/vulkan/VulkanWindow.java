@@ -16,64 +16,23 @@
 
 package com.badlogic.gdx.backend.vulkan;
 
-import static com.badlogic.gdx.backend.vulkan.VkMemoryUtil.vkCheck;
 import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.vulkan.KHRSurface.vkDestroySurfaceKHR;
-import static org.lwjgl.vulkan.KHRSwapchain.VK_ERROR_OUT_OF_DATE_KHR;
-import static org.lwjgl.vulkan.KHRSwapchain.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-import static org.lwjgl.vulkan.KHRSwapchain.VK_SUBOPTIMAL_KHR;
-import static org.lwjgl.vulkan.KHRSwapchain.vkQueuePresentKHR;
-import static org.lwjgl.vulkan.VK10.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-import static org.lwjgl.vulkan.VK10.VK_ATTACHMENT_LOAD_OP_CLEAR;
-import static org.lwjgl.vulkan.VK10.VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-import static org.lwjgl.vulkan.VK10.VK_ATTACHMENT_STORE_OP_DONT_CARE;
-import static org.lwjgl.vulkan.VK10.VK_ATTACHMENT_STORE_OP_STORE;
-import static org.lwjgl.vulkan.VK10.VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-import static org.lwjgl.vulkan.VK10.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-import static org.lwjgl.vulkan.VK10.VK_FENCE_CREATE_SIGNALED_BIT;
-import static org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-import static org.lwjgl.vulkan.VK10.VK_IMAGE_LAYOUT_UNDEFINED;
 import static org.lwjgl.vulkan.VK10.VK_NULL_HANDLE;
-import static org.lwjgl.vulkan.VK10.VK_PIPELINE_BIND_POINT_GRAPHICS;
-import static org.lwjgl.vulkan.VK10.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-import static org.lwjgl.vulkan.VK10.VK_SAMPLE_COUNT_1_BIT;
-import static org.lwjgl.vulkan.VK10.VK_SUBPASS_CONTENTS_INLINE;
-import static org.lwjgl.vulkan.VK10.VK_SUBPASS_EXTERNAL;
-import static org.lwjgl.vulkan.VK10.VK_SUCCESS;
-import static org.lwjgl.vulkan.VK10.vkAllocateCommandBuffers;
-import static org.lwjgl.vulkan.VK10.vkBeginCommandBuffer;
-import static org.lwjgl.vulkan.VK10.vkCmdBeginRenderPass;
-import static org.lwjgl.vulkan.VK10.vkCmdEndRenderPass;
-import static org.lwjgl.vulkan.VK10.vkCreateCommandPool;
-import static org.lwjgl.vulkan.VK10.vkCreateFence;
-import static org.lwjgl.vulkan.VK10.vkCreateFramebuffer;
-import static org.lwjgl.vulkan.VK10.vkCreateRenderPass;
-import static org.lwjgl.vulkan.VK10.vkCreateSemaphore;
-import static org.lwjgl.vulkan.VK10.vkDestroyCommandPool;
-import static org.lwjgl.vulkan.VK10.vkDestroyFence;
-import static org.lwjgl.vulkan.VK10.vkDestroyFramebuffer;
-import static org.lwjgl.vulkan.VK10.vkDestroyRenderPass;
-import static org.lwjgl.vulkan.VK10.vkDestroySemaphore;
 import static org.lwjgl.vulkan.VK10.vkDeviceWaitIdle;
-import static org.lwjgl.vulkan.VK10.vkEndCommandBuffer;
-import static org.lwjgl.vulkan.VK10.vkQueueSubmit;
-import static org.lwjgl.vulkan.VK10.vkResetCommandBuffer;
-import static org.lwjgl.vulkan.VK10.vkResetFences;
-import static org.lwjgl.vulkan.VK10.vkWaitForFences;
 
 import java.nio.IntBuffer;
-import java.nio.LongBuffer;
-import java.util.ArrayList;
-import java.util.List;
 
 import com.badlogic.gdx.*;
 import com.badlogic.gdx.graphics.Cursor;
-import com.badlogic.gdx.graphics.glutils.HdpiMode;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.Os;
+import com.badlogic.gdx.utils.SharedLibraryLoader;
 
 import org.lwjgl.BufferUtils;
-import org.lwjgl.PointerBuffer;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWDropCallback;
 import org.lwjgl.glfw.GLFWFramebufferSizeCallback;
@@ -83,36 +42,8 @@ import org.lwjgl.glfw.GLFWWindowFocusCallback;
 import org.lwjgl.glfw.GLFWWindowIconifyCallback;
 import org.lwjgl.glfw.GLFWWindowMaximizeCallback;
 import org.lwjgl.glfw.GLFWWindowRefreshCallback;
-import org.lwjgl.system.MemoryStack;
-import org.lwjgl.vulkan.VK10;
-import org.lwjgl.vulkan.VkAttachmentDescription;
-import org.lwjgl.vulkan.VkAttachmentReference;
-import org.lwjgl.vulkan.VkClearValue;
-import org.lwjgl.vulkan.VkCommandBuffer;
-import org.lwjgl.vulkan.VkCommandBufferAllocateInfo;
-import org.lwjgl.vulkan.VkCommandBufferBeginInfo;
-import org.lwjgl.vulkan.VkCommandPoolCreateInfo;
 import org.lwjgl.vulkan.VkDevice;
-import org.lwjgl.vulkan.VkExtent2D;
-import org.lwjgl.vulkan.VkFenceCreateInfo;
-import org.lwjgl.vulkan.VkFramebufferCreateInfo;
 import org.lwjgl.vulkan.VkInstance;
-import org.lwjgl.vulkan.VkOffset2D;
-import org.lwjgl.vulkan.VkPresentInfoKHR;
-import org.lwjgl.vulkan.VkQueue;
-import org.lwjgl.vulkan.VkRect2D;
-import org.lwjgl.vulkan.VkRenderPassBeginInfo;
-import org.lwjgl.vulkan.VkRenderPassCreateInfo;
-import org.lwjgl.vulkan.VkSemaphoreCreateInfo;
-import org.lwjgl.vulkan.VkSubmitInfo;
-import org.lwjgl.vulkan.VkSubpassDependency;
-import org.lwjgl.vulkan.VkSubpassDescription;
-import org.lwjgl.vulkan.VkViewport;
-
-import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.utils.Array;
-import com.badlogic.gdx.utils.Disposable;
-import com.badlogic.gdx.utils.SharedLibraryLoader;
 
 /**
  * Represents a single GLFW window backed by a Vulkan swapchain and render pass.
@@ -150,17 +81,10 @@ public class VulkanWindow implements Disposable {
     private boolean framebufferResized = false;
 
     private VulkanSwapchain swapchain = null;
-    private long renderPass = VK_NULL_HANDLE; // VkRenderPass handle
-    private List<Long> framebuffers = new ArrayList<>(); // List of VkFramebuffer handles
-    private long commandPool = VK_NULL_HANDLE; // VkCommandPool handle
-    private List<VkCommandBuffer> commandBuffers = new ArrayList<>(); // List of VkCommandBuffer objects/handles
-    private List<Long> imageAvailableSemaphores = new ArrayList<>(); // List of VkSemaphore handles
-    private List<Long> renderFinishedSemaphores = new ArrayList<>(); // List of VkSemaphore handles
-    private List<Long> inFlightFences = new ArrayList<>(); // List of VkFence handles
-    private int maxFramesInFlight = 1; // Example, configure as needed
-    private int currentFrame = 0; // For sync object cycling
-
-    private com.badlogic.gdx.utils.viewport.Viewport viewportForVkCommands = null;
+    private long renderPass = VK_NULL_HANDLE; // Cached from VulkanSwapchain
+    private VulkanFrameResources frameResources;
+    private VulkanWindowRenderer renderer;
+    private int maxFramesInFlight = 1;
 
     private final GLFWWindowFocusCallback focusCallback = new GLFWWindowFocusCallback() {
         @Override
@@ -298,6 +222,9 @@ public class VulkanWindow implements Disposable {
         public void invoke(long windowHandle, int width, int height) {
             if (windowHandle == VulkanWindow.this.windowHandle) {
                 VulkanWindow.this.framebufferResized = true;
+                if (VulkanWindow.this.renderer != null) {
+                    VulkanWindow.this.renderer.setFramebufferResized(true);
+                }
             }
         }
     };
@@ -379,117 +306,26 @@ public class VulkanWindow implements Disposable {
             this.maxFramesInFlight = 1;
         }
 
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            VkDevice device = application.getVulkanDevice().getRawDevice();
-
-            // --- Create Render Pass ---
-            VkAttachmentDescription.Buffer colorAttachment = VkAttachmentDescription.calloc(1, stack).format(this.swapchain.getImageFormat()).samples(VK_SAMPLE_COUNT_1_BIT).loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_STORE).stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE).initialLayout(VK_IMAGE_LAYOUT_UNDEFINED).finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-            VkAttachmentReference.Buffer colorAttachmentRef = VkAttachmentReference.calloc(1, stack).attachment(0).layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-            VkSubpassDescription.Buffer subpass = VkSubpassDescription.calloc(1, stack)
-                    .pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
-                    .colorAttachmentCount(colorAttachmentRef.remaining())
-                    .pColorAttachments(colorAttachmentRef);
-
-            VkSubpassDependency.Buffer dependency = VkSubpassDependency.calloc(1, stack).srcSubpass(VK_SUBPASS_EXTERNAL).dstSubpass(0).srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT).srcAccessMask(0).dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT).dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-            VkRenderPassCreateInfo renderPassInfo = VkRenderPassCreateInfo.calloc(stack).sType$Default().pAttachments(colorAttachment).pSubpasses(subpass).pDependencies(dependency);
-            LongBuffer pRenderPass = stack.mallocLong(1);
-            int rpErrCode = vkCreateRenderPass(device, renderPassInfo, null, pRenderPass);
-            VkResult rpResult = VkResult.translate(rpErrCode);
-            if (!rpResult.isSuccess()) { // Use helper method
-                throw new GdxRuntimeException("Failed to create render pass: " + rpResult);
+        try {
+            // Use render pass and framebuffers from VulkanSwapchain (no duplication)
+            this.renderPass = this.swapchain.getRenderPass();
+            if (this.renderPass == VK_NULL_HANDLE) {
+                throw new GdxRuntimeException("Swapchain render pass is null after creation!");
             }
-            this.renderPass = pRenderPass.get(0);
 
             if (this.vulkanGraphics != null) {
-                ((VulkanGraphics) this.vulkanGraphics).setMainSwapchainRenderPass(this.renderPass); // Inform VulkanGraphics
+                this.vulkanGraphics.setMainSwapchainRenderPass(this.renderPass);
             } else {
                 Gdx.app.error(TAG, "VulkanGraphics instance is null in VulkanWindow.create() after render pass creation.");
-                // This would be a critical setup error
             }
 
-            List<Long> swapChainImageViews = this.swapchain.getImageViews();
-            VkExtent2D swapChainExtent = this.swapchain.getExtent();
-            this.framebuffers = new ArrayList<>(swapChainImageViews.size());
-            LongBuffer attachments = stack.mallocLong(1);
-            LongBuffer pFramebuffer = stack.mallocLong(1);
-            for (long imageView : swapChainImageViews) {
-                attachments.put(0, imageView);
-                VkFramebufferCreateInfo framebufferInfo = VkFramebufferCreateInfo.calloc(stack).sType$Default().renderPass(this.renderPass).pAttachments(attachments).width(swapChainExtent.width()).height(swapChainExtent.height()).layers(1);
-                int fbErrCode = vkCreateFramebuffer(device, framebufferInfo, null, pFramebuffer);
-                VkResult fbResult = VkResult.translate(fbErrCode);
-                if (!fbResult.isSuccess()) {
-                    throw new GdxRuntimeException("Failed to create framebuffer: " + fbResult);
-                }
-                this.framebuffers.add(pFramebuffer.get(0));
-            }
-
-            // --- Create Command Pool ---
+            // Create frame resources (command pool, command buffers, sync objects)
             int graphicsQueueFamily = application.getGraphicsQueueFamily();
-            VkCommandPoolCreateInfo poolInfo = VkCommandPoolCreateInfo.calloc(stack).sType$Default().flags(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT).queueFamilyIndex(graphicsQueueFamily);
-            LongBuffer pCommandPool = stack.mallocLong(1);
-            int cpErrCode = vkCreateCommandPool(device, poolInfo, null, pCommandPool);
-            VkResult cpResult = VkResult.translate(cpErrCode);
-            if (!cpResult.isSuccess()) {
-                throw new GdxRuntimeException("Failed to create command pool: " + cpResult);
-            }
-            this.commandPool = pCommandPool.get(0);
+            this.frameResources = new VulkanFrameResources(application.getVulkanDevice(), graphicsQueueFamily, maxFramesInFlight);
 
-            this.commandBuffers = new ArrayList<>(maxFramesInFlight);
-            VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc(stack)
-                    .sType$Default()
-                    .commandPool(this.commandPool)
-                    .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
-                    .commandBufferCount(maxFramesInFlight);
-            PointerBuffer pCommandBuffers = stack.mallocPointer(maxFramesInFlight);
-            int cbErrCode = vkAllocateCommandBuffers(device, allocInfo, pCommandBuffers);
-            VkResult cbResult = VkResult.translate(cbErrCode);
-            if (!cbResult.isSuccess()) {
-                throw new GdxRuntimeException("Failed to allocate command buffers: " + cbResult);
-            }
-            for (int i = 0; i < maxFramesInFlight; i++) {
-                this.commandBuffers.add(new VkCommandBuffer(pCommandBuffers.get(i), device));
-            }
-
-            // --- Create Synchronization Objects ---
-            this.imageAvailableSemaphores = new ArrayList<>(maxFramesInFlight);
-            this.renderFinishedSemaphores = new ArrayList<>(maxFramesInFlight);
-            this.inFlightFences = new ArrayList<>(maxFramesInFlight);
-            VkSemaphoreCreateInfo semaphoreInfo = VkSemaphoreCreateInfo.calloc(stack).sType$Default();
-            VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc(stack).sType$Default().flags(VK_FENCE_CREATE_SIGNALED_BIT);
-            LongBuffer pSemaphore = stack.mallocLong(1);
-            LongBuffer pFence = stack.mallocLong(1);
-
-            vkCheck(vkCreateSemaphore(device, semaphoreInfo, null, pSemaphore), "Failed to create imageAvailable semaphore");
-            long imgAvailSemHandle = pSemaphore.get(0); // Get handle
-            imageAvailableSemaphores.add(imgAvailSemHandle);
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Created imageAvailableSemaphore[0]: " + imgAvailSemHandle + " (Hex: " + Long.toHexString(imgAvailSemHandle) + ")"); // <<< LOG HEX TOO
-
-            vkCheck(vkCreateSemaphore(device, semaphoreInfo, null, pSemaphore), "Failed to create renderFinished semaphore");
-            long rndFinSemHandle = pSemaphore.get(0); // Get handle
-            renderFinishedSemaphores.add(rndFinSemHandle);
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Created renderFinishedSemaphore[0]: " + rndFinSemHandle + " (Hex: " + Long.toHexString(rndFinSemHandle) + ")"); // <<< LOG HEX TOO
-
-            vkCheck(vkCreateFence(device, fenceInfo, null, pFence), "Failed to create inFlight fence");
-            long fenceHandle = pFence.get(0); // Get handle
-            inFlightFences.add(fenceHandle);
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Created inFlightFence[0]: " + fenceHandle + " (Hex: " + Long.toHexString(fenceHandle) + ")"); // <<< LOG HEX TOO
-
-            for (int i = 0; i < maxFramesInFlight; i++) {
-                int semErrCode1 = vkCreateSemaphore(device, semaphoreInfo, null, pSemaphore);
-                VkResult semResult1 = VkResult.translate(semErrCode1);
-                if (!semResult1.isSuccess()) throw new GdxRuntimeException("Failed to create imageAvailable semaphore: " + semResult1);
-                imageAvailableSemaphores.add(pSemaphore.get(0));
-
-                int semErrCode2 = vkCreateSemaphore(device, semaphoreInfo, null, pSemaphore);
-                VkResult semResult2 = VkResult.translate(semErrCode2);
-                if (!semResult2.isSuccess()) throw new GdxRuntimeException("Failed to create renderFinished semaphore: " + semResult2);
-                renderFinishedSemaphores.add(pSemaphore.get(0));
-
-                int fenceErrCode = vkCreateFence(device, fenceInfo, null, pFence);
-                VkResult fenceResult = VkResult.translate(fenceErrCode);
-                if (!fenceResult.isSuccess()) throw new GdxRuntimeException("Failed to create inFlight fence: " + fenceResult);
-                inFlightFences.add(pFence.get(0));
-            }
+            // Create renderer
+            this.renderer = new VulkanWindowRenderer(application.getVulkanDevice(), this.swapchain,
+                    this.frameResources, this.vulkanGraphics, this.renderPass, this.maxFramesInFlight, this.debug);
         } catch (Exception e) {
             disposeVulkanResources();
             throw new GdxRuntimeException("Failed during Vulkan resource creation for window " + windowHandle, e);
@@ -520,17 +356,15 @@ public class VulkanWindow implements Disposable {
     }
 
     public void setViewportForVkCommands(com.badlogic.gdx.utils.viewport.Viewport viewport) {
-        this.viewportForVkCommands = viewport;
-        // Optional: Add a debug log here
-        if (Gdx.app != null && viewport != null) { // Check Gdx.app for safety
-            Gdx.app.debug(TAG, "setViewportForVkCommands: Viewport SET. Hash: " + viewport.hashCode() +
-                    ", Type: " + viewport.getClass().getSimpleName() +
-                    ", Window Hash: " + this.hashCode() +
-                    ", Viewport world W/H: " + viewport.getWorldWidth() + "/" + viewport.getWorldHeight() +
-                    ", Viewport screen X/Y: " + viewport.getScreenX() + "/" + viewport.getScreenY() +
-                    ", Viewport screen W/H: " + viewport.getScreenWidth() + "/" + viewport.getScreenHeight());
-        } else if (Gdx.app != null && viewport == null) {
-            Gdx.app.debug(TAG, "setViewportForVkCommands: Viewport CLEARED (set to null) for window " + this.hashCode());
+        if (renderer != null) {
+            renderer.setViewportForVkCommands(viewport);
+        }
+        if (Gdx.app != null && debug) {
+            if (viewport != null) {
+                Gdx.app.debug(TAG, "setViewportForVkCommands: Viewport SET for window " + this.hashCode());
+            } else {
+                Gdx.app.debug(TAG, "setViewportForVkCommands: Viewport CLEARED for window " + this.hashCode());
+            }
         }
     }
 
@@ -698,6 +532,9 @@ public class VulkanWindow implements Disposable {
 
     public void resizeFrameBuffer(boolean b) {
         framebufferResized = b;
+        if (renderer != null) {
+            renderer.setFramebufferResized(b);
+        }
     }
 
     public void setTitle(CharSequence title) {
@@ -809,412 +646,16 @@ public class VulkanWindow implements Disposable {
             requestRendering = false; // Consume the request
         }
 
-        if (framebufferResized) {
+        if (renderer != null && renderer.isFramebufferResized()) {
             shouldRender = true; // Force render if resized to handle recreation
         }
 
         // --- Early Exit Checks ---
-        if (!shouldRender || iconified || swapchain == null || gfx == null) {
+        if (!shouldRender || iconified || swapchain == null || gfx == null || renderer == null) {
             return false; // No rendering needed or possible this iteration
         }
 
-        try {
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Pre-Render Checks Starting for frame " + currentFrame + "...");
-
-            // Existing resource check
-            if (commandBuffers == null || commandBuffers.isEmpty() || // Added null check
-                    inFlightFences == null || inFlightFences.isEmpty() || // Added null check
-                    imageAvailableSemaphores == null || imageAvailableSemaphores.isEmpty() || // Added null check
-                    renderFinishedSemaphores == null || renderFinishedSemaphores.isEmpty() || // Added null check
-                    renderPass == VK_NULL_HANDLE ||
-                    application.getVulkanDevice().getPresentQueue() == null || // Check via getter
-                    application.getVulkanDevice().getGraphicsQueue() == null) { // Check via getter
-                Gdx.app.error(TAG, "[" + this.hashCode() + "] Skipping render: Essential Vulkan resources/queues missing or empty!");
-                // Log details
-                Gdx.app.error(TAG, " ---> CBs: " + (commandBuffers == null ? "NULL" : commandBuffers.size())
-                        + ", Fences: " + (inFlightFences == null ? "NULL" : inFlightFences.size())
-                        + ", ImgAvailSems: " + (imageAvailableSemaphores == null ? "NULL" : imageAvailableSemaphores.size())
-                        + ", RendFinSems: " + (renderFinishedSemaphores == null ? "NULL" : renderFinishedSemaphores.size())
-                        + ", RenderPass: " + renderPass
-                        + ", PresQ: " + application.getVulkanDevice().getPresentQueue()
-                        + ", GfxQ: " + application.getVulkanDevice().getGraphicsQueue());
-                return false;
-            }
-
-            // Check index validity BEFORE accessing
-            if (currentFrame < 0 || currentFrame >= maxFramesInFlight || currentFrame >= inFlightFences.size()) {
-                Gdx.app.error(TAG, "[" + this.hashCode() + "] Invalid currentFrame index before accessing fence! currentFrame=" + currentFrame + ", maxFrames=" + maxFramesInFlight + ", listSize=" + inFlightFences.size());
-                // You might want to handle this error more gracefully, maybe reset currentFrame or throw
-                return false; // Prevent crash
-            }
-
-            // Existing access (now we know index is likely valid if we get here)
-            long fence = inFlightFences.get(currentFrame);
-
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Got fence handle reference for frame " + currentFrame + ": " + fence);
-
-        } catch (Throwable t) {
-            Gdx.app.error(TAG, "[" + this.hashCode() + "] !!! EXCEPTION during pre-render checks !!!", t);
-            // Consider if you should return false or re-throw depending on desired behavior
-            return false; // Exit update loop gracefully if checks fail
-            // throw t; // Or re-throw to make the failure obvious
-        }
-
-        // --- Main Rendering Sequence ---
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Starting main Vulkan sequence with MemoryStack for frame " + currentFrame);
-
-            VulkanDevice vulkanDevice = application.getVulkanDevice();
-            VkDevice device = vulkanDevice.getRawDevice();
-            VkQueue graphicsQueue = vulkanDevice.getGraphicsQueue();
-            VkQueue presentQueue = vulkanDevice.getPresentQueue();
-
-            //if (debug) Gdx.app.log(TAG, "maxFramesInFlight: " + maxFramesInFlight + commandBuffers.size());
-            // Check essential resources
-            if (commandBuffers.isEmpty() || inFlightFences.isEmpty() ||
-                    imageAvailableSemaphores.isEmpty() || renderFinishedSemaphores.isEmpty() ||
-                    renderPass == VK_NULL_HANDLE || presentQueue == null || graphicsQueue == null) {
-                Gdx.app.error(TAG, "[" + this.hashCode() + "] Skipping render: Essential Vulkan resources/queues missing!");
-                return false;
-            }
-
-            long fence = inFlightFences.get(currentFrame);
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Waiting for fence: " + fence + " (Frame " + currentFrame + ")");
-            long waitStart = System.nanoTime(); // Optional: time the wait
-            vkCheck(vkWaitForFences(device, fence, true, Long.MAX_VALUE), "vkWaitForFences failed");
-            long waitEnd = System.nanoTime();
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Fence signaled. Wait time: " + ((waitEnd - waitStart) / 1000000.0) + " ms");
-            this.vulkanGraphics.prepareAllFrameResources(currentFrame);
-
-            // ---> Step 1.5: <<< CLEANUP COMPLETED FRAME DESCRIPTOR SETS >>> <--- ADDED HERE
-            VulkanDescriptorManager descriptorManager = this.vulkanGraphics.getDescriptorManager();
-            if (descriptorManager != null) {
-                // Clean up descriptor sets that were queued for freeing during the frame
-                // index whose fence we just waited on.
-                descriptorManager.cleanupCompletedFrameSets(currentFrame);
-
-            } else {
-                // Log an error if the manager is unexpectedly null
-                Gdx.app.error(TAG, "[" + this.hashCode() + "] Descriptor Manager is null, cannot clean up sets!");
-            }
-
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Resetting fence: " + fence);
-            vkCheck(vkResetFences(device, fence), "Failed to reset fence after wait");
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Fence reset.");
-
-
-            // ---> Step 3: Acquire the next image <---
-            long imageAvailableSemaphore = imageAvailableSemaphores.get(currentFrame);
-            IntBuffer pImageIndex = stack.mallocInt(1);
-            int acquireResultCode;
-            try {
-                acquireResultCode = swapchain.acquireNextImage(
-                        imageAvailableSemaphore,
-                        VK_NULL_HANDLE, // Use semaphore, not fence
-                        pImageIndex
-                );
-            } catch (Exception e) {
-                Gdx.app.error(TAG, "Exception during swapchain.acquireNextImage", e);
-                framebufferResized = true; // Flag for recreation
-                acquireResultCode = VK_ERROR_OUT_OF_DATE_KHR; // Simulate error
-            }
-
-            // ---> Step 4: Handle potential swapchain invalidation after acquiring <---
-            boolean resizeNeeded = framebufferResized; // Capture flag state before resetting
-            boolean justRecreated = false; // Flag to know if we recreated in this iteration
-
-            if (acquireResultCode == VK_ERROR_OUT_OF_DATE_KHR || acquireResultCode == VK_SUBOPTIMAL_KHR || resizeNeeded) {
-                framebufferResized = false; // Reset flag
-                //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Swapchain needs recreation (Acquire Result: " + VkResult.translate(acquireResultCode) + " / Resized Flag: " + resizeNeeded + ")");
-
-                // Fence was already reset in Step 2.
-                try {
-                    //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Calling recreateSwapchainAndDependents()...");
-                    recreateSwapchainAndDependents(); // Waits for idle internally
-                    // Log after successful recreation
-                    //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] recreateSwapchainAndDependents() finished successfully.");
-                    justRecreated = true;
-
-                    // Update cache & notify listener
-                    int currentBBW = this.getBackBufferWidth();
-                    int currentBBH = this.getBackBufferHeight();
-                    int currentLW = this.getLogicalWidth();
-                    int currentLH = this.getLogicalHeight();
-                    gfx.updateFramebufferInfo(currentBBW, currentBBH, currentLW, currentLH);
-                    if (listener != null) {
-                        int lw = (application.getAppConfig().hdpiMode == HdpiMode.Pixels) ? currentBBW : currentLW;
-                        int lh = (application.getAppConfig().hdpiMode == HdpiMode.Pixels) ? currentBBH : currentLH;
-                        if (lw > 0 && lh > 0) listener.resize(lw, lh);
-                    }
-                    //return true; // Skip the rest of this frame's rendering
-                } catch (Exception e) {
-                    Gdx.app.error(TAG, "[" + this.hashCode() + "] Exception during swapchain recreation!", e);
-                    return false;
-                }
-            } else if (acquireResultCode != VK_SUCCESS) {
-                // Handle other acquire errors
-                throw new GdxRuntimeException("Failed to acquire swapchain image. Result code: " + acquireResultCode);
-            }
-
-            if (justRecreated) {
-                //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Re-acquiring image after recreation (Timeout: Inf, Sem: " + imageAvailableSemaphore + ")");
-                // Make sure imageAvailableSemaphore handle is still valid (it wasn't recreated)
-                acquireResultCode = swapchain.acquireNextImage(imageAvailableSemaphore, VK_NULL_HANDLE, pImageIndex);
-                //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Post-recreation acquireNextImage result: " + VkResult.translate(acquireResultCode));
-
-                // Handle potential immediate failure even after recreation
-                if (acquireResultCode != VK_SUCCESS && acquireResultCode != VK_SUBOPTIMAL_KHR) { // Suboptimal is okay here
-                    Gdx.app.error(TAG, "[" + this.hashCode() + "] Failed to acquire image immediately after recreation!");
-                    // Maybe throw, maybe try again next frame?
-                    return false;
-                }
-                // If suboptimal, we might want to flag resize for next frame, but proceed for now
-            }
-
-
-            // If acquire was successful and no resize needed, we have a valid image index
-            int imageIndex = pImageIndex.get(0);
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Acquired image index: " + imageIndex);
-
-            // Fence was already reset in Step 2.
-
-            // ---> Step 5: Record the command buffer <---
-            VkCommandBuffer commandBuffer = commandBuffers.get(currentFrame);
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Resetting command buffer for frame " + currentFrame);
-            vkCheck(vkResetCommandBuffer(commandBuffer, 0), "Failed to reset command buffer"); // Safe, fence protects
-
-            VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc(stack).sType$Default();
-            vkCheck(vkBeginCommandBuffer(commandBuffer, beginInfo), "Failed to begin recording command buffer");
-
-            gfx.setCurrentCommandBuffer(commandBuffer);
-            gfx.setCurrentRenderPassHandle(this.renderPass);
-            gfx.setCurrentFrameIndex(this.currentFrame);
-
-            // Begin Render Pass
-            VkRenderPassBeginInfo renderPassInfo = VkRenderPassBeginInfo.calloc(stack).sType$Default();
-            renderPassInfo.renderPass(this.renderPass);
-            long currentFramebufferHandle = VK_NULL_HANDLE;
-            if (this.framebuffers != null && imageIndex < this.framebuffers.size()) {
-                currentFramebufferHandle = this.framebuffers.get(imageIndex);
-            }
-            if (currentFramebufferHandle == VK_NULL_HANDLE) {
-                throw new GdxRuntimeException("Could not get valid Framebuffer handle for imageIndex: " + imageIndex);
-            }
-            renderPassInfo.framebuffer(currentFramebufferHandle);
-            renderPassInfo.renderArea().offset().set(0, 0);
-            VkExtent2D extent = this.swapchain.getExtent();
-            renderPassInfo.renderArea().extent().set(extent);
-            VkClearValue.Buffer clearValues = VkClearValue.calloc(1, stack);
-            clearValues.get(0).color().float32(stack.floats(config.initialBackgroundColor.r, config.initialBackgroundColor.g, config.initialBackgroundColor.b, config.initialBackgroundColor.a));
-            renderPassInfo.pClearValues(clearValues);
-            vkCmdBeginRenderPass(commandBuffer, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-            // Set dynamic states
-            updateDynamicStates(commandBuffer, stack, extent);
-            /*VkViewport.Buffer vkViewport = VkViewport.calloc(1, stack)
-                    .x(0.0f).y((float) extent.height())
-                    .width((float) extent.width()).height(-(float) extent.height())
-                    .minDepth(0.0f).maxDepth(1.0f);
-            vkCmdSetViewport(commandBuffer, 0, vkViewport);
-            VkRect2D.Buffer vkScissor = VkRect2D.calloc(1, stack)
-                    .offset(VkOffset2D.calloc(stack).set(0, 0))
-                    .extent(extent);
-            vkCmdSetScissor(commandBuffer, 0, vkScissor);*/
-
-            try {
-                if (listener != null) listener.render();
-            } catch (Throwable t) {
-                throw t;
-            }
-
-            // End Render Pass & Command Buffer
-            vkCmdEndRenderPass(commandBuffer);
-            vkCheck(vkEndCommandBuffer(commandBuffer), "Failed to record command buffer");
-
-            // Clear global context
-            gfx.setCurrentCommandBuffer(null);
-            gfx.setCurrentRenderPassHandle(VK_NULL_HANDLE);
-
-            imageAvailableSemaphore = imageAvailableSemaphores.get(currentFrame);
-            long renderFinishedSemaphore = renderFinishedSemaphores.get(currentFrame);
-            fence = inFlightFences.get(currentFrame);
-            commandBuffer = commandBuffers.get(currentFrame);
-
-            VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack).sType$Default();
-
-            // --- Explicitly create and populate wait buffers ---
-            LongBuffer waitSemaphores = stack.mallocLong(1); // Allocate size 1
-            waitSemaphores.put(0, imageAvailableSemaphore);   // Put handle at index 0
-            // waitSemaphores.flip(); // Not needed if using indexed put and limit() below
-
-            IntBuffer waitStages = stack.mallocInt(1);       // Allocate size 1
-            waitStages.put(0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT); // Put stage at index 0
-            // waitStages.flip(); // Not needed
-
-            // --- Explicitly create and populate other buffers ---
-            PointerBuffer pCommandBuffers = stack.mallocPointer(1); // Allocate size 1
-            pCommandBuffers.put(0, commandBuffer);                 // Put CB handle
-            // pCommandBuffers.flip(); // Not needed
-
-            LongBuffer signalSemaphores = stack.mallocLong(1); // Allocate size 1
-            signalSemaphores.put(0, renderFinishedSemaphore);  // Put handle at index 0
-            // signalSemaphores.flip(); // Not needed
-
-            // --- Set struct members using the explicitly created buffers ---
-            submitInfo.waitSemaphoreCount(waitSemaphores.limit()); // Set count explicitly (should be 1)
-            submitInfo.pWaitSemaphores(waitSemaphores);           // Set pointer
-            submitInfo.pWaitDstStageMask(waitStages);             // Set pointer (count implicitly linked to waitSemaphoreCount)
-            submitInfo.pCommandBuffers(pCommandBuffers);          // Set pointer
-            submitInfo.pSignalSemaphores(signalSemaphores);         // Set pointer
-
-            //if (debug) Gdx.app.log(TAG, "Frame " + currentFrame + ": Submitting CB. WaitSem: " + imageAvailableSemaphore + ", SignalSem: " + renderFinishedSemaphore + ", SignalFence: " + fence);
-            vkCheck(vkQueueSubmit(graphicsQueue, submitInfo, fence), "Failed to submit draw command buffer");
-
-            // ---> Step 7: Present the image <---
-            LongBuffer pSwapchains = stack.longs(this.swapchain.getHandle());
-            IntBuffer pImageIndices = stack.ints(imageIndex);
-            LongBuffer pWaitSemaphoresPresent = stack.longs(renderFinishedSemaphore); // Wait for render finished
-
-            VkPresentInfoKHR presentInfo = VkPresentInfoKHR.calloc(stack).sType$Default()
-                    //.waitSemaphoreCount(pWaitSemaphoresPresent.limit())
-                    .pWaitSemaphores(pWaitSemaphoresPresent)
-                    .swapchainCount(1)
-                    .pSwapchains(pSwapchains)
-                    .pImageIndices(pImageIndices);
-
-            //if (debug) Gdx.app.log(TAG, "Frame " + currentFrame + ": Presenting Image " + imageIndex + ". WaitSem: " + renderFinishedSemaphore);
-            int presentResultCode = vkQueuePresentKHR(presentQueue, presentInfo);
-
-            // Handle present results
-            if (presentResultCode == VK_ERROR_OUT_OF_DATE_KHR || presentResultCode == VK_SUBOPTIMAL_KHR) {
-                // Flag for recreate on next frame
-                framebufferResized = true;
-            } else if (presentResultCode != VK_SUCCESS) {
-                throw new GdxRuntimeException("Failed to present swap chain image: " + VkResult.translate(presentResultCode));
-            }
-
-            // ---> Step 8: Advance Frame Index <---
-            currentFrame = (currentFrame + 1) % maxFramesInFlight;
-            return true; // Success
-
-        } catch (Exception e) {
-            Gdx.app.error(TAG, "[" + this.hashCode() + "] Exception during Vulkan frame rendering", e);
-            gfx.setCurrentCommandBuffer(null);
-            gfx.setCurrentRenderPassHandle(VK_NULL_HANDLE);
-            if (e instanceof GdxRuntimeException) throw (GdxRuntimeException) e;
-            throw new GdxRuntimeException("Vulkan frame rendering failed", e);
-        }
-    }
-
-    @SuppressWarnings("DefaultLocale")
-    private void updateDynamicStates(VkCommandBuffer commandBuffer, MemoryStack stack, VkExtent2D swapchainExtent) {
-        // Initial logging
-        if (debug) {
-            if (Gdx.app != null) {
-                Gdx.app.debug(TAG, "updateDynamicStates: ENTER for window " + this.hashCode() + ". SwapchainExtent: " + swapchainExtent.width() + "x" + swapchainExtent.height());
-                if (this.viewportForVkCommands != null) {
-                    Gdx.app.debug(TAG, "updateDynamicStates: Initial check - viewportForVkCommands IS SET. Hash: " + this.viewportForVkCommands.hashCode() +
-                            ", Type: " + this.viewportForVkCommands.getClass().getSimpleName() +
-                            ", Screen X/Y: " + this.viewportForVkCommands.getScreenX() + "/" + this.viewportForVkCommands.getScreenY() +
-                            ", Screen W/H: " + this.viewportForVkCommands.getScreenWidth() + "/" + this.viewportForVkCommands.getScreenHeight() +
-                            ", World W/H: " + this.viewportForVkCommands.getWorldWidth() + "/" + this.viewportForVkCommands.getWorldHeight());
-                } else {
-                    Gdx.app.debug(TAG, "updateDynamicStates: Initial check - viewportForVkCommands is NULL.");
-                }
-            }
-        }
-
-        // Variables to hold the dimensions that will actually be used for Vulkan commands
-        float actualVkTargetX;
-        float actualVkTargetY_libGDX; // Y-coordinate from LibGDX's perspective (bottom-left of window)
-        float actualVkTargetWidth;
-        float actualVkTargetHeight;
-
-        // --- Prioritize viewportForVkCommands ---
-        if (this.viewportForVkCommands != null) {
-            // Use the viewport explicitly registered by VulkanStage
-            actualVkTargetX = this.viewportForVkCommands.getScreenX();
-            actualVkTargetY_libGDX = this.viewportForVkCommands.getScreenY();
-            actualVkTargetWidth = this.viewportForVkCommands.getScreenWidth();
-            actualVkTargetHeight = this.viewportForVkCommands.getScreenHeight();
-            if (Gdx.app != null && debug) {
-                Gdx.app.debug(TAG, "updateDynamicStates: USING EXPLICIT viewportForVkCommands. Screen X/Y: " + actualVkTargetX + "/" + actualVkTargetY_libGDX + ", Screen W/H: " + actualVkTargetWidth + "/" + actualVkTargetHeight);
-            }
-        } else if (this.listener instanceof com.badlogic.gdx.scenes.scene2d.Stage) {
-            // Fallback: if listener itself is a Stage (less common for full apps)
-            com.badlogic.gdx.scenes.scene2d.Stage stage = (com.badlogic.gdx.scenes.scene2d.Stage) this.listener;
-            com.badlogic.gdx.utils.viewport.Viewport stageViewport = stage.getViewport();
-            if (stageViewport != null) {
-                actualVkTargetX = stageViewport.getScreenX();
-                actualVkTargetY_libGDX = stageViewport.getScreenY();
-                actualVkTargetWidth = stageViewport.getScreenWidth();
-                actualVkTargetHeight = stageViewport.getScreenHeight();
-                if (Gdx.app != null && debug) {
-                    Gdx.app.debug(TAG, "updateDynamicStates: FALLBACK to listener as Stage. Screen X/Y: " + actualVkTargetX + "/" + actualVkTargetY_libGDX + ", Screen W/H: " + actualVkTargetWidth + "/" + actualVkTargetHeight);
-                }
-            } else {
-                // Listener is a Stage, but its viewport is null - default to full extent
-                actualVkTargetX = 0.0f;
-                actualVkTargetY_libGDX = 0.0f;
-                actualVkTargetWidth = (float) swapchainExtent.width();
-                actualVkTargetHeight = (float) swapchainExtent.height();
-                if (Gdx.app != null && debug) {
-                    Gdx.app.debug(TAG, "updateDynamicStates: Listener is Stage, but its viewport is NULL. Defaulting to full swapchain extent.");
-                }
-            }
-        }
-        // ELSE IF: You could add more sophisticated fallbacks here if needed,
-        // e.g., checking Game.getScreen() if it's a known type that holds a Stage,
-        // but setViewportForVkCommands() is the preferred explicit way.
-        else {
-            // Default: No specific viewport found, use full swapchain extent
-            actualVkTargetX = 0.0f;
-            actualVkTargetY_libGDX = 0.0f;
-            actualVkTargetWidth = (float) swapchainExtent.width();
-            actualVkTargetHeight = (float) swapchainExtent.height();
-            if (Gdx.app != null && debug) {
-                Gdx.app.debug(TAG, "updateDynamicStates: NO suitable viewport found. Defaulting to full swapchain extent.");
-            }
-        }
-
-        // --- Set Vulkan Viewport ---
-        org.lwjgl.vulkan.VkViewport.Buffer vkViewportBuffer = org.lwjgl.vulkan.VkViewport.calloc(1, stack);
-        vkViewportBuffer.x(actualVkTargetX);
-        vkViewportBuffer.y(actualVkTargetY_libGDX + actualVkTargetHeight); // Y for top-left with negative height
-        vkViewportBuffer.width(actualVkTargetWidth);
-        vkViewportBuffer.height(-actualVkTargetHeight); // Negative height flips Y
-        vkViewportBuffer.minDepth(0.0f);
-        vkViewportBuffer.maxDepth(1.0f);
-
-        if (Gdx.app != null && debug) {
-            Gdx.app.debug(TAG, String.format("updateDynamicStates: FINAL vkViewport PARAMS for window %d: x=%.1f, y=%.1f, width=%.1f, height=%.1f",
-                    this.hashCode(), vkViewportBuffer.x(), vkViewportBuffer.y(), vkViewportBuffer.width(), vkViewportBuffer.height()));
-        }
-        VK10.vkCmdSetViewport(commandBuffer, 0, vkViewportBuffer);
-
-        // --- Set Vulkan Scissor ---
-        VkRect2D.Buffer vkScissorBuffer = VkRect2D.calloc(1, stack);
-        int scissorX = (int) actualVkTargetX;
-        // Convert LibGDX bottom-up Y (actualVkTargetY_libGDX) to Vulkan top-down Y for scissor's top-left.
-        int scissorY_vulkanTopLeft = swapchainExtent.height() - ((int) actualVkTargetY_libGDX + (int) actualVkTargetHeight);
-        int scissorWidth = (int) actualVkTargetWidth;
-        int scissorHeight = (int) actualVkTargetHeight;
-        int clampedScissorX = Math.max(0, scissorX);
-        int clampedScissorY = Math.max(0, scissorY_vulkanTopLeft);
-        int clampedScissorWidth = Math.min(swapchainExtent.width() - clampedScissorX, scissorWidth);
-        int clampedScissorHeight = Math.min(swapchainExtent.height() - clampedScissorY, scissorHeight);
-        clampedScissorWidth = Math.max(0, clampedScissorWidth); // Ensure non-negative
-        clampedScissorHeight = Math.max(0, clampedScissorHeight); // Ensure non-negative
-
-
-        vkScissorBuffer.offset(VkOffset2D.calloc(stack).set(clampedScissorX, clampedScissorY));
-        vkScissorBuffer.extent(VkExtent2D.calloc(stack).set(clampedScissorWidth, clampedScissorHeight));
-
-        if (Gdx.app != null && debug) {
-            Gdx.app.debug(TAG, String.format("updateDynamicStates: FINAL vkScissor PARAMS for window %d: x=%d, y=%d, width=%d, height=%d",
-                    this.hashCode(), vkScissorBuffer.offset().x(), vkScissorBuffer.offset().y(), vkScissorBuffer.extent().width(), vkScissorBuffer.extent().height()));
-        }
-        VK10.vkCmdSetScissor(commandBuffer, 0, vkScissorBuffer);
+        return renderer.renderFrame(this, gfx, listener, config);
     }
 
     private void ensureListenerCreatedAndResized() {
@@ -1253,71 +694,6 @@ public class VulkanWindow implements Disposable {
             // Condition failed, log the reason and skip initialization steps
             if (debug)
                 Gdx.app.log(TAG, "[" + this.hashCode() + "] Condition FAILED (listenerInitialized=" + listenerInitialized + ", listenerIsNull=" + (listener == null) + "), skipping create/resize.");
-        }
-    }
-
-    /**
-     * Handles swapchain recreation and dependent resources like framebuffers.
-     */
-    private void recreateSwapchainAndDependents() {
-        try {
-            VulkanApplication application = (VulkanApplication) Gdx.app;
-            VkDevice device = application.getVulkanDevice().getRawDevice();
-            vkDeviceWaitIdle(device);
-
-            // 2. Clean up OLD framebuffers (depend on old image views)
-            for (long framebuffer : framebuffers) {
-                if (framebuffer != VK_NULL_HANDLE) vkDestroyFramebuffer(device, framebuffer, null);
-            }
-            framebuffers.clear();
-            //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Old framebuffers destroyed.");
-
-            // 3. Recreate the swapchain (this cleans up old swapchain, image views internally)
-            if (swapchain != null) {
-                swapchain.recreate();
-            } else {
-                throw new GdxRuntimeException("Cannot recreate null swapchain");
-            }
-
-            // 4. Recreate framebuffers using NEW swapchain image views and extent
-            try (MemoryStack stack = MemoryStack.stackPush()) {
-                // RenderPass usually doesn't need recreation unless format changes.
-                // If it might, add logic here to destroy/recreate this.renderPass.
-                if (this.renderPass == VK_NULL_HANDLE) {
-                    Gdx.app.error(TAG, "RenderPass was null during swapchain recreation!");
-                    // TODO: Add render pass recreation logic if necessary
-                    throw new GdxRuntimeException("RenderPass missing during swapchain recreation");
-                }
-
-                List<Long> newSwapChainImageViews = this.swapchain.getImageViews();
-                this.framebuffers = new ArrayList<>(newSwapChainImageViews.size());
-                VkExtent2D newSwapChainExtent = this.swapchain.getExtent();
-                //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] New swapchain extent: " + newSwapChainExtent);
-
-                LongBuffer attachments = stack.mallocLong(1);
-                LongBuffer pFramebuffer = stack.mallocLong(1);
-
-                for (long imageView : newSwapChainImageViews) {
-                    attachments.put(0, imageView);
-                    VkFramebufferCreateInfo framebufferInfo = VkFramebufferCreateInfo.calloc(stack)
-                            .sType$Default()
-                            .renderPass(this.renderPass) // Use existing render pass
-                            .pAttachments(attachments)
-                            .width(newSwapChainExtent.width())
-                            .height(newSwapChainExtent.height())
-                            .layers(1);
-
-                    VkResult fbResult = VkResult.translate(vkCreateFramebuffer(device, framebufferInfo, null, pFramebuffer));
-                    if (!fbResult.isSuccess()) {
-                        throw new GdxRuntimeException("Failed to recreate framebuffer: " + fbResult);
-                    }
-                    this.framebuffers.add(pFramebuffer.get(0));
-                }
-                //if (debug) Gdx.app.log(TAG, "[" + this.hashCode() + "] Framebuffers recreated (" + this.framebuffers.size() + ")");
-            }
-        } catch (Exception e) {
-            Gdx.app.error(TAG, "[" + this.hashCode() + "] CRITICAL: Failed to recreate swapchain!", e);
-            throw new GdxRuntimeException("Swapchain recreation failed", e);
         }
     }
 
@@ -1425,48 +801,28 @@ public class VulkanWindow implements Disposable {
 
     private void disposeVulkanResources() {
         final boolean useGdxLog = (Gdx.app != null && Gdx.app.getApplicationLogger() != null);
-        VkDevice device = null;
         VkInstance instance = null;
         if (application != null && application.getVulkanDevice() != null) {
-            device = application.getVulkanDevice().getRawDevice();
             instance = application.getVulkanInstance().getRawInstance();
         }
 
-        // Dispose Step 3 Resources (Order: Sync -> Pool -> Framebuffers -> RenderPass)
-        if (device != null) {
-            for (long semaphore : imageAvailableSemaphores) if (semaphore != VK_NULL_HANDLE) vkDestroySemaphore(device, semaphore, null);
-            for (long semaphore : renderFinishedSemaphores) if (semaphore != VK_NULL_HANDLE) vkDestroySemaphore(device, semaphore, null);
-            for (long fence : inFlightFences) if (fence != VK_NULL_HANDLE) vkDestroyFence(device, fence, null);
-            if (!imageAvailableSemaphores.isEmpty() || !renderFinishedSemaphores.isEmpty() || !inFlightFences.isEmpty())
-                logInfo(TAG, "[" + this.hashCode() + "] Sync objects disposed.", useGdxLog);
-        }
-        imageAvailableSemaphores.clear();
-        renderFinishedSemaphores.clear();
-        inFlightFences.clear();
-
-        // Command buffers are freed when pool is destroyed, just clear list
-        commandBuffers.clear();
-        if (device != null && commandPool != VK_NULL_HANDLE) {
-            vkDestroyCommandPool(device, commandPool, null);
-            logInfo(TAG, "[" + this.hashCode() + "] Command pool disposed.", useGdxLog);
-            commandPool = VK_NULL_HANDLE;
+        // Dispose renderer (clears references, doesn't own resources)
+        if (renderer != null) {
+            renderer.dispose();
+            renderer = null;
+            logInfo(TAG, "[" + this.hashCode() + "] Renderer disposed.", useGdxLog);
         }
 
-
-        if (device != null) {
-            for (long framebuffer : framebuffers) if (framebuffer != VK_NULL_HANDLE) vkDestroyFramebuffer(device, framebuffer, null);
-            if (!framebuffers.isEmpty()) logInfo(TAG, "[" + this.hashCode() + "] Framebuffers disposed.", useGdxLog);
+        // Dispose frame resources (sync objects, command pool)
+        if (frameResources != null) {
+            frameResources.dispose();
+            frameResources = null;
+            logInfo(TAG, "[" + this.hashCode() + "] Frame resources disposed.", useGdxLog);
         }
-        framebuffers.clear();
 
-        if (device != null && renderPass != VK_NULL_HANDLE) {
-            vkDestroyRenderPass(device, renderPass, null);
-            logInfo(TAG, "[" + this.hashCode() + "] Render pass disposed.", useGdxLog);
-            renderPass = VK_NULL_HANDLE;
-        }
-        // --- End Step 3 Resource Cleanup ---
+        // Render pass and framebuffers are owned by VulkanSwapchain — just clear cached handle
+        renderPass = VK_NULL_HANDLE;
 
-        cleanupSwapchainDependents();
         // --- Dispose Step 2 Resources ---
         if (swapchain != null) {
             swapchain.dispose();
@@ -1479,14 +835,6 @@ public class VulkanWindow implements Disposable {
             surface = VK_NULL_HANDLE;
         }
         // --- End Step 2 Resources ---
-    }
-
-    private void cleanupSwapchainDependents() {
-        VkDevice device = application.getVulkanDevice().getLogicalDevice();
-        for (long framebuffer : framebuffers) {
-            vkDestroyFramebuffer(device, framebuffer, null);
-        }
-        framebuffers.clear();
     }
 
     // Helper method for consistent logging during cleanup
@@ -1602,6 +950,7 @@ public class VulkanWindow implements Disposable {
             //if (debug) Gdx.app.log(TAG, "[" + windowHandle + "] setVSyncInternal(" + vsync + ") changing presentMode to: " + targetMode);
             config.presentMode = targetMode; // Update this window's config
             this.framebufferResized = true; // Flag for swapchain recreation
+            if (renderer != null) renderer.setFramebufferResized(true);
             this.requestRendering();         // Ensure render loop checks the flag
         }
     }

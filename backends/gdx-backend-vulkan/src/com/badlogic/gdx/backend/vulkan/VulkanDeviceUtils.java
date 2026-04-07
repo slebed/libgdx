@@ -29,7 +29,7 @@ public class VulkanDeviceUtils {
     }
 
     // Inner class to hold swap chain support details
-    private static class SwapChainSupportDetails {
+    static class SwapChainSupportDetails {
         VkSurfaceCapabilitiesKHR capabilities;
         VkSurfaceFormatKHR.Buffer formats;
         IntBuffer presentModes;
@@ -74,7 +74,7 @@ public class VulkanDeviceUtils {
      * @param surface The {@code VkSurfaceKHR} handle (long) for checking presentation support.
      * @return A {@link QueueFamilyIndices} object.
      */
-    private static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, MemoryStack stack, long surface) {
+    static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, MemoryStack stack, long surface) {
         QueueFamilyIndices indices = new QueueFamilyIndices();
         IntBuffer queueFamilyCount = stack.mallocInt(1);
         vkGetPhysicalDeviceQueueFamilyProperties(device, queueFamilyCount, null);
@@ -118,7 +118,7 @@ public class VulkanDeviceUtils {
      * @param requiredDeviceExtensions A Set of required device extension names.
      * @return {@code true} if all required extensions are supported, {@code false} otherwise.
      */
-    private static boolean checkDeviceExtensionSupport(VkPhysicalDevice device, MemoryStack stack, Set<String> requiredDeviceExtensions) {
+    static boolean checkDeviceExtensionSupport(VkPhysicalDevice device, MemoryStack stack, Set<String> requiredDeviceExtensions) {
         if (requiredDeviceExtensions == null || requiredDeviceExtensions.isEmpty()) {
             return true; // No extensions required
         }
@@ -156,7 +156,7 @@ public class VulkanDeviceUtils {
      * @param surface The {@code VkSurfaceKHR} handle (long).
      * @return A {@link SwapChainSupportDetails} object.
      */
-    private static SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device, MemoryStack stack, long surface) {
+    static SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device, MemoryStack stack, long surface) {
         SwapChainSupportDetails details = new SwapChainSupportDetails();
         details.capabilities = VkSurfaceCapabilitiesKHR.malloc(stack);
 
