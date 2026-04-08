@@ -38,6 +38,7 @@ public class VulkanSwapchain implements Disposable {
     private List<Long> swapchainImages; // VkImage handles (Not owned, just references)
     private List<Long> swapchainImageViews; // VkImageView handles (Owned)
     private long renderPass = VK_NULL_HANDLE; // RenderPass compatible with swapchain format (Owned)
+    private long resumeRenderPass = VK_NULL_HANDLE; // LOAD_OP_LOAD variant for resuming after FBO (Owned)
 
     // --- Depth Buffer Resources (Owned) ---
     private long depthImage = VK_NULL_HANDLE;
@@ -75,6 +76,9 @@ public class VulkanSwapchain implements Disposable {
         this.depthImageAllocation = depthImageAllocation;
         this.depthImageView = depthImageView;
         this.depthFormat = depthFormat;
+
+        // Create a compatible render pass that uses LOAD_OP_LOAD for resuming after FBO usage.
+        this.resumeRenderPass = createResumeRenderPassInternal(rawDevice, chosenFormat, depthFormat);
     }
 
     public long getHandle() {
@@ -95,6 +99,13 @@ public class VulkanSwapchain implements Disposable {
 
     public long getRenderPass() {
         return renderPass;
+    }
+
+    /** Returns a render pass compatible with the swapchain that uses LOAD_OP_LOAD instead of
+     *  LOAD_OP_CLEAR.  Used to resume the swapchain render pass after an FBO render pass without
+     *  clearing previously rendered content. */
+    public long getResumeRenderPass() {
+        return resumeRenderPass;
     }
 
     public int getImageCount() {
@@ -284,9 +295,11 @@ public class VulkanSwapchain implements Disposable {
         }
         depthFormat = VK_FORMAT_UNDEFINED;
 
-        // Render Pass
+        // Render Passes
         VkMemoryUtil.safeDestroyRenderPass(renderPass, rawDevice);
         renderPass = VK_NULL_HANDLE;
+        VkMemoryUtil.safeDestroyRenderPass(resumeRenderPass, rawDevice);
+        resumeRenderPass = VK_NULL_HANDLE;
 
         // Image Views
         if (swapchainImageViews != null) {
@@ -312,6 +325,68 @@ public class VulkanSwapchain implements Disposable {
         imageFormat = VK_FORMAT_UNDEFINED;
 
         // Don't reset needsRecreation or vsyncEnabled here, they persist
+    }
+
+    /** Creates a render pass identical to the swapchain render pass but with LOAD_OP_LOAD instead
+     *  of LOAD_OP_CLEAR and initialLayout set to the in-use layouts.  This is used to resume the
+     *  swapchain render pass after an FBO render pass without clearing previously rendered content.
+     *  The resulting render pass is compatible (same attachment count, formats, samples) so
+     *  pipelines created for the original render pass work with this one too. */
+    private static long createResumeRenderPassInternal(VkDevice rawDevice, int colorFormat, int depthFormat) {
+        try (MemoryStack stack = stackPush()) {
+            VkAttachmentDescription.Buffer attachments = VkAttachmentDescription.calloc(2, stack);
+
+            // Color attachment — load existing content, keep the same final layout
+            attachments.get(0)
+                    .format(colorFormat)
+                    .samples(VK_SAMPLE_COUNT_1_BIT)
+                    .loadOp(VK_ATTACHMENT_LOAD_OP_LOAD)
+                    .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
+                    .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+                    .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                    .initialLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+                    .finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+            // Depth attachment — load existing depth, keep layout
+            attachments.get(1)
+                    .format(depthFormat)
+                    .samples(VK_SAMPLE_COUNT_1_BIT)
+                    .loadOp(VK_ATTACHMENT_LOAD_OP_LOAD)
+                    .storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                    .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+                    .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                    .initialLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+                    .finalLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+            VkAttachmentReference.Buffer colorAttachmentRef = VkAttachmentReference.calloc(1, stack)
+                    .attachment(0)
+                    .layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+            VkAttachmentReference depthAttachmentRef = VkAttachmentReference.calloc(stack)
+                    .attachment(1)
+                    .layout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+            VkSubpassDescription.Buffer subpass = VkSubpassDescription.calloc(1, stack)
+                    .pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
+                    .colorAttachmentCount(1)
+                    .pColorAttachments(colorAttachmentRef)
+                    .pDepthStencilAttachment(depthAttachmentRef);
+
+            VkSubpassDependency.Buffer dependency = VkSubpassDependency.calloc(1, stack)
+                    .srcSubpass(VK_SUBPASS_EXTERNAL)
+                    .dstSubpass(0)
+                    .srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
+                    .srcAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+                    .dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
+                    .dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+
+            VkRenderPassCreateInfo renderPassInfo = VkRenderPassCreateInfo.calloc(stack).sType$Default()
+                    .pAttachments(attachments).pSubpasses(subpass).pDependencies(dependency);
+
+            LongBuffer pRenderPass = stack.mallocLong(1);
+            vkCheck(vkCreateRenderPass(rawDevice, renderPassInfo, null, pRenderPass), "Failed to create resume render pass");
+            return pRenderPass.get(0);
+        }
     }
 
     // --- Builder Class ---

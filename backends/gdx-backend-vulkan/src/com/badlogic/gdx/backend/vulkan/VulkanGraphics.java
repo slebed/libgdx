@@ -426,6 +426,27 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         return dimensions.backBufferHeight;
     }
 
+    /** Returns the logical window width (before HiDPI scaling). On non-HiDPI displays this
+     *  equals {@link #getBackBufferWidth()}. */
+    public int getLogicalWidth() {
+        return dimensions.logicalWidth;
+    }
+
+    /** Returns the logical window height (before HiDPI scaling). On non-HiDPI displays this
+     *  equals {@link #getBackBufferHeight()}. */
+    public int getLogicalHeight() {
+        return dimensions.logicalHeight;
+    }
+
+    /** Vulkan always supports seamless cubemap filtering. */
+    public boolean supportsCubeMapSeamless() {
+        return true;
+    }
+
+    /** No-op — Vulkan cubemap sampling is always seamless. */
+    public void enableCubeMapSeamless(boolean enable) {
+    }
+
     @Override
     public long getFrameId() {
         return frameId;
@@ -447,12 +468,14 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     @Override
     public GraphicsType getType() {
-        return GraphicsType.LWJGL3;
+        return GraphicsType.Vulkan;
     }
 
+    /** Returns null — GLVersion is an OpenGL concept. Use {@link VulkanDeviceCapabilities}
+     *  for Vulkan API version and feature queries. */
     @Override
     public GLVersion getGLVersion() {
-        return null;// glVersion;
+        return null;
     }
 
     @Override

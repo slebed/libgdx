@@ -336,29 +336,31 @@ public class VulkanFrameBuffer implements Disposable {
         // End the FBO render pass
         vkCmdEndRenderPass(cmd);
 
-        // Restore the swapchain render pass
-        long swapchainRenderPass = graphics.getSwapchainRenderPass();
+        // Restore the swapchain render pass using the LOAD_OP_LOAD variant so previously
+        // rendered content is preserved (the normal render pass uses LOAD_OP_CLEAR).
         long swapchainFramebuffer = graphics.getCurrentSwapchainFramebuffer();
         VulkanSwapchain swapchain = graphics.getCurrentSwapchain();
 
-        if (swapchainRenderPass == VK_NULL_HANDLE || swapchainFramebuffer == VK_NULL_HANDLE || swapchain == null) {
+        if (swapchainFramebuffer == VK_NULL_HANDLE || swapchain == null) {
             throw new GdxRuntimeException("Cannot restore swapchain render pass — missing state");
+        }
+
+        long resumeRenderPass = swapchain.getResumeRenderPass();
+        if (resumeRenderPass == VK_NULL_HANDLE) {
+            throw new GdxRuntimeException("Resume render pass not available on swapchain");
         }
 
         try (MemoryStack stack = stackPush()) {
             VkRenderPassBeginInfo rpInfo = VkRenderPassBeginInfo.calloc(stack).sType$Default()
-                    .renderPass(swapchainRenderPass)
+                    .renderPass(resumeRenderPass)
                     .framebuffer(swapchainFramebuffer);
             rpInfo.renderArea().offset().set(0, 0);
             VkExtent2D extent = swapchain.getExtent();
             rpInfo.renderArea().extent().set(extent);
 
-            // Use LOAD_OP_LOAD since we're resuming — but Vulkan render pass loadOp is baked at creation.
-            // Since the swapchain render pass uses LOAD_OP_CLEAR, re-beginning it will clear.
-            // To avoid this, we pass empty clear values (the loadOp is already set, clear values are just data).
+            // LOAD_OP_LOAD doesn't use clear values, but Vulkan still requires
+            // pClearValues to match the attachment count.
             VkClearValue.Buffer clearValues = VkClearValue.calloc(2, stack);
-            clearValues.get(0).color().float32(stack.floats(0f, 0f, 0f, 1f));
-            clearValues.get(1).depthStencil().depth(1.0f).stencil(0);
             rpInfo.pClearValues(clearValues);
 
             vkCmdBeginRenderPass(cmd, rpInfo, VK_SUBPASS_CONTENTS_INLINE);
@@ -374,8 +376,9 @@ public class VulkanFrameBuffer implements Disposable {
             vkCmdSetScissor(cmd, 0, scissor);
         }
 
-        // Restore graphics context
-        graphics.setCurrentRenderPassHandle(swapchainRenderPass);
+        // Restore graphics context — use the resume render pass handle since that's what's active now.
+        // Pipelines are compatible between the two render passes (same attachments, formats, samples).
+        graphics.setCurrentRenderPassHandle(resumeRenderPass);
         active = false;
     }
 
