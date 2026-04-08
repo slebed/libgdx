@@ -181,6 +181,7 @@ public class VulkanWindowRenderer implements Disposable {
             gfx.setCurrentCommandBuffer(commandBuffer);
             gfx.setCurrentRenderPassHandle(this.renderPass);
             gfx.setCurrentFrameIndex(this.currentFrame);
+            gfx.setCurrentSwapchain(this.swapchain);
 
             // Begin Render Pass
             VkRenderPassBeginInfo renderPassInfo = VkRenderPassBeginInfo.calloc(stack).sType$Default();
@@ -189,6 +190,7 @@ public class VulkanWindowRenderer implements Disposable {
             if (currentFramebufferHandle == VK_NULL_HANDLE) {
                 throw new GdxRuntimeException("Could not get valid Framebuffer handle for imageIndex: " + imageIndex);
             }
+            gfx.setCurrentSwapchainFramebuffer(currentFramebufferHandle);
             renderPassInfo.framebuffer(currentFramebufferHandle);
             renderPassInfo.renderArea().offset().set(0, 0);
             VkExtent2D extent = this.swapchain.getExtent();

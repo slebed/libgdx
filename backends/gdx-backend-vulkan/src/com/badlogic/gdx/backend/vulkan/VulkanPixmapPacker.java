@@ -5,7 +5,6 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.Texture.TextureFilter;
 import com.badlogic.gdx.graphics.g2d.PixmapPacker;
-import com.badlogic.gdx.graphics.glutils.PixmapTextureData;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
 import java.lang.reflect.Field;
@@ -35,7 +34,7 @@ public class VulkanPixmapPacker extends PixmapPacker {
 
     @Override
     public synchronized void updatePageTextures(TextureFilter minFilter, TextureFilter magFilter, boolean useMipMaps) {
-        for (final Page page : getPages()) { // Page must be final to be used in inner class
+        for (Page page : getPages()) {
             try {
                 Texture texture = (Texture) pageTextureField.get(page);
                 boolean isDirty = (boolean) pageDirtyField.get(page);
@@ -44,29 +43,24 @@ public class VulkanPixmapPacker extends PixmapPacker {
                     continue;
                 }
 
-                final Pixmap pixmap = (Pixmap) pageImageField.get(page); // Pixmap must also be final
+                Pixmap pixmap = (Pixmap) pageImageField.get(page);
                 if (pixmap == null) {
                     Gdx.app.error("VulkanPixmapPacker", "Page's pixmap is null, cannot update/create texture.");
                     continue;
                 }
 
-                // *** FIX #1: The 'disposePixmap' argument MUST be false. ***
-                PixmapTextureData textureData = new PixmapTextureData(pixmap, pixmap.getFormat(), useMipMaps, false);
-
-                if (texture != null) {
-                    texture.load(textureData);
-                } else {
-                    // *** FIX #2: Override dispose() to also dispose the page's pixmap. ***
-                    texture = new Texture(textureData) {
-                        @Override
-                        public void dispose() {
-                            super.dispose();
-                            pixmap.dispose(); // This now disposes the page's underlying pixmap
-                        }
-                    };
-
+                if (texture instanceof VulkanTexture) {
+                    // Page is dirty — reload new pixmap data into the existing VulkanTexture.
+                    // This preserves the Java object identity so BitmapFont glyph regions
+                    // that reference this texture remain valid.
+                    ((VulkanTexture) texture).reloadFromPixmap(pixmap);
                     texture.setFilter(minFilter, magFilter);
-                    pageTextureField.set(page, texture);
+                } else {
+                    if (texture != null) texture.dispose();
+                    // Create a real VulkanTexture so VulkanSpriteBatch can cast it correctly.
+                    VulkanTexture newTexture = new VulkanTexture(pixmap);
+                    newTexture.setFilter(minFilter, magFilter);
+                    pageTextureField.set(page, newTexture);
                 }
 
                 pageDirtyField.set(page, false);

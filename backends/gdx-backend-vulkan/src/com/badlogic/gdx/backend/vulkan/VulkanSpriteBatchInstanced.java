@@ -563,11 +563,12 @@ public class VulkanSpriteBatchInstanced implements Batch, VulkanFrameResourcePre
 
             // *** DYNAMIC STATE: viewport & scissor ***
             try ( MemoryStack stack = stackPush() ) {
-                // Full‐frame viewport
+                // Full‐frame viewport (negative height flips Y to match OpenGL conventions)
+                float fbHeight = (float)Gdx.graphics.getBackBufferHeight();
                 VkViewport.Buffer vp = VkViewport.calloc(1, stack)
-                        .x(0f).y(0f)
+                        .x(0f).y(fbHeight)
                         .width((float)Gdx.graphics.getBackBufferWidth())
-                        .height((float)Gdx.graphics.getBackBufferHeight())
+                        .height(-fbHeight)
                         .minDepth(0f).maxDepth(1f);
                 vkCmdSetViewport(cmd, 0, vp);
 

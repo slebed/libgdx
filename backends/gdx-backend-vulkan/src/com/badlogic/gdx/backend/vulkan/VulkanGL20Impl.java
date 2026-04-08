@@ -126,7 +126,7 @@ public class VulkanGL20Impl implements GL20 {
 
     @Override
     public void glTexParameterf(int target, int pname, float param) {
-        warnNotImplemented("glTexParameterf");
+        // Texture parameters are handled by VulkanTexture.setFilter/setWrap directly.
     }
 
     @Override
@@ -185,7 +185,8 @@ public class VulkanGL20Impl implements GL20 {
 
     @Override
     public void glBlendFuncSeparate(int srcRGB, int dstRGB, int srcAlpha, int dstAlpha) {
-        warnNotImplemented("glBlendFuncSeparate");
+        // Blend state is baked into Vulkan pipelines. VulkanSpriteBatch handles blend
+        // function parameters directly when selecting/creating pipeline variants.
     }
 
     @Override
@@ -539,7 +540,8 @@ public class VulkanGL20Impl implements GL20 {
 
     @Override
     public void glTexParameteri(int target, int pname, int param) {
-        warnNotImplemented("glTexParameteri");
+        // Texture filter/wrap parameters are handled by VulkanTexture.setFilter/setWrap
+        // which bypass GL20 and recreate the Vulkan sampler directly.
     }
 
     @Override
@@ -810,10 +812,9 @@ public class VulkanGL20Impl implements GL20 {
         throw new GdxRuntimeException(message);
     }
 
-    // Example for other methods:
     @Override
     public void glActiveTexture(int texture) {
-        notImplemented("glActiveTexture");
+        activeTextureUnit = texture - GL20.GL_TEXTURE0;
     }
 
     @Override
@@ -829,7 +830,8 @@ public class VulkanGL20Impl implements GL20 {
 
     @Override
     public void glBlendFunc(int sfactor, int dfactor) {
-        Gdx.app.log("VulkanGL20Impl", "glBlendFunc: sfactor=" + sfactor + ", dfactor=" + dfactor); /* Needs pipeline state management */
+        // Blend state is baked into Vulkan pipelines. VulkanSpriteBatch handles this
+        // internally via pipeline variants. This call is a no-op at the GL level.
     }
 
     @Override
@@ -880,12 +882,12 @@ public class VulkanGL20Impl implements GL20 {
 
     @Override
     public void glDeleteTextures(int n, IntBuffer textures) {
-        warnNotImplemented("glDeleteTextures");
+        // VulkanTexture manages its own lifecycle via dispose(). GL texture deletion is a no-op.
     }
 
     @Override
     public void glDeleteTexture(int texture) {
-        warnNotImplemented("glDeleteTexture");
+        // VulkanTexture manages its own lifecycle via dispose(). GL texture deletion is a no-op.
     }
 
     @Override

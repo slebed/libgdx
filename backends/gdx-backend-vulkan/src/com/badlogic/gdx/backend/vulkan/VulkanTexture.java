@@ -26,16 +26,16 @@ public class VulkanTexture extends Texture {
     private final String TAG = "VulkanTexture";
     private static final boolean debug = false;
 
-    // Make fields final if they are always initialized in constructors
     private final VulkanDevice device;
-    private final VulkanImage vulkanImage;
-    private final long imageViewHandle;
+    private VulkanImage vulkanImage;
+    private long imageViewHandle;
     private long samplerHandle;
-    private final int width;
-    private final int height;
-    private final int format; // Store VkFormat
-    private final int mipLevels;
+    private int width;
+    private int height;
+    private int format; // Store VkFormat
+    private int mipLevels;
     private boolean disposed = false;
+    private boolean externallyOwned = false;
     private String filePath=null;
 
     private TextureFilter currentMinFilter = TextureFilter.Nearest;
@@ -215,6 +215,16 @@ public class VulkanTexture extends Texture {
         this.mipLevels = vulkanImage.mipLevels;
     }
 
+    /** Creates a VulkanTexture that wraps existing Vulkan resources without owning them.
+     * The caller is responsible for managing the lifecycle of the provided handles.
+     * Calling dispose() on this texture will NOT destroy the underlying resources. */
+    static VulkanTexture wrapExisting(VulkanDevice device, VulkanImage image, long imageView, long sampler,
+                                       int width, int height, int format) {
+        VulkanTexture tex = new VulkanTexture(device, image, imageView, sampler);
+        tex.externallyOwned = true;
+        return tex;
+    }
+
     /** Creates a VulkanTexture directly from a Pixmap. Assumes Vulkan backend is initialized and active. The provided Pixmap is
      * NOT disposed by this constructor. If the Pixmap is not RGBA8888, a temporary copy will be created and disposed internally.
      *
@@ -359,6 +369,110 @@ public class VulkanTexture extends Texture {
             if (createdRgbaCopy && pixmapToUpload != null) {
                 pixmapToUpload.dispose();
             }
+        }
+    }
+
+    /** Re-uploads new pixmap data into this texture, destroying old Vulkan resources and creating
+     *  new ones.  The Java object identity is preserved so existing TextureRegion references
+     *  (e.g. BitmapFont glyph regions) remain valid.  The pixmap is NOT disposed by this method. */
+    public void reloadFromPixmap(Pixmap pixmap) {
+        if (pixmap == null || pixmap.isDisposed()) {
+            throw new GdxRuntimeException("Pixmap cannot be null and must not be disposed for reload.");
+        }
+        if (device == null) {
+            throw new GdxRuntimeException("Cannot reload VulkanTexture: device is null.");
+        }
+
+        VkDevice rawDevice = device.getRawDevice();
+        VulkanGraphics gfx = (VulkanGraphics) Gdx.graphics;
+        long vmaAllocator = gfx.getVmaAllocator();
+
+        // Wait for GPU to finish using the old resources
+        vkDeviceWaitIdle(rawDevice);
+
+        // Destroy old resources
+        if (imageViewHandle != VK_NULL_HANDLE) {
+            vkDestroyImageView(rawDevice, imageViewHandle, null);
+            imageViewHandle = VK_NULL_HANDLE;
+        }
+        if (samplerHandle != VK_NULL_HANDLE) {
+            vkDestroySampler(rawDevice, samplerHandle, null);
+            samplerHandle = VK_NULL_HANDLE;
+        }
+        if (vulkanImage != null) {
+            vulkanImage.dispose();
+            vulkanImage = null;
+        }
+
+        // Create new resources from the pixmap (same logic as the Pixmap constructor)
+        Pixmap pixmapToUpload = pixmap;
+        boolean createdRgbaCopy = false;
+        VulkanBuffer stagingBuffer = null;
+
+        try {
+            if (pixmap.getFormat() != Pixmap.Format.RGBA8888) {
+                pixmapToUpload = new Pixmap(pixmap.getWidth(), pixmap.getHeight(), Pixmap.Format.RGBA8888);
+                pixmapToUpload.setBlending(Pixmap.Blending.None);
+                pixmapToUpload.drawPixmap(pixmap, 0, 0);
+                createdRgbaCopy = true;
+            }
+
+            int texWidth = pixmapToUpload.getWidth();
+            int texHeight = pixmapToUpload.getHeight();
+            int vkFormat = VK_FORMAT_R8G8B8A8_SRGB;
+            long imageSize = (long) texWidth * texHeight * 4;
+            ByteBuffer pixelBuffer = pixmapToUpload.getPixels();
+
+            stagingBuffer = VulkanResourceUtil.createManagedBuffer(vmaAllocator, imageSize,
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VMA_MEMORY_USAGE_AUTO,
+                    VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+
+            PointerBuffer pData = MemoryUtil.memAllocPointer(1);
+            try {
+                vkCheck(vmaMapMemory(vmaAllocator, stagingBuffer.allocationHandle, pData),
+                        "VMA Failed to map texture staging buffer");
+                ByteBuffer stagingByteBuffer = MemoryUtil.memByteBuffer(pData.get(0), (int) imageSize);
+                pixelBuffer.position(0);
+                pixelBuffer.limit(pixelBuffer.capacity());
+                stagingByteBuffer.put(pixelBuffer);
+                vmaUnmapMemory(vmaAllocator, stagingBuffer.allocationHandle);
+            } finally {
+                MemoryUtil.memFree(pData);
+                pixelBuffer.position(0);
+            }
+
+            if (createdRgbaCopy) {
+                pixmapToUpload.dispose();
+                pixmapToUpload = null;
+                createdRgbaCopy = false;
+            }
+
+            VulkanImage newImage = VulkanResourceUtil.createManagedImage(vmaAllocator, texWidth, texHeight, vkFormat,
+                    VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0);
+
+            transitionImageLayoutCmd(device, newImage.imageHandle, vkFormat,
+                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1);
+            copyBufferToImageCmd(device, stagingBuffer.bufferHandle, newImage.imageHandle, texWidth, texHeight);
+            transitionImageLayoutCmd(device, newImage.imageHandle, vkFormat,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
+
+            long newImageView = createImageViewInternal(rawDevice, newImage.imageHandle, vkFormat, 1);
+            long newSampler = createSamplerInternal(rawDevice, 1);
+
+            this.vulkanImage = newImage;
+            this.imageViewHandle = newImageView;
+            this.samplerHandle = newSampler;
+            this.width = texWidth;
+            this.height = texHeight;
+            this.format = vkFormat;
+            this.mipLevels = 1;
+            this.disposed = false;
+
+        } finally {
+            if (stagingBuffer != null) stagingBuffer.dispose();
+            if (createdRgbaCopy && pixmapToUpload != null) pixmapToUpload.dispose();
         }
     }
 
@@ -669,9 +783,16 @@ public class VulkanTexture extends Texture {
         if (debug) Gdx.app.log(TAG, "Disposing texture " + hashCode() + " (" + width + "x" + height + ")...");
 
         if (disposed) {
-            if (debug) Gdx.app.log(TAG, "Texture already disposed."); // Optional log
+            if (debug) Gdx.app.log(TAG, "Texture already disposed.");
             return;
         }
+
+        // Externally-owned textures (e.g., FBO color attachments) don't own their resources
+        if (externallyOwned) {
+            disposed = true;
+            return;
+        }
+
         // Check device validity early
         VkDevice rawDevice = (device != null) ? device.getRawDevice() : null;
         if (rawDevice == null) {
@@ -718,26 +839,22 @@ public class VulkanTexture extends Texture {
 
     @Override
     public TextureFilter getMinFilter() {
-        // TODO: Return filter based on samplerHandle settings
-        return TextureFilter.Linear; // Placeholder
+        return currentMinFilter;
     }
 
     @Override
     public TextureFilter getMagFilter() {
-        // TODO: Return filter based on samplerHandle settings
-        return TextureFilter.Linear; // Placeholder
+        return currentMagFilter;
     }
 
     @Override
     public TextureWrap getUWrap() {
-        // TODO: Return wrap mode based on samplerHandle settings
-        return TextureWrap.Repeat; // Placeholder
+        return currentUWrap;
     }
 
     @Override
     public TextureWrap getVWrap() {
-        // TODO: Return wrap mode based on samplerHandle settings
-        return TextureWrap.Repeat; // Placeholder
+        return currentVWrap;
     }
 
     @Override
@@ -760,22 +877,36 @@ public class VulkanTexture extends Texture {
 
     @Override
     public void setFilter(TextureFilter minFilter, TextureFilter magFilter) {
-        // NO-OP for VulkanTexture in this basic implementation.
-        // The VkSampler used by this texture was created with fixed settings during load.
-        // To properly support this, we would need to potentially find or create
-        // a new VkSampler matching these filters and update descriptor sets referencing it,
-        // which is significantly more complex.
-        Gdx.app.debug(TAG, "VulkanTexture.setFilter() called, ignoring. Min: " + minFilter + ", Mag: " + magFilter);
-        // DO NOT call super.setFilter(minFilter, magFilter);
+        if (disposed) return;
+        boolean changed = false;
+        if (this.currentMinFilter != minFilter) {
+            this.currentMinFilter = minFilter;
+            changed = true;
+        }
+        if (this.currentMagFilter != magFilter) {
+            this.currentMagFilter = magFilter;
+            changed = true;
+        }
+        if (changed) {
+            recreateSamplerInternal();
+        }
     }
 
     @Override
     public void setWrap(TextureWrap u, TextureWrap v) {
-        // NO-OP for VulkanTexture in this basic implementation.
-        // The VkSampler used by this texture was created with fixed settings during load.
-        // Similar complexity to setFilter applies to supporting runtime wrap changes.
-        Gdx.app.debug(TAG, "VulkanTexture.setWrap() called, ignoring. U: " + u + ", V: " + v);
-        // DO NOT call super.setWrap(u, v);
+        if (disposed) return;
+        boolean changed = false;
+        if (this.currentUWrap != u) {
+            this.currentUWrap = u;
+            changed = true;
+        }
+        if (this.currentVWrap != v) {
+            this.currentVWrap = v;
+            changed = true;
+        }
+        if (changed) {
+            recreateSamplerInternal();
+        }
     }
 
     public String getFilePath() {

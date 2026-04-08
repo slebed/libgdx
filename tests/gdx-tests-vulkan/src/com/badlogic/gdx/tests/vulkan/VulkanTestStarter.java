@@ -36,8 +36,8 @@ public class VulkanTestStarter {
 
     public static void main(String[] argv) {
 
-        int windowWidth = 480;
-        int windowHeight = 300;
+        int windowWidth = 800;
+        int windowHeight = 600;
 
         options = new CommandLineOptions(argv);
         VulkanApplicationConfiguration vkConfig = new VulkanApplicationConfiguration();

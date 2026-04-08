@@ -463,6 +463,10 @@ public class VulkanApplication implements VulkanApplicationBase {
                 long closedHandle = closedWindow.getWindowHandle();
                 if (debug) Gdx.app.log(TAG, "Closing window with handle: " + closedHandle);
                 try {
+                    // Wait for the GPU to finish all submitted work before destroying resources.
+                    if (vulkanDevice != null && vulkanDevice.getLogicalDevice() != null) {
+                        vkDeviceWaitIdle(vulkanDevice.getLogicalDevice());
+                    }
                     ApplicationListener listener = closedWindow.getListener();
                     if (listener != null) {
                         if (debug) Gdx.app.log(TAG, "Calling listener.dispose() for closing window: " + closedHandle);
@@ -534,6 +538,10 @@ public class VulkanApplication implements VulkanApplicationBase {
             }
         }
         if (debug) Gdx.app.log(TAG, "cleanupWindows: Disposing listeners for remaining windows (count=" + windows.size + ")...");
+        // Wait for the GPU to finish all submitted work before destroying resources.
+        if (vulkanDevice != null && vulkanDevice.getLogicalDevice() != null) {
+            vkDeviceWaitIdle(vulkanDevice.getLogicalDevice());
+        }
         synchronized (windows) {
             Array<VulkanWindow> windowsToClean = new Array<>(windows);
             for (VulkanWindow window : windowsToClean) {

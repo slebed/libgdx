@@ -2,262 +2,393 @@ package com.badlogic.gdx.tests.vulkan;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
-import com.badlogic.gdx.InputProcessor;
-import com.badlogic.gdx.backend.vulkan.VulkanSpriteBatch; // Regular batch
-import com.badlogic.gdx.backend.vulkan.VulkanSpriteBatchInstanced; // Instanced batch
+import com.badlogic.gdx.InputAdapter;
+import com.badlogic.gdx.backend.vulkan.VulkanGraphics;
+import com.badlogic.gdx.backend.vulkan.VulkanPixmapPacker;
+import com.badlogic.gdx.backend.vulkan.VulkanSpriteBatch;
+import com.badlogic.gdx.backend.vulkan.VulkanSpriteBatchInstanced;
 import com.badlogic.gdx.backend.vulkan.VulkanTexture;
+import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
-import com.badlogic.gdx.graphics.g2d.Batch; // Common interface
-import com.badlogic.gdx.graphics.g2d.Sprite;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.Batch;
+import com.badlogic.gdx.graphics.g2d.BitmapFont;
+import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator;
+import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.WindowedMean;
 import com.badlogic.gdx.tests.utils.GdxTest;
+import com.badlogic.gdx.utils.StringBuilder;
 import com.badlogic.gdx.utils.TimeUtils;
-import java.text.DecimalFormat;
-import java.util.Random;
 
-public class VulkanSpriteBatchStressTest extends GdxTest implements InputProcessor {
-    private static final String TAG = "VulkanSpriteBatchStressTest";
-    DecimalFormat df = new DecimalFormat("0.00");
+/**
+ * Stress test for VulkanSpriteBatch and VulkanSpriteBatchInstanced.
+ *
+ * <p>Renders a configurable number of moving, rotating sprites and measures performance.
+ * Demonstrates how to use both batcher types, swap between them at runtime, and read back
+ * performance metrics (FPS, draw calls, frame time).</p>
+ *
+ * <h3>Controls</h3>
+ * <ul>
+ *   <li><b>UP / DOWN</b> &mdash; increase / decrease sprite count by 10,000</li>
+ *   <li><b>SHIFT + UP / DOWN</b> &mdash; increase / decrease by 1,000</li>
+ *   <li><b>SPACE</b> &mdash; toggle between Regular and Instanced batchers</li>
+ *   <li><b>T</b> &mdash; toggle texture switching stress (uses 4 textures instead of 1)</li>
+ *   <li><b>P</b> &mdash; pause/resume sprite movement</li>
+ * </ul>
+ *
+ * <h3>Architecture Notes</h3>
+ * <p>{@link VulkanSpriteBatch} uploads vertex data each frame via a streaming VMA buffer.
+ * {@link VulkanSpriteBatchInstanced} uses instanced rendering with a single quad and a
+ * per-instance data buffer. This test lets you compare their throughput under identical
+ * workloads.</p>
+ */
+public class VulkanSpriteBatchStressTest extends GdxTest {
+    private static final String TAG = "VkBatchStress";
 
-    int SPRITES = 50000; // Adjusted for potentially more demanding instanced setup initially, can be increased
+    // --- Configuration ---
+    private static final int INITIAL_SPRITES    = 10_000;
+    private static final int STEP_LARGE         = 10_000;
+    private static final int STEP_SMALL         = 1_000;
+    private static final int MAX_SPRITES        = 200_000;
+    private static final int BATCH_CAPACITY     = MAX_SPRITES;
 
-    long lastLogTime = TimeUtils.nanoTime();
-    int frames = 0;
+    // --- Core objects ---
     private OrthographicCamera camera;
-    VulkanTexture texture;
+    private VulkanSpriteBatch batchRegular;
+    private VulkanSpriteBatchInstanced batchInstanced;
+    private Batch activeBatch;
+    private boolean useInstanced = false;
 
-    // Batcher instances
-    VulkanSpriteBatch spriteBatchRegular;
-    VulkanSpriteBatchInstanced spriteBatchInstanced;
-    Batch activeBatch; // The currently used batcher, typed to the common interface
-    boolean useInstancedBatcher = false; // Start with regular batcher
+    // --- Textures ---
+    private VulkanTexture[] textures;
+    private boolean multiTexture = false;
 
-    Sprite[] sprites;
-    Random random = new Random();
+    // --- HUD ---
+    private VulkanSpriteBatch hudBatch;
+    private BitmapFont font;
+    private VulkanPixmapPacker fontPacker;
+    private final StringBuilder sb = new StringBuilder();
+
+    // --- Sprites (structure-of-arrays for cache friendliness) ---
+    private int spriteCount = INITIAL_SPRITES;
+    private float[] posX, posY;
+    private float[] velX, velY;
+    private float[] rotation, rotSpeed;
+    private float[] scale;
+    private int[] texIndex;
+    private boolean paused = false;
+
+    // --- Metrics ---
+    private final WindowedMean frameTimeMean = new WindowedMean(120);
+    private float worstFrameMs;
+    private float bestFrameMs = Float.MAX_VALUE;
+    private long lastResetTime;
+    private int lastDrawCalls;
 
     @Override
     public void create() {
-        Gdx.app.log(TAG, "[" + this.hashCode() + "] create() START");
-        Gdx.app.log(TAG, "Testing with " + SPRITES + " sprites. Press SPACE to switch batcher.");
-
-        Gdx.input.setInputProcessor(this); // Set input processor to this class
-
-        try {
-            texture = new VulkanTexture(Gdx.files.internal("data/badlogicsmall.jpg"));
-        } catch (Throwable t) {
-            Gdx.app.error(TAG, "[" + this.hashCode() + "] Failed to load texture!", t);
-            throw t;
-        }
-
-        try {
-            Gdx.app.log(TAG, "Creating Regular VulkanSpriteBatch...");
-            spriteBatchRegular = new VulkanSpriteBatch(SPRITES);
-            Gdx.app.log(TAG, "Creating Instanced VulkanSpriteBatchInstanced...");
-            spriteBatchInstanced = new VulkanSpriteBatchInstanced(SPRITES);
-        } catch (Throwable t) {
-            Gdx.app.error(TAG, "[" + this.hashCode() + "] Failed to create one or both SpriteBatch instances!", t);
-            if (texture != null) texture.dispose();
-            throw t;
-        }
-
-        // Set initial active batch
-        activeBatch = useInstancedBatcher ? spriteBatchInstanced : spriteBatchRegular;
-        Gdx.app.log(TAG, "Initial active batch: " + (useInstancedBatcher ? "Instanced" : "Regular"));
-
-
+        // --- Camera ---
         camera = new OrthographicCamera();
-        // Initial resize will set camera and projection matrix
-        Gdx.app.log(TAG, "[" + this.hashCode() + "] Camera created.");
 
-        sprites = new Sprite[SPRITES];
-        int screenW = Gdx.graphics.getWidth();
-        int screenH = Gdx.graphics.getHeight();
-        if (screenW == 0 || screenH == 0) { // Handle headless or early init
-            screenW = 640; screenH = 480;
+        // --- Textures ---
+        // Create 4 colored textures procedurally to avoid external asset dependency.
+        // When multiTexture mode is on, the batcher must handle texture switches each frame,
+        // which stresses the flush/rebind path.
+        Color[] colors = {
+            new Color(0.4f, 0.1f, 0.1f, 1f),  // dark red
+            new Color(0.1f, 0.4f, 0.1f, 1f),  // dark green
+            new Color(0.1f, 0.1f, 0.4f, 1f),  // dark blue
+            new Color(0.4f, 0.4f, 0.1f, 1f),  // dark yellow
+        };
+        textures = new VulkanTexture[colors.length];
+        for (int i = 0; i < colors.length; i++) {
+            Pixmap pm = new Pixmap(32, 32, Pixmap.Format.RGBA8888);
+            pm.setColor(colors[i]);
+            pm.fillRectangle(0, 0, 32, 32);
+            // Draw a small inner square to make sprites visually distinct
+            pm.setColor(new Color(colors[i].r * 1.5f, colors[i].g * 1.5f, colors[i].b * 1.5f, 1f));
+            pm.fillRectangle(8, 8, 16, 16);
+            textures[i] = new VulkanTexture(pm);
+            pm.dispose();
         }
 
+        // --- Batchers ---
+        // VulkanSpriteBatch: streaming upload each frame. Good general-purpose batcher.
+        batchRegular = new VulkanSpriteBatch(BATCH_CAPACITY);
 
-        try {
-            for (int i = 0; i < SPRITES; i++) {
-                float x = random.nextFloat() * screenW * 1.5f - screenW * 0.25f; // Slightly wider spread
-                float y = random.nextFloat() * screenH * 1.5f - screenH * 0.25f;
-                sprites[i] = new Sprite(texture);
-                sprites[i].setPosition(x, y);
-                // Optional: Add slight variations for visual interest if needed
-                sprites[i].setSize(texture.getWidth() * (0.5f + random.nextFloat() * 0.5f), texture.getHeight() * (0.5f + random.nextFloat() * 0.5f));
-                sprites[i].setRotation(random.nextFloat() * 15f);
+        // VulkanSpriteBatchInstanced: single quad + per-instance buffer. Best for many
+        // identical or similar sprites (particles, bullets).
+        batchInstanced = new VulkanSpriteBatchInstanced(BATCH_CAPACITY);
+
+        activeBatch = batchRegular;
+
+        // --- HUD font (FreeType -> VulkanPixmapPacker -> BitmapFont) ---
+        hudBatch = new VulkanSpriteBatch();
+        font = createHudFont();
+
+        // --- Sprite data ---
+        allocateSprites(MAX_SPRITES);
+        randomizeSprites(0, spriteCount);
+
+        // --- Input ---
+        Gdx.input.setInputProcessor(new InputAdapter() {
+            @Override
+            public boolean keyDown(int keycode) {
+                return handleKey(keycode);
             }
-        } catch (Throwable t) {
-            Gdx.app.error(TAG, "[" + this.hashCode() + "] Error during sprite creation!", t);
-            dispose();
-            throw t;
-        }
-        Gdx.app.log(TAG, "[" + this.hashCode() + "] create() END");
+        });
+
+        lastResetTime = TimeUtils.nanoTime();
+        Gdx.app.log(TAG, "Created. " + spriteCount + " sprites. Press SPACE to toggle batcher, UP/DOWN to adjust count.");
     }
 
-    @Override
-    public void resize(int width, int height) {
-        Gdx.app.log(TAG, "[" + this.hashCode() + "] resize(" + width + ", " + height + ")");
-        if (camera != null) {
-            camera.setToOrtho(false, width, height);
-            camera.update();
-            // Update projection matrix for both batchers, or at least the active one
-            if (spriteBatchRegular != null) {
-                spriteBatchRegular.setProjectionMatrix(camera.combined);
-            }
-            if (spriteBatchInstanced != null) {
-                spriteBatchInstanced.setProjectionMatrix(camera.combined);
-            }
-        } else {
-            Gdx.app.error(TAG, "[" + this.hashCode() + "] resize() called but camera is NULL!");
-        }
-    }
+    // ---- Rendering ----
 
     @Override
     public void render() {
-        handleCameraInput(); // Optional: Allow camera movement
+        long frameStart = TimeUtils.nanoTime();
+        float delta = Gdx.graphics.getDeltaTime();
 
-        if (camera == null || activeBatch == null) {
-            Gdx.app.error(TAG, "[" + this.hashCode() + "] render() called but camera or activeBatch is NULL!");
-            return;
-        }
+        // Update sprite positions
+        if (!paused) updateSprites(delta);
 
+        // Clear
+        Gdx.gl.glClearColor(0.08f, 0.08f, 0.12f, 1f);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+
+        // Draw sprites
         camera.update();
-        // The activeBatch's projection matrix should be set in resize or after switching
-        // For safety, can set it here too, but might be redundant if resize handles it.
-        // activeBatch.setProjectionMatrix(camera.combined);
-
+        activeBatch.setProjectionMatrix(camera.combined);
         activeBatch.begin();
-        for (int i = 0; i < SPRITES; i++) {
-            if (sprites[i] != null) {
-                sprites[i].draw(activeBatch);
-            }
-        }
+        drawSprites();
         activeBatch.end();
 
-        frames++;
-        long timeNow = TimeUtils.nanoTime();
-        if (timeNow - lastLogTime > 1000000000) {
-            float fps = frames / ((timeNow - lastLogTime) / 1000000000.0f);
-            int currentRenderCalls = 0;
+        // Capture draw call count from the batcher that just rendered
+        if (useInstanced) {
+            lastDrawCalls = batchInstanced.renderCalls;
+        } else {
+            lastDrawCalls = batchRegular.renderCalls;
+        }
 
-            if (useInstancedBatcher && spriteBatchInstanced != null) {
-                currentRenderCalls = spriteBatchInstanced.renderCalls;
-            } else if (!useInstancedBatcher && spriteBatchRegular != null) {
-                currentRenderCalls = spriteBatchRegular.renderCalls;
-            }
+        // Draw HUD overlay
+        drawHud();
 
-            float avgSpritesPerCall = (currentRenderCalls > 0) ? (float)SPRITES / currentRenderCalls : SPRITES;
-            String batcherType = useInstancedBatcher ? "Instanced" : "Regular";
+        // Record frame time
+        float frameMs = (TimeUtils.nanoTime() - frameStart) / 1_000_000f;
+        frameTimeMean.addValue(frameMs);
+        if (frameMs > worstFrameMs) worstFrameMs = frameMs;
+        if (frameMs < bestFrameMs) bestFrameMs = frameMs;
 
-            Gdx.app.log(TAG, "Batcher: " + batcherType
-                    + ", fps: " + df.format(fps)
-                    + ", render calls: " + currentRenderCalls
-                    + ", avg sprites/call: " + df.format(avgSpritesPerCall));
-            frames = 0;
-            lastLogTime = timeNow;
+        // Reset min/max every 5 seconds to keep them fresh
+        if (TimeUtils.nanoTime() - lastResetTime > 5_000_000_000L) {
+            worstFrameMs = 0f;
+            bestFrameMs = Float.MAX_VALUE;
+            lastResetTime = TimeUtils.nanoTime();
         }
     }
 
-    private void handleCameraInput() {
-        float camSpeed = 300 * Gdx.graphics.getDeltaTime(); // Increased speed
-        if (Gdx.input.isKeyPressed(Input.Keys.A)) camera.translate(-camSpeed, 0);
-        if (Gdx.input.isKeyPressed(Input.Keys.D)) camera.translate(camSpeed, 0);
-        if (Gdx.input.isKeyPressed(Input.Keys.W)) camera.translate(0, camSpeed);
-        if (Gdx.input.isKeyPressed(Input.Keys.S)) camera.translate(0, -camSpeed);
-        if (Gdx.input.isKeyPressed(Input.Keys.Q)) camera.zoom += 0.02f;
-        if (Gdx.input.isKeyPressed(Input.Keys.E)) camera.zoom -= 0.02f;
-        camera.zoom = Math.max(0.1f, camera.zoom); // Prevent zoom from becoming too small or negative
+    private void drawSprites() {
+        float screenW = Gdx.graphics.getWidth();
+        float screenH = Gdx.graphics.getHeight();
+        float spriteW = 24f;
+        float spriteH = 24f;
+        float halfW = spriteW * 0.5f;
+        float halfH = spriteH * 0.5f;
+
+        if (multiTexture) {
+            // Multi-texture path: sprites use different textures, forcing flushes on switch.
+            for (int i = 0; i < spriteCount; i++) {
+                VulkanTexture tex = textures[texIndex[i]];
+                float s = scale[i];
+                activeBatch.draw(tex,
+                        posX[i] - halfW * s, posY[i] - halfH * s,
+                        halfW * s, halfH * s,
+                        spriteW * s, spriteH * s,
+                        1f, 1f,
+                        rotation[i],
+                        0, 0, 32, 32,
+                        false, false);
+            }
+        } else {
+            // Single-texture path: all sprites share one texture, minimal flushes.
+            VulkanTexture tex = textures[0];
+            for (int i = 0; i < spriteCount; i++) {
+                float s = scale[i];
+                activeBatch.draw(tex,
+                        posX[i] - halfW * s, posY[i] - halfH * s,
+                        halfW * s, halfH * s,
+                        spriteW * s, spriteH * s,
+                        1f, 1f,
+                        rotation[i],
+                        0, 0, 32, 32,
+                        false, false);
+            }
+        }
     }
 
+    private void drawHud() {
+        hudBatch.setProjectionMatrix(camera.combined);
+        hudBatch.begin();
+
+        sb.setLength(0);
+        sb.append("Vulkan SpriteBatch Stress Test\n");
+        sb.append("Batcher: ").append(useInstanced ? "INSTANCED" : "REGULAR").append('\n');
+        sb.append("Sprites: ").append(spriteCount);
+        sb.append("  Textures: ").append(multiTexture ? textures.length : 1).append('\n');
+        sb.append("Draw calls: ").append(lastDrawCalls).append('\n');
+        sb.append("FPS: ").append(Gdx.graphics.getFramesPerSecond());
+        if (frameTimeMean.hasEnoughData()) {
+            sb.append("  Frame: ").append(String.format("%.2f", frameTimeMean.getMean())).append("ms");
+            sb.append("  Best: ").append(String.format("%.2f", bestFrameMs)).append("ms");
+            sb.append("  Worst: ").append(String.format("%.2f", worstFrameMs)).append("ms");
+        }
+        sb.append('\n');
+        sb.append(paused ? "[PAUSED] " : "");
+        sb.append("[UP/DOWN] count  [SPACE] batcher  [T] textures  [P] pause\n");
+
+        font.draw(hudBatch, sb, 10, Gdx.graphics.getHeight() - 10);
+        hudBatch.end();
+    }
+
+    // ---- Sprite simulation ----
+
+    private void updateSprites(float delta) {
+        float screenW = Gdx.graphics.getWidth();
+        float screenH = Gdx.graphics.getHeight();
+
+        for (int i = 0; i < spriteCount; i++) {
+            posX[i] += velX[i] * delta;
+            posY[i] += velY[i] * delta;
+            rotation[i] += rotSpeed[i] * delta;
+
+            // Wrap around screen edges
+            if (posX[i] < -32f) posX[i] += screenW + 64f;
+            else if (posX[i] > screenW + 32f) posX[i] -= screenW + 64f;
+            if (posY[i] < -32f) posY[i] += screenH + 64f;
+            else if (posY[i] > screenH + 32f) posY[i] -= screenH + 64f;
+        }
+    }
+
+    // ---- Sprite data management ----
+
+    private void allocateSprites(int capacity) {
+        posX     = new float[capacity];
+        posY     = new float[capacity];
+        velX     = new float[capacity];
+        velY     = new float[capacity];
+        rotation = new float[capacity];
+        rotSpeed = new float[capacity];
+        scale    = new float[capacity];
+        texIndex = new int[capacity];
+    }
+
+    private void randomizeSprites(int from, int to) {
+        float screenW = Gdx.graphics.getWidth();
+        float screenH = Gdx.graphics.getHeight();
+        if (screenW == 0) screenW = 1280;
+        if (screenH == 0) screenH = 720;
+
+        for (int i = from; i < to; i++) {
+            posX[i]     = MathUtils.random(0f, screenW);
+            posY[i]     = MathUtils.random(0f, screenH);
+            velX[i]     = MathUtils.random(-80f, 80f);
+            velY[i]     = MathUtils.random(-80f, 80f);
+            rotation[i] = MathUtils.random(0f, 360f);
+            rotSpeed[i] = MathUtils.random(-90f, 90f);
+            scale[i]    = MathUtils.random(0.4f, 1.5f);
+            texIndex[i] = MathUtils.random(0, textures.length - 1);
+        }
+    }
+
+    // ---- Input handling ----
+
+    private boolean handleKey(int keycode) {
+        boolean shift = Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT)
+                     || Gdx.input.isKeyPressed(Input.Keys.SHIFT_RIGHT);
+        int step = shift ? STEP_SMALL : STEP_LARGE;
+
+        switch (keycode) {
+            case Input.Keys.UP:
+                int newCount = Math.min(spriteCount + step, MAX_SPRITES);
+                if (newCount > spriteCount) {
+                    randomizeSprites(spriteCount, newCount);
+                    spriteCount = newCount;
+                    Gdx.app.log(TAG, "Sprite count: " + spriteCount);
+                }
+                return true;
+
+            case Input.Keys.DOWN:
+                spriteCount = Math.max(spriteCount - step, 0);
+                Gdx.app.log(TAG, "Sprite count: " + spriteCount);
+                return true;
+
+            case Input.Keys.SPACE:
+                useInstanced = !useInstanced;
+                activeBatch = useInstanced ? batchInstanced : batchRegular;
+                activeBatch.setProjectionMatrix(camera.combined);
+                Gdx.app.log(TAG, "Switched to " + (useInstanced ? "INSTANCED" : "REGULAR") + " batcher");
+                return true;
+
+            case Input.Keys.T:
+                multiTexture = !multiTexture;
+                Gdx.app.log(TAG, "Multi-texture: " + multiTexture);
+                return true;
+
+            case Input.Keys.P:
+                paused = !paused;
+                Gdx.app.log(TAG, paused ? "Paused" : "Resumed");
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    // ---- Lifecycle ----
+
+    @Override
+    public void resize(int width, int height) {
+        if (camera != null) {
+            camera.setToOrtho(false, width, height);
+            camera.update();
+        }
+    }
 
     @Override
     public void dispose() {
-        Gdx.app.log(TAG, "[" + this.hashCode() + "] dispose() called.");
-        if (spriteBatchRegular != null) {
-            spriteBatchRegular.dispose();
-            spriteBatchRegular = null;
+        Gdx.app.log(TAG, "Disposing...");
+        if (batchRegular   != null) batchRegular.dispose();
+        if (batchInstanced != null) batchInstanced.dispose();
+        if (hudBatch       != null) hudBatch.dispose();
+        if (font           != null) font.dispose();
+        if (fontPacker     != null) fontPacker.dispose();
+        for (VulkanTexture tex : textures) {
+            if (tex != null) tex.dispose();
         }
-        if (spriteBatchInstanced != null) {
-            spriteBatchInstanced.dispose();
-            spriteBatchInstanced = null;
-        }
-        activeBatch = null;
-
-        if (texture != null) {
-            texture.dispose();
-            texture = null;
-        }
-        sprites = null;
-        if (Gdx.input.getInputProcessor() == this) {
-            Gdx.input.setInputProcessor(null);
-        }
+        Gdx.input.setInputProcessor(null);
     }
 
-    // --- InputProcessor Methods ---
-    @Override
-    public boolean keyDown(int keycode) {
-        if (keycode == Input.Keys.SPACE) {
-            // End current batch if it's drawing
-            if (activeBatch != null && activeBatch.isDrawing()) {
-                activeBatch.end();
-            }
+    // ---- Font helper ----
 
-            useInstancedBatcher = !useInstancedBatcher; // Toggle the flag
+    /** Creates a BitmapFont using FreeType and VulkanPixmapPacker.
+     * This demonstrates the recommended way to create fonts in the Vulkan backend. */
+    private BitmapFont createHudFont() {
+        FreeTypeFontGenerator gen = new FreeTypeFontGenerator(Gdx.files.internal("data/DroidSerif-Regular.ttf"));
+        FreeTypeFontGenerator.FreeTypeFontParameter param = new FreeTypeFontGenerator.FreeTypeFontParameter();
 
-            // Switch the active batch reference
-            activeBatch = useInstancedBatcher ? spriteBatchInstanced : spriteBatchRegular;
+        fontPacker = new VulkanPixmapPacker(512, 512, Pixmap.Format.RGBA8888, 2, false);
+        param.packer      = fontPacker;
+        param.size         = 18;
+        param.color        = Color.WHITE;
+        param.incremental  = true;
+        param.minFilter    = Texture.TextureFilter.Linear;
+        param.magFilter    = Texture.TextureFilter.Linear;
 
-            Gdx.app.log(TAG, "Switched to " + (useInstancedBatcher ? "INSTANCED" : "REGULAR") + " SpriteBatch");
-
-            // Ensure the new active batch has the correct projection matrix
-            if (activeBatch != null && camera != null) {
-                activeBatch.setProjectionMatrix(camera.combined);
-                // It's good practice to call begin() if the batch is expected to be active immediately,
-                // but our render loop handles begin()/end().
-                // If begin() was called here, render() would need to check if already drawing.
-            }
-            return true; // Event handled
-        }
-        return false; // Event not handled
-    }
-
-    @Override
-    public boolean keyUp(int keycode) {
-        return false;
-    }
-
-    @Override
-    public boolean keyTyped(char character) {
-        return false;
-    }
-
-    @Override
-    public boolean touchDown(int screenX, int screenY, int pointer, int button) {
-        return false;
-    }
-
-    @Override
-    public boolean touchUp(int screenX, int screenY, int pointer, int button) {
-        return false;
-    }
-
-    @Override
-    public boolean touchDragged(int screenX, int screenY, int pointer) {
-        return false;
-    }
-
-    @Override
-    public boolean mouseMoved(int screenX, int screenY) {
-        return false;
-    }
-
-    @Override
-    public boolean scrolled(float amountX, float amountY) {
-        return false;
-    }
-
-    @Override
-    public boolean touchCancelled(int screenX, int screenY, int pointer, int button) {
-        return false;
+        BitmapFont f = gen.generateFont(param);
+        f.setUseIntegerPositions(false);
+        gen.dispose();
+        return f;
     }
 }

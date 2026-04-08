@@ -110,6 +110,8 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
     final IntBuffer tmpBuffer = BufferUtils.createIntBuffer(1);
     final IntBuffer tmpBuffer2 = BufferUtils.createIntBuffer(1);
     private long mainSwapchainRenderPass = VK_NULL_HANDLE;
+    private long currentSwapchainFramebuffer = VK_NULL_HANDLE;
+    private VulkanSwapchain currentSwapchain;
     private final List<VulkanFrameResourcePreparer> frameResourcePreparers = new CopyOnWriteArrayList<>();
 
     private final VulkanGL20Impl vulkanGL20Instance;
@@ -327,6 +329,22 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
         return mainSwapchainRenderPass;
     }
 
+    public void setCurrentSwapchainFramebuffer(long framebuffer) {
+        this.currentSwapchainFramebuffer = framebuffer;
+    }
+
+    public long getCurrentSwapchainFramebuffer() {
+        return currentSwapchainFramebuffer;
+    }
+
+    public void setCurrentSwapchain(VulkanSwapchain swapchain) {
+        this.currentSwapchain = swapchain;
+    }
+
+    public VulkanSwapchain getCurrentSwapchain() {
+        return currentSwapchain;
+    }
+
     @Override
     public boolean isGL30Available() {
         return false;
@@ -527,7 +545,9 @@ public class VulkanGraphics extends AbstractGraphics implements Disposable {
 
     @Override
     public boolean supportsExtension(String extension) {
-        return GLFW.glfwExtensionSupported(extension);
+        // glfwExtensionSupported queries OpenGL extensions which are not available in a
+        // Vulkan context.  Vulkan extension support is handled via VulkanDeviceCapabilities.
+        return false;
     }
 
     @Override

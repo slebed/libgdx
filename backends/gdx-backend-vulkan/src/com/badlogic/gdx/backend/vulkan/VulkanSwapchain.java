@@ -126,6 +126,11 @@ public class VulkanSwapchain implements Disposable {
         return swapchainFramebuffers.get(index);
     }
 
+    /** Finds a supported depth format for the given physical device. Delegates to Builder.findDepthFormat. */
+    public static int findDepthFormat(VkPhysicalDevice physicalDevice) {
+        return Builder.findDepthFormat(physicalDevice);
+    }
+
     public boolean needsRecreation() {
         return needsRecreation;
     }
@@ -827,7 +832,7 @@ public class VulkanSwapchain implements Disposable {
          * Finds a supported depth format from the physical device.
          * Prefers D32_SFLOAT, then D32_SFLOAT_S8_UINT, then D24_UNORM_S8_UINT.
          */
-        private static int findDepthFormat(VkPhysicalDevice physicalDevice) {
+        static int findDepthFormat(VkPhysicalDevice physicalDevice) {
             int[] candidates = {
                     VK_FORMAT_D32_SFLOAT,
                     VK_FORMAT_D32_SFLOAT_S8_UINT,
