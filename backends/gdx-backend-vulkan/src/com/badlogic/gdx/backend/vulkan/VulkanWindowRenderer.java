@@ -193,10 +193,11 @@ public class VulkanWindowRenderer implements Disposable {
             renderPassInfo.renderArea().offset().set(0, 0);
             VkExtent2D extent = this.swapchain.getExtent();
             renderPassInfo.renderArea().extent().set(extent);
-            VkClearValue.Buffer clearValues = VkClearValue.calloc(1, stack);
+            VkClearValue.Buffer clearValues = VkClearValue.calloc(2, stack);
             clearValues.get(0).color().float32(stack.floats(
                     config.initialBackgroundColor.r, config.initialBackgroundColor.g,
                     config.initialBackgroundColor.b, config.initialBackgroundColor.a));
+            clearValues.get(1).depthStencil().depth(1.0f).stencil(0);
             renderPassInfo.pClearValues(clearValues);
             vkCmdBeginRenderPass(commandBuffer, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -370,6 +371,11 @@ public class VulkanWindowRenderer implements Disposable {
 
         if (this.vulkanGraphics != null) {
             this.vulkanGraphics.setMainSwapchainRenderPass(this.renderPass);
+            // Invalidate cached pipelines — they reference the old render pass handle
+            VulkanPipelineManager pm = this.vulkanGraphics.getPipelineManager();
+            if (pm != null) {
+                pm.invalidatePipelines();
+            }
         }
     }
 

@@ -39,6 +39,12 @@ public class VulkanSwapchain implements Disposable {
     private List<Long> swapchainImageViews; // VkImageView handles (Owned)
     private long renderPass = VK_NULL_HANDLE; // RenderPass compatible with swapchain format (Owned)
 
+    // --- Depth Buffer Resources (Owned) ---
+    private long depthImage = VK_NULL_HANDLE;
+    private long depthImageAllocation = VK_NULL_HANDLE; // VMA allocation
+    private long depthImageView = VK_NULL_HANDLE;
+    private int depthFormat = VK_FORMAT_UNDEFINED;
+
     // --- State ---
     private int imageFormat; // VkFormat enum value used
     private VkExtent2D extent; // VkExtent2D used for creation
@@ -46,23 +52,29 @@ public class VulkanSwapchain implements Disposable {
     volatile boolean needsRecreation = false; // Internal flag
     private boolean disposed = false;
 
-    VulkanSwapchain(Builder builder, long swapchainHandle, List<Long> images, List<Long> imageViews, long renderPassHandle, List<Long> framebuffers, VkExtent2D chosenExtent, int chosenFormat) {
+    VulkanSwapchain(Builder builder, long swapchainHandle, List<Long> images, List<Long> imageViews,
+                    long renderPassHandle, List<Long> framebuffers, VkExtent2D chosenExtent, int chosenFormat,
+                    long depthImage, long depthImageAllocation, long depthImageView, int depthFormat) {
 
         this.device = Objects.requireNonNull(builder.device, "Device cannot be null");
         this.rawDevice = device.getRawDevice();
-        this.physicalDevice = device.getPhysicalDevice(); // Get from device wrapper
+        this.physicalDevice = device.getPhysicalDevice();
         this.surface = builder.surface;
         this.windowHandle = builder.windowHandle;
 
         this.swapchain = swapchainHandle;
-        this.swapchainImages = images; // Assign the list of image handles
+        this.swapchainImages = images;
         this.swapchainImageViews = imageViews;
         this.renderPass = renderPassHandle;
         this.swapchainFramebuffers = framebuffers;
 
-        // Store a copy of the extent object
         this.extent = VkExtent2D.create().set(chosenExtent);
         this.imageFormat = chosenFormat;
+
+        this.depthImage = depthImage;
+        this.depthImageAllocation = depthImageAllocation;
+        this.depthImageView = depthImageView;
+        this.depthFormat = depthFormat;
     }
 
     public long getHandle() {
@@ -75,6 +87,10 @@ public class VulkanSwapchain implements Disposable {
 
     public int getImageFormat() {
         return imageFormat;
+    }
+
+    public int getDepthFormat() {
+        return depthFormat;
     }
 
     public long getRenderPass() {
@@ -244,8 +260,24 @@ public class VulkanSwapchain implements Disposable {
                 VkMemoryUtil.safeDestroyFramebuffer(framebuffer, rawDevice);
             }
             swapchainFramebuffers.clear();
-            swapchainFramebuffers = null; // Help GC
+            swapchainFramebuffers = null;
         }
+
+        // Depth buffer resources
+        VkMemoryUtil.safeDestroyImageView(depthImageView, rawDevice);
+        depthImageView = VK_NULL_HANDLE;
+        if (depthImage != VK_NULL_HANDLE && depthImageAllocation != VK_NULL_HANDLE) {
+            VulkanApplication app = (VulkanApplication) Gdx.app;
+            if (app != null) {
+                long vma = app.getVmaAllocator();
+                if (vma != VK_NULL_HANDLE) {
+                    org.lwjgl.util.vma.Vma.vmaDestroyImage(vma, depthImage, depthImageAllocation);
+                }
+            }
+            depthImage = VK_NULL_HANDLE;
+            depthImageAllocation = VK_NULL_HANDLE;
+        }
+        depthFormat = VK_FORMAT_UNDEFINED;
 
         // Render Pass
         VkMemoryUtil.safeDestroyRenderPass(renderPass, rawDevice);
@@ -358,6 +390,10 @@ public class VulkanSwapchain implements Disposable {
             instance.swapchainFramebuffers = recreated.swapchainFramebuffers;
             instance.extent = recreated.extent;
             instance.imageFormat = recreated.imageFormat;
+            instance.depthImage = recreated.depthImage;
+            instance.depthImageAllocation = recreated.depthImageAllocation;
+            instance.depthImageView = recreated.depthImageView;
+            instance.depthFormat = recreated.depthFormat;
             // Keep instance.vsyncEnabled as it was
             instance.needsRecreation = false; // Mark as successfully recreated
         }
@@ -510,14 +546,33 @@ public class VulkanSwapchain implements Disposable {
                     images.add(pImages.get(i));
                 }
 
+                // --- Create depth buffer ---
+                int chosenDepthFormat = findDepthFormat(physDev);
+                long vmaAllocator = ((VulkanApplication) Gdx.app).getVmaAllocator();
+                long depthImg = VK_NULL_HANDLE;
+                long depthImgAlloc = VK_NULL_HANDLE;
+                long depthImgView = VK_NULL_HANDLE;
+
                 // --- Create dependent resources with rollback on partial failure ---
                 List<Long> imageViews = null;
                 long renderPassHandle = VK_NULL_HANDLE;
                 List<Long> framebuffers = null;
                 try {
+                    // Create depth image via VMA
+                    VulkanImage depthImageObj = VulkanResourceUtil.createManagedImage(
+                            vmaAllocator, chosenExtent.width(), chosenExtent.height(),
+                            chosenDepthFormat, VK_IMAGE_TILING_OPTIMAL,
+                            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                            org.lwjgl.util.vma.Vma.VMA_MEMORY_USAGE_GPU_ONLY, 0);
+                    depthImg = depthImageObj.imageHandle;
+                    depthImgAlloc = depthImageObj.allocationHandle;
+
+                    // Create depth image view
+                    depthImgView = createImageViewInternal(rawDev, depthImg, chosenDepthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+
                     imageViews = createImageViewsInternal(rawDev, images, chosenFormat.format());
-                    renderPassHandle = createRenderPassInternal(rawDev, chosenFormat.format());
-                    framebuffers = createFramebuffersInternal(rawDev, imageViews, renderPassHandle, chosenExtent);
+                    renderPassHandle = createRenderPassInternal(rawDev, chosenFormat.format(), chosenDepthFormat);
+                    framebuffers = createFramebuffersInternal(rawDev, imageViews, depthImgView, renderPassHandle, chosenExtent);
                 } catch (Exception e) {
                     // Clean up in reverse order of creation
                     if (framebuffers != null) {
@@ -527,19 +582,24 @@ public class VulkanSwapchain implements Disposable {
                     if (imageViews != null) {
                         for (long iv : imageViews) VkMemoryUtil.safeDestroyImageView(iv, rawDev);
                     }
+                    VkMemoryUtil.safeDestroyImageView(depthImgView, rawDev);
+                    if (depthImg != VK_NULL_HANDLE && depthImgAlloc != VK_NULL_HANDLE) {
+                        org.lwjgl.util.vma.Vma.vmaDestroyImage(vmaAllocator, depthImg, depthImgAlloc);
+                    }
                     VkMemoryUtil.safeDestroySwapchain(swapchainHandle, rawDev);
                     throw new GdxRuntimeException("Failed to create swapchain dependent resources", e);
                 }
 
                 if (debug)
-                    Gdx.app.log("VulkanSwapchain.Builder", "Created swapchain resources. PresentMode: " + VkResultDecoder.decodePresentMode(chosenPresentMode) + ", Format: " + chosenFormat.format() + ", Extent: " + chosenExtent.width() + "x" + chosenExtent.height());
+                    Gdx.app.log("VulkanSwapchain.Builder", "Created swapchain resources. PresentMode: " + VkResultDecoder.decodePresentMode(chosenPresentMode) + ", Format: " + chosenFormat.format() + ", Extent: " + chosenExtent.width() + "x" + chosenExtent.height() + ", DepthFormat: " + chosenDepthFormat);
                 // --- Construct VulkanSwapchain Instance ---
                 Builder dummyBuilder = (source instanceof Builder) ? (Builder) source
                         : new Builder().device(dev).surface(surf).windowHandle(windowHnd)
                         .configuration(new VulkanApplicationConfiguration());
 
                 return new VulkanSwapchain(dummyBuilder,
-                        swapchainHandle, images, imageViews, renderPassHandle, framebuffers, chosenExtent, chosenFormat.format());
+                        swapchainHandle, images, imageViews, renderPassHandle, framebuffers, chosenExtent, chosenFormat.format(),
+                        depthImg, depthImgAlloc, depthImgView, chosenDepthFormat);
             }
         }
 
@@ -677,25 +737,57 @@ public class VulkanSwapchain implements Disposable {
             return imageViews;
         }
 
-        private static long createRenderPassInternal(VkDevice rawDevice, int format) {
+        private static long createRenderPassInternal(VkDevice rawDevice, int colorFormat, int depthFormat) {
             try (MemoryStack stack = stackPush()) {
-                VkAttachmentDescription.Buffer colorAttachment = VkAttachmentDescription.calloc(1, stack).format(format)
-                        .samples(VK_SAMPLE_COUNT_1_BIT).loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR).storeOp(VK_ATTACHMENT_STORE_OP_STORE)
-                        .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE).stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
-                        .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED).finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+                // Two attachments: color (index 0) and depth (index 1)
+                VkAttachmentDescription.Buffer attachments = VkAttachmentDescription.calloc(2, stack);
 
-                VkAttachmentReference.Buffer colorAttachmentRef = VkAttachmentReference.calloc(1, stack).attachment(0)
+                // Color attachment
+                attachments.get(0)
+                        .format(colorFormat)
+                        .samples(VK_SAMPLE_COUNT_1_BIT)
+                        .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
+                        .storeOp(VK_ATTACHMENT_STORE_OP_STORE)
+                        .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+                        .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                        .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+                        .finalLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+                // Depth attachment
+                attachments.get(1)
+                        .format(depthFormat)
+                        .samples(VK_SAMPLE_COUNT_1_BIT)
+                        .loadOp(VK_ATTACHMENT_LOAD_OP_CLEAR)
+                        .storeOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                        .stencilLoadOp(VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+                        .stencilStoreOp(VK_ATTACHMENT_STORE_OP_DONT_CARE)
+                        .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED)
+                        .finalLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+                VkAttachmentReference.Buffer colorAttachmentRef = VkAttachmentReference.calloc(1, stack)
+                        .attachment(0)
                         .layout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-                VkSubpassDescription.Buffer subpass = VkSubpassDescription.calloc(1, stack)
-                        .pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS).colorAttachmentCount(1).pColorAttachments(colorAttachmentRef);
+                VkAttachmentReference depthAttachmentRef = VkAttachmentReference.calloc(stack)
+                        .attachment(1)
+                        .layout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
-                VkSubpassDependency.Buffer dependency = VkSubpassDependency.calloc(1, stack).srcSubpass(VK_SUBPASS_EXTERNAL)
-                        .dstSubpass(0).srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT).srcAccessMask(0)
-                        .dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT).dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+                VkSubpassDescription.Buffer subpass = VkSubpassDescription.calloc(1, stack)
+                        .pipelineBindPoint(VK_PIPELINE_BIND_POINT_GRAPHICS)
+                        .colorAttachmentCount(1)
+                        .pColorAttachments(colorAttachmentRef)
+                        .pDepthStencilAttachment(depthAttachmentRef);
+
+                VkSubpassDependency.Buffer dependency = VkSubpassDependency.calloc(1, stack)
+                        .srcSubpass(VK_SUBPASS_EXTERNAL)
+                        .dstSubpass(0)
+                        .srcStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
+                        .srcAccessMask(0)
+                        .dstStageMask(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
+                        .dstAccessMask(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 
                 VkRenderPassCreateInfo renderPassInfo = VkRenderPassCreateInfo.calloc(stack).sType$Default()
-                        .pAttachments(colorAttachment).pSubpasses(subpass).pDependencies(dependency);
+                        .pAttachments(attachments).pSubpasses(subpass).pDependencies(dependency);
 
                 LongBuffer pRenderPass = stack.mallocLong(1);
                 vkCheck(vkCreateRenderPass(rawDevice, renderPassInfo, null, pRenderPass), "Failed to create render pass");
@@ -703,15 +795,16 @@ public class VulkanSwapchain implements Disposable {
             }
         }
 
-        private static List<Long> createFramebuffersInternal(VkDevice rawDevice, List<Long> imageViews, long renderPass,
-                                                             VkExtent2D extent) {
+        private static List<Long> createFramebuffersInternal(VkDevice rawDevice, List<Long> imageViews,
+                                                             long depthImageView, long renderPass, VkExtent2D extent) {
             List<Long> framebuffers = new ArrayList<>(imageViews.size());
             try (MemoryStack stack = stackPush()) {
-                LongBuffer attachments = stack.mallocLong(1);
+                LongBuffer attachments = stack.mallocLong(2); // color + depth
                 LongBuffer pFramebuffer = stack.mallocLong(1);
 
                 for (long imageView : imageViews) {
                     attachments.put(0, imageView);
+                    attachments.put(1, depthImageView);
                     VkFramebufferCreateInfo framebufferInfo = VkFramebufferCreateInfo.calloc(stack).sType$Default()
                             .renderPass(renderPass).pAttachments(attachments).width(extent.width()).height(extent.height()).layers(1);
 
@@ -719,7 +812,6 @@ public class VulkanSwapchain implements Disposable {
                         vkCheck(vkCreateFramebuffer(rawDevice, framebufferInfo, null, pFramebuffer), "Failed to create framebuffer");
                         framebuffers.add(pFramebuffer.get(0));
                     } catch (Exception e) {
-                        // Clean up already-created framebuffers before propagating
                         for (long fb : framebuffers) {
                             VkMemoryUtil.safeDestroyFramebuffer(fb, rawDevice);
                         }
@@ -729,6 +821,51 @@ public class VulkanSwapchain implements Disposable {
                 }
             }
             return framebuffers;
+        }
+
+        /**
+         * Finds a supported depth format from the physical device.
+         * Prefers D32_SFLOAT, then D32_SFLOAT_S8_UINT, then D24_UNORM_S8_UINT.
+         */
+        private static int findDepthFormat(VkPhysicalDevice physicalDevice) {
+            int[] candidates = {
+                    VK_FORMAT_D32_SFLOAT,
+                    VK_FORMAT_D32_SFLOAT_S8_UINT,
+                    VK_FORMAT_D24_UNORM_S8_UINT
+            };
+            try (MemoryStack stack = stackPush()) {
+                VkFormatProperties props = VkFormatProperties.calloc(stack);
+                for (int format : candidates) {
+                    vkGetPhysicalDeviceFormatProperties(physicalDevice, format, props);
+                    if ((props.optimalTilingFeatures() & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0) {
+                        return format;
+                    }
+                }
+            }
+            throw new GdxRuntimeException("Failed to find a supported depth format!");
+        }
+
+        /**
+         * Creates a single image view with specified aspect mask.
+         */
+        private static long createImageViewInternal(VkDevice rawDevice, long image, int format, int aspectMask) {
+            try (MemoryStack stack = stackPush()) {
+                VkImageViewCreateInfo viewInfo = VkImageViewCreateInfo.calloc(stack)
+                        .sType$Default()
+                        .image(image)
+                        .viewType(VK_IMAGE_VIEW_TYPE_2D)
+                        .format(format);
+                viewInfo.subresourceRange()
+                        .aspectMask(aspectMask)
+                        .baseMipLevel(0)
+                        .levelCount(1)
+                        .baseArrayLayer(0)
+                        .layerCount(1);
+
+                LongBuffer pImageView = stack.mallocLong(1);
+                vkCheck(vkCreateImageView(rawDevice, viewInfo, null, pImageView), "Failed to create image view");
+                return pImageView.get(0);
+            }
         }
 
     } // End Builder class

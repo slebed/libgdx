@@ -13,16 +13,21 @@ public class VulkanImage implements Disposable {
 	public final int format;
 	public final int width;
 	public final int height;
-	// Add extent, depth, layers, mipLevels if needed
+	public final int mipLevels;
 	private final long allocatorHandle;
 	private boolean disposed = false; // Add this flag
 
 	public VulkanImage (long imageHandle, long allocationHandle, int format, int width, int height, long allocatorHandle) {
+		this(imageHandle, allocationHandle, format, width, height, 1, allocatorHandle);
+	}
+
+	public VulkanImage (long imageHandle, long allocationHandle, int format, int width, int height, int mipLevels, long allocatorHandle) {
 		this.imageHandle = imageHandle;
 		this.allocationHandle = allocationHandle;
 		this.format = format;
 		this.width = width;
 		this.height = height;
+		this.mipLevels = mipLevels;
 		this.allocatorHandle = allocatorHandle;
 	}
 

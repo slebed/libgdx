@@ -150,6 +150,28 @@ public class VulkanPipelineManager implements Disposable {
         VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Pipeline manager disposed.");
     }
 
+    /** Invalidates all cached graphics pipelines. Call this when the render pass changes (e.g., on swapchain recreation).
+     * Pipeline layouts are NOT invalidated as they are render-pass-independent. */
+    public void invalidatePipelines() {
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE, "Invalidating cached pipelines due to render pass change...");
+
+        for (long pipelineHandle : spriteBatchPipelineCache.values()) {
+            if (pipelineHandle != VK_NULL_HANDLE) {
+                vkDestroyPipeline(rawDevice, pipelineHandle, null);
+            }
+        }
+        spriteBatchPipelineCache.clear();
+
+        for (long pipelineHandle : instancedSpriteBatchPipelineCache.values()) {
+            if (pipelineHandle != VK_NULL_HANDLE) {
+                vkDestroyPipeline(rawDevice, pipelineHandle, null);
+            }
+        }
+        instancedSpriteBatchPipelineCache.clear();
+
+        VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE, "Pipeline caches cleared. Pipelines will be recreated on next use.");
+    }
+
     private void createPipelineCache() {
         VulkanDebugLogger.debug(VulkanLogCategory.PIPELINE,"Creating Vulkan pipeline cache...");
         try (MemoryStack stack = stackPush()) {

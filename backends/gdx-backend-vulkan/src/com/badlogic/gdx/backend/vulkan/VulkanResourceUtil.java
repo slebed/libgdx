@@ -156,6 +156,67 @@ public class VulkanResourceUtil {
     }
 
     /**
+     * Creates a Vulkan image managed by VMA with a specified number of mip levels.
+     *
+     * @param allocator VMA allocator instance handle.
+     * @param width Image width in pixels.
+     * @param height Image height in pixels.
+     * @param format VkFormat specifying the image format.
+     * @param tiling VkImageTiling (OPTIMAL for device access, LINEAR for host access).
+     * @param imageUsageFlags VkImageUsageFlags describing how the image will be used.
+     * @param vmaMemoryUsage VmaMemoryUsage hint for memory type.
+     * @param vmaAllocFlags VmaAllocationCreateFlags.
+     * @param mipLevels Number of mip levels to create.
+     * @return A VulkanImage wrapper object.
+     */
+    public static VulkanImage createManagedImage(long allocator, int width, int height, int format, int tiling,
+                                                 int imageUsageFlags, int vmaMemoryUsage, int vmaAllocFlags, int mipLevels) {
+        try (MemoryStack stack = stackPush()) {
+            VkImageCreateInfo imageInfo = VkImageCreateInfo.calloc(stack)
+                    .sType$Default()
+                    .imageType(VK_IMAGE_TYPE_2D)
+                    .format(format)
+                    .extent(e -> e.width(width).height(height).depth(1))
+                    .mipLevels(mipLevels)
+                    .arrayLayers(1)
+                    .samples(VK_SAMPLE_COUNT_1_BIT)
+                    .tiling(tiling)
+                    .usage(imageUsageFlags)
+                    .sharingMode(VK_SHARING_MODE_EXCLUSIVE)
+                    .initialLayout(VK_IMAGE_LAYOUT_UNDEFINED);
+
+            VmaAllocationCreateInfo allocInfo = VmaAllocationCreateInfo.calloc(stack)
+                    .usage(vmaMemoryUsage)
+                    .flags(vmaAllocFlags);
+
+            LongBuffer pImage = stack.mallocLong(1);
+            PointerBuffer pAllocation = stack.mallocPointer(1);
+
+            vkCheck(vmaCreateImage(allocator, imageInfo, allocInfo, pImage, pAllocation, null),
+                    "VMA failed to create image");
+
+            long imageHandle = pImage.get(0);
+            long allocationHandle = pAllocation.get(0);
+
+            if (imageHandle == VK_NULL_HANDLE || allocationHandle == VK_NULL_HANDLE) {
+                if (imageHandle != VK_NULL_HANDLE || allocationHandle != VK_NULL_HANDLE) {
+                    vmaDestroyImage(allocator, imageHandle, allocationHandle);
+                }
+                throw new GdxRuntimeException("VMA image creation returned NULL handle(s) despite success code.");
+            }
+
+            return new VulkanImage(imageHandle, allocationHandle, format, width, height, mipLevels, allocator);
+        }
+    }
+
+    /**
+     * Calculates the number of mip levels for a given image dimension.
+     */
+    public static int calculateMipLevels(int width, int height) {
+        return (int) (Math.floor(Math.log(Math.max(width, height)) / Math.log(2))) + 1;
+    }
+
+    /**
      * Creates a device-local buffer (optimized for GPU access) and uploads data from a FloatBuffer
      * using an intermediate staging buffer.
      *

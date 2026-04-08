@@ -6,6 +6,8 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.backend.vulkan.VulkanDevice;
 import com.badlogic.gdx.backend.vulkan.VulkanGraphics;
 import com.badlogic.gdx.backend.vulkan.VulkanPixmapPacker;
+import com.badlogic.gdx.backend.vulkan.VulkanSpriteBatch;
+import com.badlogic.gdx.backend.vulkan.VulkanSpriteBatchInstanced;
 import com.badlogic.gdx.backend.vulkan.VulkanTexture;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
@@ -82,10 +84,10 @@ public class TechDemo_BulletHell extends ApplicationAdapter {
         // --- Batch Creation ---
         if (USE_VULKAN_INSTANCED_BATCHING) {
             Gdx.app.log("DEMO_SETUP", "Using VulkanSpriteBatchInstanced. Max instances: " + MAX_BULLETS_ON_SCREEN);
-            //batch = new VulkanSpriteBatchInstanced(gfx, MAX_BULLETS_ON_SCREEN);
+            batch = new VulkanSpriteBatchInstanced(MAX_BULLETS_ON_SCREEN);
         } else {
             Gdx.app.log("DEMO_SETUP", "Using VulkanSpriteBatch (Streaming). Flush trigger: " + VK_STREAMING_FLUSH_TRIGGER);
-            // batch = new VulkanSpriteBatch(gfx, VK_STREAMING_FLUSH_TRIGGER, MAX_BULLETS_ON_SCREEN);
+            batch = new VulkanSpriteBatch(VK_STREAMING_FLUSH_TRIGGER, MAX_BULLETS_ON_SCREEN);
         }
 
         // --- Texture Creation ---

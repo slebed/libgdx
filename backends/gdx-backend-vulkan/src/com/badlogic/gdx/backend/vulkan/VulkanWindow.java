@@ -556,7 +556,7 @@ public class VulkanWindow implements Disposable {
     }
 
     VulkanGraphics getGraphics() {
-        return (VulkanGraphics) Gdx.graphics;
+        return vulkanGraphics;
     }
 
     VulkanInput getInput() {
@@ -936,7 +936,7 @@ public class VulkanWindow implements Disposable {
     }
 
     void setResizableInternal(boolean resizable) {
-        GLFW.glfwSetWindowAttrib(this.windowHandle, GLFW.GLFW_RESIZABLE, resizable ? GLFW.GLFW_TRUE : GLFW.GLFW_TRUE);
+        GLFW.glfwSetWindowAttrib(this.windowHandle, GLFW.GLFW_RESIZABLE, resizable ? GLFW.GLFW_TRUE : GLFW.GLFW_FALSE);
     }
 
     void setVSyncInternal(boolean vsync) {

@@ -60,6 +60,9 @@ public class VulkanFreeTypeFontTest extends GdxTest {
 
     @Override
     public void dispose() {
+        if (batch != null) {
+            batch.dispose();
+        }
         if (font != null) {
             font.dispose();
         }

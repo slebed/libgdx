@@ -34,6 +34,7 @@ public class VulkanTexture extends Texture {
     private final int width;
     private final int height;
     private final int format; // Store VkFormat
+    private final int mipLevels;
     private boolean disposed = false;
     private String filePath=null;
 
@@ -46,11 +47,20 @@ public class VulkanTexture extends Texture {
     private final int textureHandle;
 
     /** Constructor that automatically retrieves Vulkan context from Gdx.graphics. Assumes Vulkan backend is initialized and
-     * active.
+     * active. Does not generate mipmaps.
      *
      * @param file The FileHandle of the image to load.
      * @throws GdxRuntimeException if Gdx.graphics is not VulkanGraphics or context is invalid. */
     public VulkanTexture(FileHandle file) {
+        this(file, false);
+    }
+
+    /** Constructor that automatically retrieves Vulkan context from Gdx.graphics, with optional mipmap generation.
+     *
+     * @param file The FileHandle of the image to load.
+     * @param genMipmaps Whether to generate mipmaps for this texture.
+     * @throws GdxRuntimeException if Gdx.graphics is not VulkanGraphics or context is invalid. */
+    public VulkanTexture(FileHandle file, boolean genMipmaps) {
         super(); // Call the protected no-op Texture() constructor FIRST
 
         if (file == null || !file.exists()) {
@@ -58,7 +68,7 @@ public class VulkanTexture extends Texture {
         }
         this.filePath = file.path();
 
-        if (debug) Gdx.app.log(TAG, "(Constructor) Loading texture from: " + file.path());
+        if (debug) Gdx.app.log(TAG, "(Constructor) Loading texture from: " + file.path() + " (mipmaps: " + genMipmaps + ")");
 
         // 1. Get Vulkan Context (Device and Allocator)
         if (!(Gdx.graphics instanceof VulkanGraphics)) {
@@ -102,6 +112,8 @@ public class VulkanTexture extends Texture {
             long imageSize = (long) texWidth * texHeight * 4;
             ByteBuffer pixelBuffer = rgbaPixmap.getPixels();
 
+            int texMipLevels = genMipmaps ? VulkanResourceUtil.calculateMipLevels(texWidth, texHeight) : 1;
+
             // 3. Create Staging Buffer via VMA
             stagingBuffer = VulkanResourceUtil.createManagedBuffer(vmaAllocator, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                     VMA_MEMORY_USAGE_AUTO, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
@@ -123,25 +135,35 @@ public class VulkanTexture extends Texture {
             rgbaPixmap = null;
 
             // 5. Create Final GPU Image via VMA
+            // When generating mipmaps, we need TRANSFER_SRC_BIT so each mip level can be a blit source
+            int usageFlags = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+            if (genMipmaps) usageFlags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+
             tempGpuImage = VulkanResourceUtil.createManagedImage(vmaAllocator, texWidth, texHeight, vkFormat,
-                    VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                    VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0);
+                    VK_IMAGE_TILING_OPTIMAL, usageFlags,
+                    VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0, texMipLevels);
 
-            // 6. Perform Layout Transitions and Copy (using the retrieved device)
+            // 6. Perform Layout Transitions and Copy
             transitionImageLayoutCmd(retrievedDevice, tempGpuImage.imageHandle, vkFormat, VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, texMipLevels);
             copyBufferToImageCmd(retrievedDevice, stagingBuffer.bufferHandle, tempGpuImage.imageHandle, texWidth, texHeight);
-            transitionImageLayoutCmd(retrievedDevice, tempGpuImage.imageHandle, vkFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-            if (debug) Gdx.app.log(TAG, "VMA Image created and data uploaded.");
+            if (genMipmaps) {
+                // Generate mipmaps using vkCmdBlitImage — this also transitions all levels to SHADER_READ_ONLY
+                generateMipmapsCmd(retrievedDevice, tempGpuImage.imageHandle, vkFormat, texWidth, texHeight, texMipLevels);
+            } else {
+                transitionImageLayoutCmd(retrievedDevice, tempGpuImage.imageHandle, vkFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, texMipLevels);
+            }
+
+            if (debug) Gdx.app.log(TAG, "VMA Image created and data uploaded. Mip levels: " + texMipLevels);
 
             // 7. Create ImageView
-            tempImageView = createImageViewInternal(retrievedDevice.getRawDevice(), tempGpuImage.imageHandle, vkFormat);
+            tempImageView = createImageViewInternal(retrievedDevice.getRawDevice(), tempGpuImage.imageHandle, vkFormat, texMipLevels);
             if (debug) Gdx.app.log(TAG, "ImageView created: " + tempImageView);
 
             // 8. Create Sampler
-            tempSampler = createSamplerInternal(retrievedDevice.getRawDevice());
+            tempSampler = createSamplerInternal(retrievedDevice.getRawDevice(), texMipLevels);
             if (debug) Gdx.app.log(TAG, "Sampler created: " + tempSampler);
 
             // 9. Assign to final fields *after* all steps succeed
@@ -152,6 +174,7 @@ public class VulkanTexture extends Texture {
             this.width = texWidth;
             this.height = texHeight;
             this.format = vkFormat;
+            this.mipLevels = texMipLevels;
 
             this.textureHandle = handleCounter.getAndIncrement(); // Assign a unique ID
 
@@ -189,6 +212,7 @@ public class VulkanTexture extends Texture {
         this.width = vulkanImage.width;
         this.height = vulkanImage.height;
         this.format = vulkanImage.format;
+        this.mipLevels = vulkanImage.mipLevels;
     }
 
     /** Creates a VulkanTexture directly from a Pixmap. Assumes Vulkan backend is initialized and active. The provided Pixmap is
@@ -289,19 +313,19 @@ public class VulkanTexture extends Texture {
 
             // 6. Perform Layout Transitions and Copy (using the retrieved device)
             transitionImageLayoutCmd(retrievedDevice, tempGpuImage.imageHandle, vkFormat, VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1);
             copyBufferToImageCmd(retrievedDevice, stagingBuffer.bufferHandle, tempGpuImage.imageHandle, texWidth, texHeight);
             transitionImageLayoutCmd(retrievedDevice, tempGpuImage.imageHandle, vkFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
 
             if (debug) Gdx.app.log(TAG, "VMA Image created and data uploaded from Pixmap.");
 
             // 7. Create ImageView
-            tempImageView = createImageViewInternal(retrievedDevice.getRawDevice(), tempGpuImage.imageHandle, vkFormat);
+            tempImageView = createImageViewInternal(retrievedDevice.getRawDevice(), tempGpuImage.imageHandle, vkFormat, 1);
             if (debug) Gdx.app.log(TAG, "ImageView created: " + tempImageView);
 
             // 8. Create Sampler
-            tempSampler = createSamplerInternal(retrievedDevice.getRawDevice());
+            tempSampler = createSamplerInternal(retrievedDevice.getRawDevice(), 1);
             if (debug) Gdx.app.log(TAG, "Sampler created: " + tempSampler);
 
             // 9. Assign to final fields *after* all steps succeed
@@ -312,6 +336,7 @@ public class VulkanTexture extends Texture {
             this.width = texWidth;
             this.height = texHeight;
             this.format = vkFormat;
+            this.mipLevels = 1;
 
             if (debug) Gdx.app.log(TAG, "VulkanTexture created successfully from Pixmap.");
 
@@ -430,21 +455,20 @@ public class VulkanTexture extends Texture {
                     VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0);
 
             // 5. Perform Layout Transitions and Copy (using helpers)
-            // These helpers need access to the device to execute commands
             transitionImageLayoutCmd(device, finalGpuImage.imageHandle, vkFormat, VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1);
             copyBufferToImageCmd(device, stagingBuffer.bufferHandle, finalGpuImage.imageHandle, texWidth, texHeight);
             transitionImageLayoutCmd(device, finalGpuImage.imageHandle, vkFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 1);
 
             if (debug) Gdx.app.log(logTag, "VMA Image created and data uploaded.");
 
             // 6. Create ImageView
-            imageView = createImageViewInternal(device.getRawDevice(), finalGpuImage.imageHandle, vkFormat);
+            imageView = createImageViewInternal(device.getRawDevice(), finalGpuImage.imageHandle, vkFormat, 1);
             if (debug) Gdx.app.log(logTag, "ImageView created: " + imageView);
 
             // 7. Create Sampler (Using default settings for now)
-            sampler = createSamplerInternal(device.getRawDevice());
+            sampler = createSamplerInternal(device.getRawDevice(), 1);
             if (debug) Gdx.app.log(logTag, "Sampler created: " + sampler);
 
             // If all successful, create the VulkanTexture instance
@@ -465,16 +489,16 @@ public class VulkanTexture extends Texture {
         }
     }
 
-    private static long createImageViewInternal(VkDevice rawDevice, long imageHandle, int format) {
-        if (debug) Gdx.app.log("VulkanTexture", "Creating internal image view...");
+    private static long createImageViewInternal(VkDevice rawDevice, long imageHandle, int format, int mipLevels) {
+        if (debug) Gdx.app.log("VulkanTexture", "Creating internal image view (mipLevels: " + mipLevels + ")...");
         try (MemoryStack stack = stackPush()) {
             VkImageViewCreateInfo viewInfo = VkImageViewCreateInfo.calloc(stack).sType$Default().image(imageHandle)
                     .viewType(VK_IMAGE_VIEW_TYPE_2D).format(format)
                     .components(c -> c.r(VK_COMPONENT_SWIZZLE_IDENTITY).g(VK_COMPONENT_SWIZZLE_IDENTITY).b(VK_COMPONENT_SWIZZLE_IDENTITY)
                             .a(VK_COMPONENT_SWIZZLE_IDENTITY))
-                    .subresourceRange(r -> r.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT) // Assuming color
-                            .baseMipLevel(0).levelCount(1) // TODO: Support mipmaps
-                            .baseArrayLayer(0).layerCount(1)); // TODO: Support array layers
+                    .subresourceRange(r -> r.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                            .baseMipLevel(0).levelCount(mipLevels)
+                            .baseArrayLayer(0).layerCount(1));
 
             LongBuffer pImageView = stack.mallocLong(1);
             vkCheck(vkCreateImageView(rawDevice, viewInfo, null, pImageView), "Failed to create texture image view");
@@ -482,17 +506,17 @@ public class VulkanTexture extends Texture {
         }
     }
 
-    private static long createSamplerInternal(VkDevice rawDevice) {
+    private static long createSamplerInternal(VkDevice rawDevice, int mipLevels) {
         // TODO: Parameterize sampler settings (filter, wrap, anisotropy)
         // TODO: Implement Sampler Caching
-        if (debug) Gdx.app.log("VulkanTexture", "Creating internal sampler (default settings)...");
+        if (debug) Gdx.app.log("VulkanTexture", "Creating internal sampler (mipLevels: " + mipLevels + ")...");
         try (MemoryStack stack = stackPush()) {
             VkSamplerCreateInfo samplerInfo = VkSamplerCreateInfo.calloc(stack).sType$Default().magFilter(VK_FILTER_LINEAR)
                     .minFilter(VK_FILTER_LINEAR).addressModeU(VK_SAMPLER_ADDRESS_MODE_REPEAT).addressModeV(VK_SAMPLER_ADDRESS_MODE_REPEAT)
                     .addressModeW(VK_SAMPLER_ADDRESS_MODE_REPEAT).anisotropyEnable(false).borderColor(VK_BORDER_COLOR_INT_OPAQUE_BLACK)
                     .unnormalizedCoordinates(false).compareEnable(false).compareOp(VK_COMPARE_OP_ALWAYS)
-                    .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR) // Needs mip levels > 1 on image to be effective
-                    .mipLodBias(0.0f).minLod(0.0f).maxLod(0.0f); // Use maxLod > 0 for mipmaps
+                    .mipmapMode(VK_SAMPLER_MIPMAP_MODE_LINEAR)
+                    .mipLodBias(0.0f).minLod(0.0f).maxLod(mipLevels > 1 ? (float) mipLevels : 0.0f);
 
             LongBuffer pSampler = stack.mallocLong(1);
             vkCheck(vkCreateSampler(rawDevice, samplerInfo, null, pSampler), "Failed to create texture sampler");
@@ -500,7 +524,7 @@ public class VulkanTexture extends Texture {
         }
     }
 
-    private static void transitionImageLayoutCmd(VulkanDevice device, long image, int format, int oldLayout, int newLayout) {
+    private static void transitionImageLayoutCmd(VulkanDevice device, long image, int format, int oldLayout, int newLayout, int mipLevels) {
         device.executeSingleTimeCommands(commandBuffer -> {
             try (MemoryStack stack = stackPush()) {
                 VkImageMemoryBarrier.Buffer barrier = VkImageMemoryBarrier.calloc(1, stack).sType$Default().oldLayout(oldLayout)
@@ -516,7 +540,7 @@ public class VulkanTexture extends Texture {
                 } else {
                     aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
                 }
-                barrier.subresourceRange().aspectMask(aspectMask).baseMipLevel(0).levelCount(1).baseArrayLayer(0).layerCount(1);
+                barrier.subresourceRange().aspectMask(aspectMask).baseMipLevel(0).levelCount(mipLevels).baseArrayLayer(0).layerCount(1);
 
                 int sourceStage, destinationStage;
                 if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
@@ -530,7 +554,7 @@ public class VulkanTexture extends Texture {
                     destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
                 } else {
                     throw new GdxRuntimeException("Unsupported layout transition!");
-                } // TODO: Add more transitions
+                }
 
                 vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, null, null, barrier);
             }
@@ -545,6 +569,92 @@ public class VulkanTexture extends Texture {
                         .imageSubresource(is -> is.aspectMask(VK_IMAGE_ASPECT_COLOR_BIT).mipLevel(0).baseArrayLayer(0).layerCount(1))
                         .imageOffset(off -> off.set(0, 0, 0)).imageExtent(ext -> ext.set(width, height, 1));
                 vkCmdCopyBufferToImage(commandBuffer, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, region);
+            }
+        });
+    }
+
+    /** Generates mipmaps for the given image using vkCmdBlitImage. The image must already have mip level 0 filled
+     * and all mip levels in TRANSFER_DST_OPTIMAL layout. After this call, all mip levels are in SHADER_READ_ONLY_OPTIMAL. */
+    private static void generateMipmapsCmd(VulkanDevice device, long image, int format, int texWidth, int texHeight, int mipLevels) {
+        device.executeSingleTimeCommands(commandBuffer -> {
+            try (MemoryStack stack = stackPush()) {
+                VkImageMemoryBarrier.Buffer barrier = VkImageMemoryBarrier.calloc(1, stack)
+                        .sType$Default()
+                        .image(image)
+                        .srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                        .dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
+                barrier.subresourceRange()
+                        .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                        .baseArrayLayer(0)
+                        .layerCount(1)
+                        .levelCount(1);
+
+                int mipWidth = texWidth;
+                int mipHeight = texHeight;
+
+                for (int i = 1; i < mipLevels; i++) {
+                    // Transition mip level i-1 from TRANSFER_DST to TRANSFER_SRC (it was filled by previous blit or initial copy)
+                    barrier.subresourceRange().baseMipLevel(i - 1);
+                    barrier.oldLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                    barrier.newLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+                    barrier.srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT);
+                    barrier.dstAccessMask(VK_ACCESS_TRANSFER_READ_BIT);
+
+                    vkCmdPipelineBarrier(commandBuffer,
+                            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                            null, null, barrier);
+
+                    // Set up the blit region
+                    VkImageBlit.Buffer blit = VkImageBlit.calloc(1, stack);
+                    blit.srcOffsets(0).set(0, 0, 0);
+                    blit.srcOffsets(1).set(mipWidth, mipHeight, 1);
+                    blit.srcSubresource()
+                            .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                            .mipLevel(i - 1)
+                            .baseArrayLayer(0)
+                            .layerCount(1);
+
+                    int nextMipWidth = mipWidth > 1 ? mipWidth / 2 : 1;
+                    int nextMipHeight = mipHeight > 1 ? mipHeight / 2 : 1;
+
+                    blit.dstOffsets(0).set(0, 0, 0);
+                    blit.dstOffsets(1).set(nextMipWidth, nextMipHeight, 1);
+                    blit.dstSubresource()
+                            .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+                            .mipLevel(i)
+                            .baseArrayLayer(0)
+                            .layerCount(1);
+
+                    // Blit from mip i-1 (TRANSFER_SRC) to mip i (TRANSFER_DST)
+                    vkCmdBlitImage(commandBuffer,
+                            image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            blit, VK_FILTER_LINEAR);
+
+                    // Transition mip level i-1 from TRANSFER_SRC to SHADER_READ_ONLY
+                    barrier.oldLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+                    barrier.newLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                    barrier.srcAccessMask(VK_ACCESS_TRANSFER_READ_BIT);
+                    barrier.dstAccessMask(VK_ACCESS_SHADER_READ_BIT);
+
+                    vkCmdPipelineBarrier(commandBuffer,
+                            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
+                            null, null, barrier);
+
+                    mipWidth = nextMipWidth;
+                    mipHeight = nextMipHeight;
+                }
+
+                // Transition the last mip level from TRANSFER_DST to SHADER_READ_ONLY
+                barrier.subresourceRange().baseMipLevel(mipLevels - 1);
+                barrier.oldLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                barrier.newLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                barrier.srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT);
+                barrier.dstAccessMask(VK_ACCESS_SHADER_READ_BIT);
+
+                vkCmdPipelineBarrier(commandBuffer,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
+                        null, null, barrier);
             }
         });
     }

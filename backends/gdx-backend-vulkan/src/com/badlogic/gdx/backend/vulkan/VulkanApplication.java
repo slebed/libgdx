@@ -764,7 +764,7 @@ public class VulkanApplication implements VulkanApplicationBase {
 
     @Override
     public ApplicationType getType() {
-        return ApplicationType.HeadlessDesktop; // Should be Desktop if it has windows
+        return ApplicationType.Desktop;
     }
 
     @Override

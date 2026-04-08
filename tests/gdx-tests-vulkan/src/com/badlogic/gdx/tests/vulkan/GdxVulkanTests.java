@@ -59,18 +59,18 @@ public class GdxVulkanTests {
         // Create a temporary list using Arrays.asList (this list might be fixed-size)
         List<Class<? extends GdxTest>> initialTests = Arrays.asList(
                 // @off
-                //VulkanClearScreenTest.class,
+                VulkanClearScreenTest.class,
                 VulkanScene2dTest.class,
-                //VulkanSpriteBatchPerformanceTest.class,
+                VulkanSpriteBatchPerformanceTest.class,
                 VulkanSpriteBatchPerformanceTest2.class,
                 VulkanSpriteBatchTest.class,
                 VulkanSpriteBatchStressTest.class,
-                //VulkanSpriteBatchTextureSwitchTest.class,
+                VulkanSpriteBatchTextureSwitchTest.class,
                 Vulkan3DCubeTest.class,
                 Vulkan3DTexturedCubeTest.class,
+                Vulkan3DLitTexturedCubeTest.class,
                 VulkanFreeTypeFontTest.class,
                 VulkanBenchmark3dTest.class
-                //Vulkan3DLitTexturedCubeTest.class
                 // @on
         );
 
