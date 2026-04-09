@@ -43,6 +43,7 @@ ipch/
 *.sdf
 *.class
 hs_err_pid*
+shader_cache/
 Thumbs.db
 
 libgdx-*.zip
