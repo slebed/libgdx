@@ -1,39 +1,143 @@
-![libGDX Logo](libgdx_logo.svg)
+# libGDX Vulkan Backend
 
-[![GitHub Actions Build Status](https://img.shields.io/github/actions/workflow/status/libgdx/libgdx/build-publish.yml?branch=master&label=GitHub%20Actions)](https://github.com/libgdx/libgdx/actions?query=workflow%3A%22Build+and+Publish%22)
+This is a fork of [libGDX](https://github.com/libgdx/libgdx) that adds a **Vulkan rendering backend** for desktop (Windows/Linux). The goal is to provide a drop-in replacement for `Lwjgl3Application` — same `ApplicationListener`, `SpriteBatch`, `BitmapFont`, `Scene2D`, etc. — powered by Vulkan instead of OpenGL.
 
-[![Latest Version](https://img.shields.io/nexus/r/com.badlogicgames.gdx/gdx?nexusVersion=2&server=https%3A%2F%2Foss.sonatype.org&label=Version)](https://search.maven.org/artifact/com.badlogicgames.gdx/gdx)
-[![Snapshots](https://img.shields.io/nexus/s/com.badlogicgames.gdx/gdx?server=https%3A%2F%2Foss.sonatype.org&label=Snapshots)](https://oss.sonatype.org/#nexus-search;gav~com.badlogicgames.gdx~gdx~~~~kw,versionexpand)
+Developers get OpenGL-like simplicity by default, with opt-in access to low-level Vulkan when needed.
 
-[![Discord Chat](https://img.shields.io/discord/348229412858101762?logo=discord)](https://libgdx.com/community/discord/)
+## Quick Start
 
-## Cross-platform Game Development Framework
-**[libGDX](https://libgdx.com) is a cross-platform Java game development framework based on OpenGL (ES), designed for Windows, Linux, macOS, Android, web browsers, and iOS.** It provides a robust and well-established environment for rapid prototyping and iterative development. Unlike other frameworks, libGDX does not impose a specific design or coding style, allowing you the freedom to create games according to your preferences.
+Replace `Lwjgl3Application` with `VulkanApplication`:
 
-## Open Source, Feature Packed, and Fostering a Large Third-Party Ecosystem
-libGDX is released under the [Apache 2.0 License](https://www.apache.org/licenses/LICENSE-2.0.html), offering unrestricted usage in both commercial and non-commercial projects. While not mandatory, we appreciate any credit given to libGDX when you release a game or app using it. Check out our [showcase](https://libgdx.com/showcase/) for a selection of popular libGDX-powered games. With libGDX, you gain access to a comprehensive set of tools and features to develop multi-platform 2D and 3D games using Java.
+```java
+public class MyGame extends ApplicationAdapter {
+    VulkanSpriteBatch batch;
+    VulkanTexture texture;
 
-Moreover, libGDX boasts a vibrant third-party ecosystem, with numerous [tools](https://libgdx.com/dev/tools/) and libraries that streamline development tasks. Explore the [awesome-libgdx](https://github.com/rafaskb/awesome-libgdx#readme) repository for a curated list of libGDX-centered libraries, serving as an excellent starting point for newcomers in the libGDX community.
+    public void create() {
+        batch = new VulkanSpriteBatch();
+        texture = new VulkanTexture(Gdx.files.internal("sprite.png"));
+    }
 
-![](https://libgdx.com/assets/images/index_showcase/game0.png)
-###### An example game created with libGDX: [Pathway](https://store.steampowered.com/app/546430/Pathway/) by Robotality. Discover more captivating games in our [Showcase](https://libgdx.com/showcase/).
+    public void render() {
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        batch.begin();
+        batch.draw(texture, 100, 100);
+        batch.end();
+    }
+}
 
-## Getting Started with libGDX / Documentation
-Thanks to Gradle, you can easily set up libGDX without the need to download the framework itself. Your favorite build tool can handle everything for you. Additionally, we offer a convenient [setup tool](https://libgdx.com/dev/#how-to-get-started-with-libgdx) that automates project creation and downloads all the necessary components. Check out our **[website](https://libgdx.com/wiki/start/setup)** for instructions on getting started or refer to our comprehensive **[wiki](https://libgdx.com/wiki/)**.
+// Launch with Vulkan instead of OpenGL
+new VulkanApplication(new MyGame(), new VulkanApplicationConfiguration());
+```
 
-- [Creating a libGDX Project](https://libgdx.com/wiki/start/setup)
-- [Building a Simple Game](https://libgdx.com/wiki/start/a-simple-game)
-- [Tutorials & Demos](https://libgdx.com/wiki/start/demos-and-tutorials)
+## What's Implemented
 
-We provide the libGDX [javadocs](https://javadoc.io/doc/com.badlogicgames.gdx) online for easy reference. Additionally, the javadocs are bundled with every libGDX distribution, ensuring smooth integration with your preferred IDE.
+### Core Infrastructure
+- **VulkanApplication** — full application lifecycle, multi-window support, GLFW integration
+- **VulkanGraphics** — complete `Graphics` interface implementation (FPS, delta time, display modes, monitors, HiDPI, fullscreen, vsync)
+- **VulkanBootstrap** — Vulkan instance, physical/logical device selection, VMA allocator, validation layers, debug messenger
+- **VulkanSwapchain** — swapchain creation/recreation with depth buffer, render pass management, resume render pass for FBO support
+- **VulkanDevice** — logical device wrapper with single-time command execution
+- **VulkanDeviceCapabilities** — runtime feature queries (descriptor indexing, timeline semaphores, dynamic rendering, etc.)
 
-## Community & Contribution
-Stay up to date with the **latest libGDX news** by following our [blog](https://libgdx.com/news/). For engaging discussions and support, join our official [libGDX Discord](https://libgdx.com/community/discord/).
+### Rendering
+- **VulkanSpriteBatch** — streaming vertex upload, texture array batching, descriptor indexing, blend modes
+- **VulkanSpriteBatchInstanced** — instanced rendering variant for particles/bullets
+- **VulkanTexture** — extends libGDX `Texture`, Pixmap/file loading, mipmap generation, setFilter/setWrap with sampler recreation, in-place reload
+- **VulkanFrameBuffer** — off-screen render targets with color + optional depth, LOAD_OP_LOAD resume render pass
+- **VulkanPipelineManager** — pipeline caching by render state key, invalidation on swapchain recreation
+- **VulkanDescriptorManager** — descriptor pool/set/layout management with partial binding support
+- **VulkanShaderManager** — SPIR-V loading + runtime GLSL compilation via Shaderc
 
-### Reporting Issues
-Use the **[Issue Tracker](https://github.com/libgdx/libgdx/issues)** here on GitHub to report any issues you encounter. Before submitting, please read our [Getting Help](https://libgdx.com/wiki/articles/getting-help) guide, which walks you through the process of reporting an issue effectively.
+### Scene2D / UI
+- **VulkanScrollPane** — touch/scroll interaction working
+- **VulkanScreenViewport** / **VulkanExtendViewport** — viewport implementations that skip GL viewport calls
+- **FreeType font rendering** via VulkanPixmapPacker
 
-### Contributing to the Codebase
-libGDX benefits greatly from contributions made by our dedicated developer community. We appreciate any assistance in making libGDX even better. Check out the [CONTRIBUTING.md](https://github.com/libgdx/libgdx/blob/master/.github/CONTRIBUTING.md) file for details on how to contribute. Note that contributing involves working directly with libGDX's source code, a process that regular users do not typically undertake. Refer to the [Working with the Source](https://libgdx.com/dev/from-source/) article for guidance.
+### 3D
+- **VulkanModelBatch** — basic model rendering pipeline
+- **SimpleColorShader** / **SimpleUnlitTextureShader** / **SimpleLitTextureShader** — vertex color, textured, and lit material shaders
+- **VulkanMesh** / **VulkanVertexData** / **VulkanIndexData** — GPU buffer management
+- **OBJ, G3DJ, G3DB loaders** — model loading with Vulkan texture integration
 
-You can also support our infrastructure (build server, web server, test devices) by contributing financially through our [Patreon](https://patreon.com/libgdx)!
+### Platform
+- **VulkanWindow** — GLFW window management, input, resize, focus, iconify callbacks
+- **DefaultVulkanInput** — keyboard, mouse, scroll, touch input via GLFW
+- **VulkanClipboard** / **VulkanCursor** — clipboard and custom cursor support
+- **VulkanGL20Impl** — GL20 compatibility shim (glClear, glActiveTexture, blend state as no-ops where Vulkan handles it natively)
+- **VulkanApplicationConfiguration** — mirrors `Lwjgl3ApplicationConfiguration` with Vulkan-specific options
+
+## Test Suite
+
+Tests live in `tests/gdx-tests-vulkan/` and serve as both API verification and usage examples:
+
+| Test | What it demonstrates |
+|------|---------------------|
+| VulkanClearScreenTest | Minimal Vulkan lifecycle |
+| VulkanSpriteBatchTest | Basic sprite rendering |
+| VulkanSpriteBatchStressTest | 10k-200k sprites, batcher comparison, frame metrics |
+| VulkanSpriteBatchPerformanceTest | Batch performance measurement |
+| VulkanSpriteBatchTextureSwitchTest | Multi-texture batch flushing |
+| VulkanFreeTypeFontTest | FreeType font generation with VulkanPixmapPacker |
+| VulkanScene2dTest | Scene2D UI with scrollpanes |
+| Vulkan3DCubeTest | Rotating 3D cube |
+| Vulkan3DTexturedCubeTest | Textured 3D cube |
+| Vulkan3DLitTexturedCubeTest | Lit + textured 3D cube |
+| VulkanBenchmark3dTest | OBJ/G3DJ/G3DB model loading |
+| TechDemo_BulletHell | Instanced rendering stress test |
+
+Run tests: `./gradlew :tests:gdx-tests-vulkan:run`
+
+## TODO
+
+### High Priority
+- [ ] FBO post-processing pipeline (render to texture, then composite)
+- [ ] GL20 compatibility layer — implement `glViewport`, `glScissor`, `glEnable`/`glDisable`
+- [ ] Texture atlas loading with VulkanTexture (AssetManager integration)
+- [ ] VulkanSkin for Scene2D (TextureAtlas-backed skin loading)
+
+### Medium Priority
+- [ ] Multi-window resource sharing (shared pipeline cache, descriptor layouts)
+- [ ] Compute shader support
+- [ ] MSAA (multi-sample anti-aliasing)
+- [ ] Vulkan 1.3 dynamic rendering (remove render pass objects)
+- [ ] SpriteBatch custom shader support
+
+### Low Priority / Future
+- [ ] Linux testing and validation
+- [ ] Vulkan memory budget tracking and reporting
+- [ ] Secondary command buffer recording (multi-threaded rendering)
+- [ ] Bindless textures
+- [ ] Ray tracing extensions (RTX)
+
+## Requirements
+
+- Java 17+
+- Vulkan 1.1+ capable GPU and drivers
+- LWJGL 3 (included via Gradle)
+
+Tested on: NVIDIA GeForce RTX 2080, Windows 10, Vulkan 1.3.280
+
+## Building
+
+```bash
+# Compile the Vulkan backend
+./gradlew :backends:gdx-backend-vulkan:compileJava
+
+# Compile and run tests
+./gradlew :tests:gdx-tests-vulkan:run
+```
+
+## Project Structure
+
+```
+backends/gdx-backend-vulkan/    # Vulkan backend implementation (77 classes)
+tests/gdx-tests-vulkan/         # Vulkan test suite and examples
+tests/gdx-tests-android/assets/data/vulkan/  # Vulkan shaders and test assets
+```
+
+## Upstream
+
+This fork is based on [libGDX](https://github.com/libgdx/libgdx) and maintains compatibility with the core `gdx` API. The Vulkan backend is additive — it does not modify the OpenGL backends or core framework behavior.
+
+Licensed under [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0.html).
