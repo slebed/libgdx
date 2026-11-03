@@ -3,6 +3,8 @@
 //
 // Blocks are persistently mapped host memory. A block is reused only once the submit that read it has completed
 // (Timeline serial), so a copy can never be overwritten while the GPU is still reading it.
+//
+// Requests are recorded in the order they were queued, so an update queued after an upload of the same image sees it finished.
 #pragma once
 
 #include <cstdint>
@@ -13,6 +15,12 @@
 
 namespace gdxvk {
 
+// A rectangle of one mip level, and where its (tightly packed) bytes start inside the data handed to uploadImage/updateImage.
+struct ImageRegion {
+    uint32_t level = 0, x = 0, y = 0, width = 0, height = 0;
+    VkDeviceSize dataOffset = 0;
+};
+
 class StagingRing {
 public:
     StagingRing(ContextHandles& h, VkDeviceSize blockSize);
@@ -21,10 +29,20 @@ public:
     StagingRing& operator=(const StagingRing&) = delete;
 
     // Thread-safe. Copy the bytes into a staging slice and queue the transfer, atomically, so the render thread can never
-    // record a copy whose bytes are still being written. Returns false if staging memory could not be allocated.
+    // record a copy whose bytes are still being written. Return false if staging memory could not be allocated.
     bool uploadBuffer(const void* data, VkDeviceSize size, VkBuffer dst, VkDeviceSize dstOffset);
-    // First upload of a freshly created VK_FORMAT_R8G8B8A8_UNORM image (layout UNDEFINED); leaves it SHADER_READ_ONLY_OPTIMAL.
-    bool uploadImage(const void* data, VkDeviceSize size, VkImage image, uint32_t width, uint32_t height);
+
+    // First upload into a freshly created image (layout UNDEFINED, `levels` mip levels, usage SAMPLED | TRANSFER_DST | TRANSFER_SRC).
+    // Writes `regions`; with `generateMips`, levels 1.. are then built from level 0 by a blit chain. Leaves SHADER_READ_ONLY_OPTIMAL.
+    bool uploadImage(const void* data, VkDeviceSize size, VkImage image, uint32_t width, uint32_t height, uint32_t levels,
+                     const std::vector<ImageRegion>& regions, bool generateMips, VkFilter blitFilter);
+
+    // Copy-on-write update (plan, Core decision 4): `newImage` (UNDEFINED) receives the first `copyLevels` levels of `oldImage`
+    // (SHADER_READ_ONLY_OPTIMAL, restored afterwards because draws recorded later this frame may still sample it), then `regions`
+    // on top, then optionally regenerated mips. Leaves `newImage` SHADER_READ_ONLY_OPTIMAL.
+    bool updateImage(const void* data, VkDeviceSize size, VkImage newImage, VkImage oldImage, uint32_t width, uint32_t height,
+                     uint32_t levels, uint32_t copyLevels, const std::vector<ImageRegion>& regions, bool generateMips,
+                     VkFilter blitFilter);
 
     // Render thread. Records all queued copies, with the barriers around them, into `cmd`.
     // Returns false when there was nothing to record. Every true return must be followed by markSubmitted().
@@ -45,17 +63,25 @@ private:
         uint64_t serial = 0;
     };
     struct Request {
-        VkBuffer src;
-        VkDeviceSize srcOffset, size;
-        VkBuffer dstBuffer; // or
-        VkDeviceSize dstOffset;
-        VkImage dstImage;
-        uint32_t width, height;
+        enum Kind { BufferCopy, ImageUpload, ImageUpdate } kind = BufferCopy;
+        VkBuffer src = VK_NULL_HANDLE;
+        VkDeviceSize srcOffset = 0, size = 0;
+        VkBuffer dstBuffer = VK_NULL_HANDLE;
+        VkDeviceSize dstOffset = 0;
+        VkImage image = VK_NULL_HANDLE, oldImage = VK_NULL_HANDLE;
+        uint32_t width = 0, height = 0, levels = 1, copyLevels = 0;
+        bool generateMips = false;
+        VkFilter blitFilter = VK_FILTER_LINEAR;
+        std::vector<ImageRegion> regions;
     };
 
     bool allocSlice(VkDeviceSize size, Block*& block, VkDeviceSize& offset); // requires mutex_
     Block* newBlock(VkDeviceSize size);
     void destroyBlock(Block* b);
+    bool queueImage(Request::Kind kind, const void* data, VkDeviceSize size, VkImage image, VkImage oldImage, uint32_t width,
+                    uint32_t height, uint32_t levels, uint32_t copyLevels, const std::vector<ImageRegion>& regions, bool generateMips,
+                    VkFilter blitFilter);
+    void recordImage(VkCommandBuffer cmd, const Request& r);
 
     ContextHandles& h_;
     VkDeviceSize blockSize_;

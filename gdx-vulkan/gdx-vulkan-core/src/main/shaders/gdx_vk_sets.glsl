@@ -4,6 +4,7 @@
 #ifndef GDX_VK_SETS_GLSL
 #define GDX_VK_SETS_GLSL
 
+#ifndef GDX_SKIP_SET0 // define before including to use set 1 only (a shader that declares set 0 expects it to be bound)
 // Set 0 binding 0: camera and frame globals. At most 16 KB. UNIFORM_BUFFER_DYNAMIC.
 layout(std140, set = 0, binding = 0) uniform GdxFrame {
     vec4 u_frameColor;
@@ -14,6 +15,8 @@ layout(std140, set = 0, binding = 0) uniform GdxFrame {
 layout(std430, set = 0, binding = 1) readonly buffer GdxData {
     vec4 gdx_data[];
 };
+
+#endif
 
 // Set 1 binding 0: textures.
 #ifdef GDX_TIER_A

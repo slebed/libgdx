@@ -45,6 +45,7 @@ FrameStatus mapResult(VkResult r) {
 struct Frame {
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkCommandBuffer uploadCmd = VK_NULL_HANDLE; // staged uploads, recorded at endFrame, submitted ahead of `cmd`
     VkSemaphore acquired = VK_NULL_HANDLE;
     uint64_t serial = 0; // submit serial of the last frame recorded in this slot; 0 = never submitted
 };
@@ -152,6 +153,7 @@ struct Presenter::Impl {
             ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
             ai.commandBufferCount = 1;
             if (vkAllocateCommandBuffers(h.device, &ai, &f.cmd) != VK_SUCCESS) return false;
+            if (vkAllocateCommandBuffers(h.device, &ai, &f.uploadCmd) != VK_SUCCESS) return false;
             VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
             if (vkCreateSemaphore(h.device, &si, nullptr, &f.acquired) != VK_SUCCESS) return false;
         }
@@ -448,9 +450,6 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(f.cmd, &bi);
 
-    // Uploads queued by any thread since the last frame: recorded ahead of everything this frame draws.
-    s.stagingRecorded = h.staging->recordPending(f.cmd);
-
     if (h.tierA) { // Tier A: one global update-after-bind table, bound once per command buffer
         VkDescriptorSet table = h.layouts->globalTextureSet();
         vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, h.layouts->pipelineLayout(), 1, 1, &table, 0, nullptr);
@@ -549,8 +548,17 @@ FrameStatus Presenter::endFrame(bool capture) {
     si.waitSemaphoreCount = 1;
     si.pWaitSemaphores = &f.acquired;
     si.pWaitDstStageMask = &waitStage;
-    si.commandBufferCount = 1;
-    si.pCommandBuffers = &f.cmd;
+    // Everything staged up to now, by any thread, goes into its own command buffer that runs ahead of the frame's draws in the same
+    // submit. Recording it here, not at beginFrame, means a texture created or changed mid-frame is already uploaded when the frame's
+    // draws run; a renamed image keeps its old contents for the draws that were recorded before the change.
+    VkCommandBufferBeginInfo ubi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    ubi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(f.uploadCmd, &ubi);
+    s.stagingRecorded = h.staging->recordPending(f.uploadCmd);
+    vkEndCommandBuffer(f.uploadCmd);
+    VkCommandBuffer cmds[2] = {f.uploadCmd, f.cmd};
+    si.commandBufferCount = s.stagingRecorded ? 2 : 1;
+    si.pCommandBuffers = s.stagingRecorded ? cmds : &f.cmd;
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = &s.renderDone[s.imageIndex];
     VkResult r = h.timeline->submit(si, &f.serial);

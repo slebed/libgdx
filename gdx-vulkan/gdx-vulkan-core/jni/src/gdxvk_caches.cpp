@@ -27,7 +27,7 @@ VkSampler SamplerCache::get(SamplerKey key) {
     si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     si.anisotropyEnable = key.anisotropy > 1 ? VK_TRUE : VK_FALSE;
     si.maxAnisotropy = static_cast<float>(key.anisotropy);
-    si.maxLod = VK_LOD_CLAMP_NONE;
+    si.maxLod = key.mipmapped ? VK_LOD_CLAMP_NONE : 0.0f;
     si.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
     VkSampler s = VK_NULL_HANDLE;
     if (vkCreateSampler(h_.device, &si, nullptr, &s) != VK_SUCCESS) return VK_NULL_HANDLE;

@@ -10,12 +10,38 @@ namespace gdxvk {
 
 namespace {
 constexpr uint64_t kPoolSize = 32ull << 20;
+
+VkFormat vkFormatOf(TexFormat f) {
+    switch (f) {
+        case TexFormat::R8Alpha: return VK_FORMAT_R8_UNORM;
+        case TexFormat::Rg8LuminanceAlpha: return VK_FORMAT_R8G8_UNORM;
+        default: return VK_FORMAT_R8G8B8A8_UNORM;
+    }
 }
+
+VkComponentMapping swizzleOf(TexFormat f) {
+    switch (f) {
+        case TexFormat::R8Alpha: // GL_ALPHA: rgb 0, alpha from the single channel
+            return {VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_R};
+        case TexFormat::Rg8LuminanceAlpha: // GL_LUMINANCE_ALPHA: rgb = luminance, alpha = second channel
+            return {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G};
+        default: return {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+    }
+}
+
+uint32_t levelExtent(uint32_t base, uint32_t level) { return std::max(1u, base >> level); }
+
+uint32_t fullChain(uint32_t w, uint32_t h) {
+    uint32_t n = 1;
+    for (uint32_t m = std::max(w, h); m > 1; m >>= 1) ++n;
+    return n;
+}
+} // namespace
 
 Resources::Resources(ContextHandles& h) : h_(h) {}
 
 Resources::~Resources() {
-    // The context has waited for the device and flushed the deletion queue only after us, so run it now: it owns the
+    // The context has waited for the device and flushes the deletion queue only after us, so run it now: it owns the
     // destructors for everything still retired.
     h_.deletion->flushAll();
     for (TextureEntry& t : textures_) {
@@ -113,9 +139,9 @@ void Resources::destroyBuffer(int id) {
         bufferBytesLive_ -= e.size;
         --buffersLive_;
     }
-    // The id is reusable now; the bytes are not, until the GPU has finished with every submit that could read them.
-    // One serial later than usual (see DeletionQueue::retire): a copy into this range may still be queued for the next frame, and the
-    // range must not be handed to a new owner, whose copy would race it, until that frame has completed.
+    // The id is reusable now; the bytes are not, until the GPU has finished with every submit that could read them. One serial
+    // later than usual (see DeletionQueue::retire): a copy into this range may still be queued for the next frame, and the range
+    // must not be handed to a new owner, whose copy would race it, until that frame has completed.
     h_.deletion->retire(
         [this, block, e]() {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -126,24 +152,62 @@ void Resources::destroyBuffer(int id) {
 
 // --------------------------------------------------------------- textures
 
-bool Resources::bindSampler(TextureEntry& t, const SamplerKey& key, int* newSlot, DescriptorLayouts::TextureSet* newSet) {
+bool Resources::makeImage(uint32_t w, uint32_t h, TexFormat f, uint32_t levels, VkImage& image, VmaAllocation& alloc, VkImageView& view) {
+    VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = vkFormatOf(f);
+    ii.extent = {w, h, 1};
+    ii.mipLevels = levels;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    // TRANSFER_SRC: blit chain for mips, and the source of a copy-on-write update.
+    ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VmaAllocationCreateInfo ai{};
+    ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    if (vmaCreateImage(h_.allocator, &ii, &ai, &image, &alloc, nullptr) != VK_SUCCESS) return false;
+
+    VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vi.image = image;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = ii.format;
+    vi.components = swizzleOf(f);
+    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1};
+    if (vkCreateImageView(h_.device, &vi, nullptr, &view) != VK_SUCCESS) {
+        vmaDestroyImage(h_.allocator, image, alloc);
+        return false;
+    }
+    return true;
+}
+
+bool Resources::blitFilter(TexFormat f, VkFilter* filter) {
+    VkFormatProperties p;
+    vkGetPhysicalDeviceFormatProperties(h_.physical, vkFormatOf(f), &p);
+    const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
+    if ((p.optimalTilingFeatures & need) != need) return false;
+    *filter = (p.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+    return true;
+}
+
+bool Resources::bindSampler(VkImageView view, const SamplerKey& key, int* newSlot, DescriptorLayouts::TextureSet* newSet) {
     VkSampler sampler = h_.samplers->get(key);
     if (sampler == VK_NULL_HANDLE) return false;
     if (h_.tierA) {
         const int slot = h_.layouts->allocSlot();
         if (slot < 0) return false;
-        h_.layouts->writeSlot(slot, t.view, sampler);
+        h_.layouts->writeSlot(slot, view, sampler);
         *newSlot = slot;
     } else {
         DescriptorLayouts::TextureSet set;
         if (!h_.layouts->allocTextureSet(set)) return false;
-        h_.layouts->writeTextureSet(set, t.view, sampler);
+        h_.layouts->writeTextureSet(set, view, sampler);
         *newSet = set;
     }
     return true;
 }
 
-void Resources::retireSampler(int slot, DescriptorLayouts::TextureSet set) {
+void Resources::retireBinding(int slot, DescriptorLayouts::TextureSet set) {
     DescriptorLayouts* layouts = h_.layouts;
     if (h_.tierA) {
         if (slot >= 0) h_.deletion->retire([layouts, slot]() { layouts->freeSlot(slot); });
@@ -152,42 +216,56 @@ void Resources::retireSampler(int slot, DescriptorLayouts::TextureSet set) {
     }
 }
 
-int Resources::createTexture(uint32_t width, uint32_t height, const void* rgba, const SamplerKey& sampler) {
-    if (width == 0 || height == 0 || rgba == nullptr) return -1;
+void Resources::retireImage(VkImage image, VmaAllocation alloc, VkImageView view) {
+    VkDevice device = h_.device;
+    VmaAllocator allocator = h_.allocator;
+    // A copy into this image may still be queued for the next frame, so wait one submit longer than usual (see retire()).
+    h_.deletion->retire(
+        [device, allocator, image, alloc, view]() {
+            vkDestroyImageView(device, view, nullptr);
+            vmaDestroyImage(allocator, image, alloc);
+        },
+        1);
+}
+
+int Resources::createTexture(const TextureDesc& d, const void* data, uint64_t dataBytes, const SamplerKey& sampler) {
+    if (d.width == 0 || d.height == 0 || data == nullptr || d.uploadedLevels == 0) return -1;
+    if (d.generateMips && d.uploadedLevels != 1) return -1;
+    const uint32_t bpp = bytesPerPixel(d.format);
+    const uint32_t levels = d.generateMips ? fullChain(d.width, d.height) : d.uploadedLevels;
+    if (levels > fullChain(d.width, d.height)) return -1;
+
+    std::vector<ImageRegion> regions;
+    uint64_t offset = 0;
+    for (uint32_t l = 0; l < d.uploadedLevels; ++l) {
+        ImageRegion r;
+        r.level = l;
+        r.width = levelExtent(d.width, l);
+        r.height = levelExtent(d.height, l);
+        r.dataOffset = offset;
+        offset += static_cast<uint64_t>(r.width) * r.height * bpp;
+        regions.push_back(r);
+    }
+    if (offset != dataBytes) return -1;
+
+    VkFilter filter = VK_FILTER_LINEAR;
+    if (d.generateMips && !blitFilter(d.format, &filter)) return -1;
+
     TextureEntry t;
-
-    VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-    ii.imageType = VK_IMAGE_TYPE_2D;
-    ii.format = VK_FORMAT_R8G8B8A8_UNORM;
-    ii.extent = {width, height, 1};
-    ii.mipLevels = 1;
-    ii.arrayLayers = 1;
-    ii.samples = VK_SAMPLE_COUNT_1_BIT;
-    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VmaAllocationCreateInfo ai{};
-    ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-    if (vmaCreateImage(h_.allocator, &ii, &ai, &t.image, &t.alloc, nullptr) != VK_SUCCESS) return -1;
-
-    VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-    vi.image = t.image;
-    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    vi.format = ii.format;
-    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    if (vkCreateImageView(h_.device, &vi, nullptr, &t.view) != VK_SUCCESS) {
-        vmaDestroyImage(h_.allocator, t.image, t.alloc);
+    t.width = d.width;
+    t.height = d.height;
+    t.format = d.format;
+    t.levels = levels;
+    t.sampler = sampler;
+    if (!makeImage(d.width, d.height, d.format, levels, t.image, t.alloc, t.view)) return -1;
+    if (!bindSampler(t.view, sampler, &t.slot, &t.set)) {
+        retireImage(t.image, t.alloc, t.view);
         return -1;
     }
-    auto abandon = [&]() {
-        vkDestroyImageView(h_.device, t.view, nullptr);
-        vmaDestroyImage(h_.allocator, t.image, t.alloc);
+    if (!h_.staging->uploadImage(data, dataBytes, t.image, d.width, d.height, levels, regions, d.generateMips, filter)) {
+        retireBinding(t.slot, t.set);
+        retireImage(t.image, t.alloc, t.view);
         return -1;
-    };
-    if (!bindSampler(t, sampler, &t.slot, &t.set)) return abandon();
-    if (!h_.staging->uploadImage(rgba, static_cast<VkDeviceSize>(width) * height * 4, t.image, width, height)) {
-        retireSampler(t.slot, t.set);
-        return abandon();
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
@@ -205,30 +283,86 @@ int Resources::createTexture(uint32_t width, uint32_t height, const void* rgba, 
     return id;
 }
 
-bool Resources::setTextureSampler(int id, const SamplerKey& sampler) {
-    TextureEntry copy;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (id < 0 || static_cast<size_t>(id) >= textures_.size() || !textures_[id].live) return false;
-        copy = textures_[id];
+bool Resources::updateTexture(int id, uint32_t level, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const void* data, uint64_t dataBytes) {
+    // Held throughout: the rename reads the entry, builds the replacement and swaps it in, and two updates of one texture must not
+    // both rename the same old image.
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (id < 0 || static_cast<size_t>(id) >= textures_.size() || !textures_[id].live) return false;
+    TextureEntry& t = textures_[id];
+    if (level >= t.levels || w == 0 || h == 0) return false;
+    if (x + w > levelExtent(t.width, level) || y + h > levelExtent(t.height, level)) return false;
+    if (dataBytes != static_cast<uint64_t>(w) * h * bytesPerPixel(t.format)) return false;
+
+    TextureEntry fresh = t;
+    if (!makeImage(t.width, t.height, t.format, t.levels, fresh.image, fresh.alloc, fresh.view)) return false;
+    fresh.slot = -1;
+    fresh.set = DescriptorLayouts::TextureSet();
+    if (!bindSampler(fresh.view, t.sampler, &fresh.slot, &fresh.set)) {
+        retireImage(fresh.image, fresh.alloc, fresh.view);
+        return false;
     }
+    ImageRegion r;
+    r.level = level;
+    r.x = x;
+    r.y = y;
+    r.width = w;
+    r.height = h;
+    r.dataOffset = 0;
+    if (!h_.staging->updateImage(data, dataBytes, fresh.image, t.image, t.width, t.height, t.levels, t.levels, {r}, false, VK_FILTER_NEAREST)) {
+        retireBinding(fresh.slot, fresh.set);
+        retireImage(fresh.image, fresh.alloc, fresh.view);
+        return false;
+    }
+    const TextureEntry old = t;
+    t = fresh;
+    retireBinding(old.slot, old.set);
+    retireImage(old.image, old.alloc, old.view);
+    return true;
+}
+
+bool Resources::regenerateMips(int id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (id < 0 || static_cast<size_t>(id) >= textures_.size() || !textures_[id].live) return false;
+    TextureEntry& t = textures_[id];
+    VkFilter filter;
+    if (!blitFilter(t.format, &filter)) return false;
+    const uint32_t levels = fullChain(t.width, t.height);
+
+    TextureEntry fresh = t;
+    fresh.levels = levels;
+    if (!makeImage(t.width, t.height, t.format, levels, fresh.image, fresh.alloc, fresh.view)) return false;
+    fresh.slot = -1;
+    fresh.set = DescriptorLayouts::TextureSet();
+    if (!bindSampler(fresh.view, t.sampler, &fresh.slot, &fresh.set)) {
+        retireImage(fresh.image, fresh.alloc, fresh.view);
+        return false;
+    }
+    // Copy level 0 from the old image and rebuild everything below it.
+    if (!h_.staging->updateImage(nullptr, 0, fresh.image, t.image, t.width, t.height, levels, 1, {}, true, filter)) {
+        retireBinding(fresh.slot, fresh.set);
+        retireImage(fresh.image, fresh.alloc, fresh.view);
+        return false;
+    }
+    const TextureEntry old = t;
+    t = fresh;
+    retireBinding(old.slot, old.set);
+    retireImage(old.image, old.alloc, old.view);
+    return true;
+}
+
+bool Resources::setTextureSampler(int id, const SamplerKey& sampler) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (id < 0 || static_cast<size_t>(id) >= textures_.size() || !textures_[id].live) return false;
+    TextureEntry& t = textures_[id];
     int newSlot = -1;
     DescriptorLayouts::TextureSet newSet;
-    if (!bindSampler(copy, sampler, &newSlot, &newSet)) return false;
-    int oldSlot;
-    DescriptorLayouts::TextureSet oldSet;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!textures_[id].live) { // destroyed meanwhile: give the new binding back
-            retireSampler(newSlot, newSet);
-            return false;
-        }
-        oldSlot = textures_[id].slot;
-        oldSet = textures_[id].set;
-        textures_[id].slot = newSlot;
-        textures_[id].set = newSet;
-    }
-    retireSampler(oldSlot, oldSet);
+    if (!bindSampler(t.view, sampler, &newSlot, &newSet)) return false;
+    const int oldSlot = t.slot;
+    const DescriptorLayouts::TextureSet oldSet = t.set;
+    t.slot = newSlot;
+    t.set = newSet;
+    t.sampler = sampler;
+    retireBinding(oldSlot, oldSet);
     return true;
 }
 
@@ -242,16 +376,8 @@ void Resources::destroyTexture(int id) {
         freeTextureIds_.push_back(id);
         --texturesLive_;
     }
-    retireSampler(t.slot, t.set);
-    VkDevice device = h_.device;
-    VmaAllocator allocator = h_.allocator;
-    // The upload recorded for this image may belong to the next frame, so wait one submit longer than usual (see retire()).
-    h_.deletion->retire(
-        [device, allocator, t]() {
-            vkDestroyImageView(device, t.view, nullptr);
-            vmaDestroyImage(allocator, t.image, t.alloc);
-        },
-        1);
+    retireBinding(t.slot, t.set);
+    retireImage(t.image, t.alloc, t.view);
 }
 
 bool Resources::textureBinding(int id, int* slot, VkDescriptorSet* set) {
@@ -259,6 +385,15 @@ bool Resources::textureBinding(int id, int* slot, VkDescriptorSet* set) {
     if (id < 0 || static_cast<size_t>(id) >= textures_.size() || !textures_[id].live) return false;
     *slot = textures_[id].slot;
     *set = textures_[id].set.set;
+    return true;
+}
+
+bool Resources::textureInfo(int id, uint32_t* width, uint32_t* height, uint32_t* levels) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (id < 0 || static_cast<size_t>(id) >= textures_.size() || !textures_[id].live) return false;
+    *width = textures_[id].width;
+    *height = textures_[id].height;
+    *levels = textures_[id].levels;
     return true;
 }
 

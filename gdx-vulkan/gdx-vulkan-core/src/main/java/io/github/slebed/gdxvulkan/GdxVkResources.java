@@ -58,12 +58,53 @@ public final class GdxVkResources {
         GdxVkNative.nativeDestroyBuffer(context.nativeHandle(), id);
     }
 
+    /** R8G8B8A8, 4 bytes per texel. */
+    public static final int FORMAT_RGBA8 = 0;
+    /** R8, 1 byte per texel, sampled as (0, 0, 0, r): GL_ALPHA. */
+    public static final int FORMAT_ALPHA = 1;
+    /** R8G8, 2 bytes per texel, sampled as (r, r, r, g): GL_LUMINANCE_ALPHA. */
+    public static final int FORMAT_LUMINANCE_ALPHA = 2;
+
+    public static int bytesPerTexel(int format) {
+        return format == FORMAT_RGBA8 ? 4 : format == FORMAT_LUMINANCE_ALPHA ? 2 : 1;
+    }
+
     /** @param rgba width * height * 4 bytes, RGBA8, row 0 at the top */
     public int createTexture(int width, int height, byte[] rgba, GdxVkSampler sampler) {
-        int id = GdxVkNative.nativeCreateTexture(context.nativeHandle(), width, height, rgba, sampler.minFilter, sampler.magFilter,
-            sampler.mipFilter, sampler.wrapU, sampler.wrapV, sampler.anisotropy);
-        if (id < 0) throw new VulkanOutOfMemoryException("Could not create a " + width + "x" + height + " texture (table full?)");
+        return createTexture(width, height, FORMAT_RGBA8, 1, false, rgba, sampler);
+    }
+
+    /**
+     * @param uploadedLevels how many mip levels {@code data} holds, tightly packed, level 0 first
+     * @param generateMips build the rest of the chain on the GPU (then {@code uploadedLevels} must be 1)
+     */
+    public int createTexture(int width, int height, int format, int uploadedLevels, boolean generateMips, byte[] data, GdxVkSampler sampler) {
+        int id = GdxVkNative.nativeCreateTexture(context.nativeHandle(), width, height, format, uploadedLevels, generateMips, data,
+            sampler.minFilter, sampler.magFilter, sampler.mipFilter, sampler.wrapU, sampler.wrapV, sampler.anisotropy);
+        if (id < 0) throw new VulkanOutOfMemoryException("Could not create a " + width + "x" + height + " texture (table full, or bad arguments)");
         return id;
+    }
+
+    /**
+     * Rewrites a rectangle of one mip level (tightly packed in the texture's format). The texture is renamed (new image and
+     * slot, old ones retired), so draws already recorded this frame still see the old contents.
+     */
+    public void updateTexture(int id, int level, int x, int y, int w, int h, byte[] data) {
+        if (!GdxVkNative.nativeUpdateTexture(context.nativeHandle(), id, level, x, y, w, h, data)) {
+            throw new IllegalArgumentException("updateTexture failed for texture " + id + " (no such texture, or region out of bounds)");
+        }
+    }
+
+    /** Rebuilds mip levels 1.. from level 0 on the GPU, giving the texture a full chain. */
+    public void regenerateMips(int id) {
+        if (!GdxVkNative.nativeRegenerateMips(context.nativeHandle(), id)) {
+            throw new IllegalArgumentException("regenerateMips failed for texture " + id + " (no such texture, or format cannot be blitted)");
+        }
+    }
+
+    /** @return {width, height, levels}, or null if there is no such texture */
+    public int[] textureInfo(int id) {
+        return GdxVkNative.nativeTextureInfo(context.nativeHandle(), id);
     }
 
     /** Changes the sampler. The texture gets a new table slot or descriptor set; the old one is retired. */

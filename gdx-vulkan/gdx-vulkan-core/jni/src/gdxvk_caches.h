@@ -18,8 +18,9 @@ struct SamplerKey {
     VkSamplerAddressMode wrapU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     VkSamplerAddressMode wrapV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     uint32_t anisotropy = 1; // whole numbers only, so the key is exact; clamped to the device limit
+    bool mipmapped = true;   // false: only level 0 is ever sampled (GL min filters NEAREST and LINEAR)
 
-    auto tie() const { return std::make_tuple(minFilter, magFilter, mipmapMode, wrapU, wrapV, anisotropy); }
+    auto tie() const { return std::make_tuple(minFilter, magFilter, mipmapMode, wrapU, wrapV, anisotropy, mipmapped); }
     bool operator<(const SamplerKey& o) const { return tie() < o.tie(); }
 };
 

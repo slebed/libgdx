@@ -47,7 +47,9 @@ gdxvk::SamplerKey samplerKey(jint minF, jint magF, jint mipF, jint wrapU, jint w
     gdxvk::SamplerKey k;
     k.minFilter = filter(minF);
     k.magFilter = filter(magF);
-    k.mipmapMode = mipF == 0 ? VK_SAMPLER_MIPMAP_MODE_NEAREST : VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    // mip filter: 0 nearest, 1 linear, 2 = no mipmapping (level 0 only)
+    k.mipmapMode = mipF == 1 ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    k.mipmapped = mipF != 2;
     k.wrapU = wrap(wrapU);
     k.wrapV = wrap(wrapV);
     k.anisotropy = static_cast<uint32_t>(aniso < 1 ? 1 : aniso);
@@ -267,17 +269,52 @@ JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDestroy
     res(ctx).destroyBuffer(id);
 }
 
+// `data` holds `uploadedLevels` tightly packed mip levels, level 0 first. format: 0 RGBA8, 1 alpha (R8), 2 luminance-alpha (RG8).
 JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateTexture(JNIEnv* env, jclass, jlong ctx, jint width,
-                                                                                        jint height, jbyteArray rgba, jint minFilter,
-                                                                                        jint magFilter, jint mipFilter, jint wrapU,
-                                                                                        jint wrapV, jint anisotropy) {
-    if (rgba == nullptr || env->GetArrayLength(rgba) < width * height * 4) return -1;
-    jbyte* p = static_cast<jbyte*>(env->GetPrimitiveArrayCritical(rgba, nullptr));
+                                                                                        jint height, jint format, jint uploadedLevels,
+                                                                                        jboolean generateMips, jbyteArray data,
+                                                                                        jint minFilter, jint magFilter, jint mipFilter,
+                                                                                        jint wrapU, jint wrapV, jint anisotropy) {
+    if (data == nullptr || format < 0 || format > 2) return -1;
+    gdxvk::TextureDesc desc;
+    desc.width = static_cast<uint32_t>(width);
+    desc.height = static_cast<uint32_t>(height);
+    desc.format = static_cast<gdxvk::TexFormat>(format);
+    desc.uploadedLevels = static_cast<uint32_t>(uploadedLevels);
+    desc.generateMips = generateMips == JNI_TRUE;
+    const jsize bytes = env->GetArrayLength(data);
+    jbyte* p = static_cast<jbyte*>(env->GetPrimitiveArrayCritical(data, nullptr));
     if (p == nullptr) return -1;
-    const int id = res(ctx).createTexture(static_cast<uint32_t>(width), static_cast<uint32_t>(height), p,
-                                          samplerKey(minFilter, magFilter, mipFilter, wrapU, wrapV, anisotropy));
-    env->ReleasePrimitiveArrayCritical(rgba, p, JNI_ABORT);
+    const int id = res(ctx).createTexture(desc, p, static_cast<uint64_t>(bytes), samplerKey(minFilter, magFilter, mipFilter, wrapU, wrapV, anisotropy));
+    env->ReleasePrimitiveArrayCritical(data, p, JNI_ABORT);
     return id;
+}
+
+JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeUpdateTexture(JNIEnv* env, jclass, jlong ctx, jint id,
+                                                                                            jint level, jint x, jint y, jint w, jint h,
+                                                                                            jbyteArray data) {
+    if (data == nullptr) return JNI_FALSE;
+    const jsize bytes = env->GetArrayLength(data);
+    jbyte* p = static_cast<jbyte*>(env->GetPrimitiveArrayCritical(data, nullptr));
+    if (p == nullptr) return JNI_FALSE;
+    const bool ok = res(ctx).updateTexture(id, static_cast<uint32_t>(level), static_cast<uint32_t>(x), static_cast<uint32_t>(y),
+                                           static_cast<uint32_t>(w), static_cast<uint32_t>(h), p, static_cast<uint64_t>(bytes));
+    env->ReleasePrimitiveArrayCritical(data, p, JNI_ABORT);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeRegenerateMips(JNIEnv*, jclass, jlong ctx, jint id) {
+    return res(ctx).regenerateMips(id) ? JNI_TRUE : JNI_FALSE;
+}
+
+// [width, height, levels] or null
+JNIEXPORT jintArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeTextureInfo(JNIEnv* env, jclass, jlong ctx, jint id) {
+    uint32_t w, h, l;
+    if (!res(ctx).textureInfo(id, &w, &h, &l)) return nullptr;
+    const jint v[3] = {static_cast<jint>(w), static_cast<jint>(h), static_cast<jint>(l)};
+    jintArray out = env->NewIntArray(3);
+    env->SetIntArrayRegion(out, 0, 3, v);
+    return out;
 }
 
 JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeSetTextureSampler(JNIEnv*, jclass, jlong ctx, jint id,

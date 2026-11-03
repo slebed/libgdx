@@ -12,16 +12,16 @@ the plan names; the phone is currently unplugged.
 
 | Section | Done | Partial | Not started | Total |
 |---|---|---|---|---|
-| Core decisions | 25 | 6 | 25 | 56 |
+| Core decisions | 30 | 7 | 19 | 56 |
 | Phase 1a: Extraction, window surfaces and CI | 13 | 7 | 2 | 22 |
 | Phase 1b: Memory, layout and caches | 15 | 1 | 4 | 20 |
-| Phase 2: Unmodified 2D | 1 | 1 | 21 | 23 |
+| Phase 2: Unmodified 2D | 4 | 2 | 18 | 24 |
 | Phase 3: Stock FrameBuffer | 0 | 0 | 13 | 13 |
 | Phase 4: Android lifecycle | 0 | 2 | 10 | 12 |
 | Phase 5: 3D with stock models | 0 | 0 | 12 | 12 |
 | Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 1 | 0 | 4 | 5 |
-| **All** | **55** | **17** | **95** | **167** |
+| **All** | **63** | **19** | **86** | **168** |
 ---
 
 ## Core decisions
@@ -48,20 +48,20 @@ the plan names; the phone is currently unplugged.
 - [x] SPIRV-Reflect validates every declared `(set, binding, type)` at shader load and fails naming the shader
 
 ### 3. GL20 shim scope (`VulkanGL20`)
-- [ ] `glGenTexture`, `glBindTexture`, `glTexImage2D`, `glTexSubImage2D`, `glCompressedTexImage2D`, `glTexParameteri`, `glGenerateMipmap`, `glDeleteTexture`, `glPixelStorei`
-- [ ] Lazy `VkImage` creation (at `glGenerateMipmap` or first draw), level > 0 uploads
+- [~] `glGenTexture`, `glBindTexture`, `glActiveTexture`, `glTexImage2D`, `glTexSubImage2D`, `glTexParameteri/f`, `glGenerateMipmap`, `glDeleteTexture`, `glPixelStorei` done and tested with stock `Texture`/`Pixmap`; `glCompressedTexImage2D` throws (not started); only `GL_TEXTURE_2D` (no cube maps)
+- [x] Lazy `VkImage` creation at first use (`VulkanGL20.nativeTexture`), once the mip chain is known; level > 0 uploads; `glGenerateMipmap` by GPU blit chain
 - [ ] Ordered state packets: `glClear`, `glClearColor`, `glViewport`, `glScissor`, `glEnable`/`glDisable` (scissor, blend, depth), `glBindFramebuffer`
 - [ ] Buffers: `glGenBuffer`, `glBindBuffer`, `glBufferData`, `glBufferSubData`, `glDeleteBuffer`
 - [ ] Framebuffers: `glGenFramebuffer`, `glFramebufferTexture2D`, renderbuffers, `glCheckFramebufferStatus`, deletes
-- [ ] Query table (`VulkanGL20Queries.java`): extension strings, `GL_MAX_TEXTURE_SIZE`, anisotropy, `GL_VIEWPORT`, `GL_FRAMEBUFFER_BINDING`, `glGetString(GL_VERSION)`
+- [x] Query table (in `VulkanGL20`, not a separate `VulkanGL20Queries`): extension strings, `GL_MAX_TEXTURE_SIZE`, anisotropy, `GL_VIEWPORT` (last `glViewport`), `GL_FRAMEBUFFER_BINDING` (0), `glGetString(GL_VERSION)`; unknown enums log once and return 0
 - [ ] `Gdx.gl30` always null (nothing sets `Gdx.gl*` yet)
-- [~] Native foundation exists: thread-safe buffer and RGBA8 texture resources with deferred deletion (`GdxVkResources`), no GL handle layer on top
+- [~] Whole interface covered: all 162 `GL20` methods exist (generated from libGDX's `GL20.java` by `tools/generate_gl20_base.py`); drawing, programs and vertex state throw a message naming the call and pointing at the Vulkan batches; pure state (blend, depth, scissor, clear, ...) is accepted and ignored until the command stream exists. Buffer and framebuffer GL calls still throw
 
 ### 4. Copy-on-write renaming
-- [~] Sampler change: new slot/set, old one retired (done, soak-tested ~1,000/s); no full-upload or sub-image rename yet
-- [ ] Rename trigger: resource referenced by a recorded draw/dispatch since the last submit
-- [ ] Full-upload rename (new image + slot, GL handle repointed)
-- [ ] Sub-image upload rename (`vkCmdCopyImage` from the old image, then the region)
+- [x] Sampler change: new slot/set, old one retired (soak-tested ~1,000/s, bounded sampler count)
+- [~] Rename trigger: every pixel change after the image exists renames it (conservative); the "referenced by a recorded draw since the last submit" optimisation is not done, so a change before first use is applied in place on the CPU copy and costs nothing
+- [x] Full-upload rename: same-shape `glTexImage2D` reload renames; a different size or format redefines the texture, as GL does
+- [x] Sub-image upload rename (`vkCmdCopyImage` from the old image, then the region); old image restored to read layout for draws recorded earlier in the frame
 - [~] Pending uploads queued per image/buffer request (not per GL handle); post-rename routing not applicable until renaming exists
 - [ ] Renames-per-frame counter in the debug overlay
 
@@ -151,7 +151,7 @@ the plan names; the phone is currently unplugged.
 
 ### 3. Allocators
 - [x] Per-frame dynamic ring for the Set 0 UBO and SSBO, persistently mapped, aligned to the device minimums, grows when exceeded
-- [x] Mutex-guarded staging ring; render thread records copies at the start of the frame command buffer
+- [x] Mutex-guarded staging ring; the render thread records every queued copy into an upload command buffer at `endFrame`, submitted ahead of the frame command buffer
 
 ### 4. Caches
 - [x] `VkSampler` cache keyed by (filters, wrap, anisotropy), bounded (4 samplers over ~1,000 changes/s)
@@ -175,11 +175,12 @@ the plan names; the phone is currently unplugged.
 ## Phase 2: Unmodified 2D
 
 ### 1. Texture and state shim
-- [ ] Texture calls with lazy image creation, level > 0 uploads, copy-on-write
-- [ ] Format conversion in staging: `RGB888 -> RGBA8888`, `Alpha -> R8_UNORM` swizzle `(0,0,0,R)`, `LuminanceAlpha -> R8G8_UNORM` swizzle `(R,R,R,G)`, `RGBA4444`/`RGB565`
+- [x] Uploads recorded ahead of the frame's draws in the same submit, whenever they were queued during the frame (separate upload command buffer recorded at `endFrame`)
+- [x] Texture calls with lazy image creation, level > 0 uploads, copy-on-write (15 shim tests drive unmodified stock `Texture` and `Pixmap`; both tiers; RTX 5080/2080; lavapipe)
+- [~] Format conversion: `RGB888 -> RGBA8888`, `Alpha -> R8_UNORM` swizzle `(0,0,0,R)`, `LuminanceAlpha -> R8G8_UNORM` swizzle `(R,R,R,G)` done; `RGBA4444` and `RGB565` are expanded to RGBA8 (the plan's fallback), packed Vulkan formats where supported are not used yet; `GL_UNPACK_ALIGNMENT` honoured
 - [ ] Compressed uploads: ETC2/ASTC on Android, BC on desktop, chosen by format support
-- [ ] Ordered state packets for clear, viewport, scissor, enable/disable
-- [ ] The shim query table
+- [ ] Ordered state packets for clear, viewport, scissor, enable/disable (the calls are accepted and ignored; viewport is recorded for queries)
+- [x] The shim query table (see Core decision 3)
 - [x] `VulkanStage`, `VulkanScrollPane`, `Vulkan*Viewport`, `VulkanTextureLoader`, `VulkanPixmapPacker` not carried over (fresh project; stock classes are the goal)
 
 ### 2. Command stream

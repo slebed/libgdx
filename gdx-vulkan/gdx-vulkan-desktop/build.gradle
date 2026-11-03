@@ -3,6 +3,8 @@
 dependencies {
     api project(':gdx-vulkan-core')
     api "com.badlogicgames.gdx:gdx-backend-lwjgl3:${gdxVersion}"
+    // libGDX's own natives (gdx2d: Pixmap decoding/drawing), which the stock classes under test need.
+    api "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-desktop"
 
     testImplementation platform("org.junit:junit-bom:${junitVersion}")
     testImplementation 'org.junit.jupiter:junit-jupiter'

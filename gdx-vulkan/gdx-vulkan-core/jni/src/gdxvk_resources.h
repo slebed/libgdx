@@ -1,10 +1,11 @@
-// GPU buffers and 2D textures behind small integer ids, thread-safe, with deferred deletion (plan, Phase 1b). This is the native
-// half of what the GL20 shim will sit on in Phase 2; the stress test drives it directly.
+// GPU buffers and 2D textures behind small integer ids, thread-safe, with deferred deletion (plan, Phase 1b/2). The GL20 shim sits
+// on this; the stress test drives it directly.
 //
 //  - Buffers are sub-allocated from large device-local pools (VmaVirtualBlock). Writes go through the staging ring.
 //    destroyBuffer() returns the range to the pool only after the GPU is done with it.
-//  - Textures are R8G8B8A8_UNORM images with one mip. Tier A gives each a slot in the global table, Tier B a descriptor set.
-//    Changing the sampler allocates a new slot/set and retires the old one (plan, Core decision 4: copy-on-write renaming).
+//  - Textures are 2D images in one of three formats (see TexFormat) with one or more mip levels. Tier A gives each a slot in the
+//    global table, Tier B a descriptor set. Any change after creation (sampler, region update, mip regeneration) allocates a new
+//    slot/set, and for pixel changes a new image too, and retires the old ones (plan, Core decision 4: copy-on-write renaming).
 #pragma once
 
 #include <cstdint>
@@ -14,8 +15,25 @@
 
 #include "gdxvk_caches.h"
 #include "gdxvk_layout.h"
+#include "gdxvk_staging.h"
 
 namespace gdxvk {
+
+// Pixel formats the GL shim maps libGDX Pixmap formats onto (plan, Phase 2). Everything else is converted to Rgba8 on the CPU.
+enum class TexFormat : int {
+    Rgba8 = 0,            // R8G8B8A8_UNORM
+    R8Alpha = 1,          // R8_UNORM, sampled as (0, 0, 0, R)   (GL_ALPHA)
+    Rg8LuminanceAlpha = 2 // R8G8_UNORM, sampled as (R, R, R, G) (GL_LUMINANCE_ALPHA)
+};
+
+constexpr uint32_t bytesPerPixel(TexFormat f) { return f == TexFormat::Rgba8 ? 4 : f == TexFormat::Rg8LuminanceAlpha ? 2 : 1; }
+
+struct TextureDesc {
+    uint32_t width = 0, height = 0;
+    TexFormat format = TexFormat::Rgba8;
+    uint32_t uploadedLevels = 1; // levels present in the data, packed level 0 first, no padding
+    bool generateMips = false;   // build the rest of the chain by blitting (then uploadedLevels must be 1)
+};
 
 class Resources {
 public:
@@ -31,11 +49,16 @@ public:
     bool bufferInfo(int id, VkBuffer& buffer, uint64_t& offset, uint64_t& size);
 
     // ---- textures ----
-    int createTexture(uint32_t width, uint32_t height, const void* rgba, const SamplerKey& sampler); // -1 on failure
+    int createTexture(const TextureDesc& desc, const void* data, uint64_t dataBytes, const SamplerKey& sampler); // -1 on failure
+    // Rewrites a rectangle of one level (tightly packed data). The texture is renamed: new image, slot/set, old ones retired.
+    bool updateTexture(int id, uint32_t level, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const void* data, uint64_t dataBytes);
+    // Rebuilds levels 1.. from level 0 (glGenerateMipmap on an existing texture). Renames the texture, giving it a full chain.
+    bool regenerateMips(int id);
     bool setTextureSampler(int id, const SamplerKey& sampler);
     void destroyTexture(int id);
     // Tier A: *slot is the table index for u_indices.y. Tier B: *set is the descriptor set to bind as set 1.
     bool textureBinding(int id, int* slot, VkDescriptorSet* set);
+    bool textureInfo(int id, uint32_t* width, uint32_t* height, uint32_t* levels);
 
     // Uploads queued while no frame is being recorded (headless use, tests): records them in a one-off command buffer,
     // submits and waits. A running Presenter does this every frame instead.
@@ -66,12 +89,18 @@ private:
         VkImage image = VK_NULL_HANDLE;
         VmaAllocation alloc = nullptr;
         VkImageView view = VK_NULL_HANDLE;
-        int slot = -1;                        // Tier A
-        DescriptorLayouts::TextureSet set;    // Tier B
+        uint32_t width = 0, height = 0, levels = 1;
+        TexFormat format = TexFormat::Rgba8;
+        SamplerKey sampler;
+        int slot = -1;                     // Tier A
+        DescriptorLayouts::TextureSet set; // Tier B
     };
 
-    bool bindSampler(TextureEntry& t, const SamplerKey& key, int* newSlot, DescriptorLayouts::TextureSet* newSet);
-    void retireSampler(int slot, DescriptorLayouts::TextureSet set);
+    bool makeImage(uint32_t w, uint32_t h, TexFormat f, uint32_t levels, VkImage& image, VmaAllocation& alloc, VkImageView& view);
+    bool bindSampler(VkImageView view, const SamplerKey& key, int* newSlot, DescriptorLayouts::TextureSet* newSet);
+    void retireBinding(int slot, DescriptorLayouts::TextureSet set);
+    void retireImage(VkImage image, VmaAllocation alloc, VkImageView view);
+    bool blitFilter(TexFormat f, VkFilter* filter); // false if the format cannot be a blit source and destination
 
     ContextHandles& h_;
     std::mutex mutex_;

@@ -23,8 +23,11 @@ final class GdxVkNative {
     static native int nativeCreateBuffer(long ctx, long size);
     static native boolean nativeWriteBuffer(long ctx, int id, long offset, byte[] data, int start, int length);
     static native void nativeDestroyBuffer(long ctx, int id);
-    static native int nativeCreateTexture(long ctx, int width, int height, byte[] rgba, int minFilter, int magFilter, int mipFilter,
-        int wrapU, int wrapV, int anisotropy);
+    static native int nativeCreateTexture(long ctx, int width, int height, int format, int uploadedLevels, boolean generateMips, byte[] data,
+        int minFilter, int magFilter, int mipFilter, int wrapU, int wrapV, int anisotropy);
+    static native boolean nativeUpdateTexture(long ctx, int id, int level, int x, int y, int w, int h, byte[] data);
+    static native boolean nativeRegenerateMips(long ctx, int id);
+    static native int[] nativeTextureInfo(long ctx, int id);
     static native boolean nativeSetTextureSampler(long ctx, int id, int minFilter, int magFilter, int mipFilter, int wrapU, int wrapV,
         int anisotropy);
     static native void nativeDestroyTexture(long ctx, int id);
