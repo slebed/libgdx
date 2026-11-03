@@ -65,6 +65,31 @@ public final class GdxVkResources {
     /** R8G8, 2 bytes per texel, sampled as (r, r, r, g): GL_LUMINANCE_ALPHA. */
     public static final int FORMAT_LUMINANCE_ALPHA = 2;
 
+    /** A block-compressed image; the Vulkan format and block geometry travel separately (see {@link #createCompressedTexture}). */
+    public static final int FORMAT_COMPRESSED = 3;
+
+    /**
+     * A block-compressed texture: {@code levels} mip levels of {@code vkFormat}, tightly packed, level 0 first. Throws if the device
+     * cannot sample the format (BC on desktop GPUs, ETC2 and ASTC on mobile ones; check {@link #formatSupported}).
+     *
+     * @param blockBytes bytes per blockW x blockH block
+     */
+    public int createCompressedTexture(int width, int height, int vkFormat, int blockW, int blockH, int blockBytes, int levels, byte[] data,
+        GdxVkSampler sampler) {
+        int id = GdxVkNative.nativeCreateCompressedTexture(context.nativeHandle(), width, height, vkFormat, blockW, blockH, blockBytes, levels, data,
+            sampler.minFilter, sampler.magFilter, sampler.mipFilter, sampler.wrapU, sampler.wrapV, sampler.anisotropy);
+        if (id < 0) {
+            throw new VulkanOutOfMemoryException("Could not create a " + width + "x" + height + " compressed texture (VkFormat " + vkFormat
+                + " unsupported by this device, table full, or bad arguments)");
+        }
+        return id;
+    }
+
+    /** Can this device sample images of the given VkFormat (with linear filtering)? */
+    public boolean formatSupported(int vkFormat) {
+        return GdxVkNative.nativeFormatSupported(context.nativeHandle(), vkFormat);
+    }
+
     public static int bytesPerTexel(int format) {
         return format == FORMAT_RGBA8 ? 4 : format == FORMAT_LUMINANCE_ALPHA ? 2 : 1;
     }

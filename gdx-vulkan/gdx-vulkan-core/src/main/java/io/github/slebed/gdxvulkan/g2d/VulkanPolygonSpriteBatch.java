@@ -11,6 +11,7 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
 import io.github.slebed.gdxvulkan.CommandStream;
 import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkPresenter;
+import io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle;
 import io.github.slebed.gdxvulkan.gl.VulkanGL20;
 
 import java.nio.ByteBuffer;
@@ -33,6 +34,7 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
     private final Matrix4 projectionMatrix = new Matrix4();
     private final Matrix4 combinedMatrix = new Matrix4();
     private final float[] push = new float[32];
+    private VulkanShaderPipelineBundle bundle; // null: the default sprite shaders
 
     private boolean blendingDisabled;
     private int blendSrcFunc = GL20.GL_SRC_ALPHA;
@@ -194,9 +196,13 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
         presenter.flushVertices(iBlock, iOffset, iBytes);
 
         final CommandStream s = frame.stream();
-        s.bindPipeline(SpritePipelines.get(frame, blendingDisabled, blendSrcFunc, blendDstFunc, blendSrcFuncAlpha, blendDstFuncAlpha));
+        s.bindPipeline(SpritePipelines.get(frame, bundle, false, blendingDisabled, blendSrcFunc, blendDstFunc, blendSrcFuncAlpha, blendDstFuncAlpha));
         System.arraycopy(combinedMatrix.val, 0, push, 0, 16);
         push[16] = push[17] = push[18] = push[19] = 1f;
+        if (bundle != null) {
+            System.arraycopy(bundle.custom0, 0, push, 24, 4);
+            System.arraycopy(bundle.custom1, 0, push, 28, 4);
+        }
         s.pushConstants(push);
         if (!tierA) s.bindTexture(nativeTexture(lastTexture));
         s.bindVertex(vBlock, vOffset);
@@ -288,6 +294,17 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
 
     @Override public ShaderProgram getShader () {
         return null;
+    }
+
+    /** Custom shading: draws after this call use the bundle's shaders. Null restores the default. Flushes what is queued first. */
+    public void setShaderBundle (VulkanShaderPipelineBundle bundle) {
+        if (bundle == this.bundle) return;
+        if (drawing) flush();
+        this.bundle = bundle;
+    }
+
+    public VulkanShaderPipelineBundle getShaderBundle () {
+        return bundle;
     }
 
     @Override public boolean isBlendingEnabled () {

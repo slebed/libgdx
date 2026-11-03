@@ -39,8 +39,13 @@ bool FrameRing::addBlock(std::vector<Block>& list, VkBufferUsageFlags usage, VkD
     bi.size = size;
     bi.usage = usage;
     VmaAllocationCreateInfo ai{};
-    ai.usage = VMA_MEMORY_USAGE_AUTO;
-    ai.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    // Vertex and index data is written once per frame by the CPU and read once by the GPU: keep it in system memory. VMA's default
+    // would pick the small host-visible device-local window (write-combined over PCIe), which the CPU fills several times slower
+    // (measured on an RTX 5080: the vertex copy dominated a 20,000-sprite frame).
+    ai.usage = (usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ? VMA_MEMORY_USAGE_AUTO_PREFER_HOST : VMA_MEMORY_USAGE_AUTO;
+    // Random access asks for cached memory, which the Java side can also fill faster than write-combined memory.
+    ai.flags = ((usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ? VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT : VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT) |
+               VMA_ALLOCATION_CREATE_MAPPED_BIT;
     VmaAllocationInfo info{};
     Block b;
     if (vmaCreateBuffer(h_.allocator, &bi, &ai, &b.buffer, &b.alloc, &info) != VK_SUCCESS) return false;

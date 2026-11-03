@@ -11,24 +11,6 @@ namespace gdxvk {
 namespace {
 constexpr uint64_t kPoolSize = 32ull << 20;
 
-VkFormat vkFormatOf(TexFormat f) {
-    switch (f) {
-        case TexFormat::R8Alpha: return VK_FORMAT_R8_UNORM;
-        case TexFormat::Rg8LuminanceAlpha: return VK_FORMAT_R8G8_UNORM;
-        default: return VK_FORMAT_R8G8B8A8_UNORM;
-    }
-}
-
-VkComponentMapping swizzleOf(TexFormat f) {
-    switch (f) {
-        case TexFormat::R8Alpha: // GL_ALPHA: rgb 0, alpha from the single channel
-            return {VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_R};
-        case TexFormat::Rg8LuminanceAlpha: // GL_LUMINANCE_ALPHA: rgb = luminance, alpha = second channel
-            return {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G};
-        default: return {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
-    }
-}
-
 uint32_t levelExtent(uint32_t base, uint32_t level) { return std::max(1u, base >> level); }
 
 uint32_t fullChain(uint32_t w, uint32_t h) {
@@ -37,6 +19,31 @@ uint32_t fullChain(uint32_t w, uint32_t h) {
     return n;
 }
 } // namespace
+
+TexFormatInfo formatInfo(TexFormat f, const TextureDesc& desc) {
+    TexFormatInfo i;
+    switch (f) {
+        case TexFormat::R8Alpha: // GL_ALPHA: rgb 0, alpha from the single channel
+            i.vk = VK_FORMAT_R8_UNORM;
+            i.swizzle = {VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_ZERO, VK_COMPONENT_SWIZZLE_R};
+            i.blockBytes = 1;
+            break;
+        case TexFormat::Rg8LuminanceAlpha: // GL_LUMINANCE_ALPHA: rgb = luminance, alpha = second channel
+            i.vk = VK_FORMAT_R8G8_UNORM;
+            i.swizzle = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G};
+            i.blockBytes = 2;
+            break;
+        case TexFormat::Compressed:
+            i.vk = static_cast<VkFormat>(desc.vkFormat);
+            i.blockW = desc.blockW;
+            i.blockH = desc.blockH;
+            i.blockBytes = desc.blockBytes;
+            i.compressed = true;
+            break;
+        default: break; // Rgba8
+    }
+    return i;
+}
 
 Resources::Resources(ContextHandles& h) : h_(h) {}
 
@@ -152,10 +159,10 @@ void Resources::destroyBuffer(int id) {
 
 // --------------------------------------------------------------- textures
 
-bool Resources::makeImage(uint32_t w, uint32_t h, TexFormat f, uint32_t levels, VkImage& image, VmaAllocation& alloc, VkImageView& view) {
+bool Resources::makeImage(uint32_t w, uint32_t h, const TexFormatInfo& f, uint32_t levels, VkImage& image, VmaAllocation& alloc, VkImageView& view) {
     VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     ii.imageType = VK_IMAGE_TYPE_2D;
-    ii.format = vkFormatOf(f);
+    ii.format = f.vk;
     ii.extent = {w, h, 1};
     ii.mipLevels = levels;
     ii.arrayLayers = 1;
@@ -172,7 +179,7 @@ bool Resources::makeImage(uint32_t w, uint32_t h, TexFormat f, uint32_t levels, 
     vi.image = image;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
     vi.format = ii.format;
-    vi.components = swizzleOf(f);
+    vi.components = f.swizzle;
     vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1};
     if (vkCreateImageView(h_.device, &vi, nullptr, &view) != VK_SUCCESS) {
         vmaDestroyImage(h_.allocator, image, alloc);
@@ -181,9 +188,17 @@ bool Resources::makeImage(uint32_t w, uint32_t h, TexFormat f, uint32_t levels, 
     return true;
 }
 
-bool Resources::blitFilter(TexFormat f, VkFilter* filter) {
+bool Resources::formatSupported(uint32_t vkFormat) {
     VkFormatProperties p;
-    vkGetPhysicalDeviceFormatProperties(h_.physical, vkFormatOf(f), &p);
+    vkGetPhysicalDeviceFormatProperties(h_.physical, static_cast<VkFormat>(vkFormat), &p);
+    const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    return (p.optimalTilingFeatures & need) == need;
+}
+
+bool Resources::blitFilter(const TexFormatInfo& f, VkFilter* filter) {
+    if (f.compressed) return false; // no blitting into or out of block-compressed images
+    VkFormatProperties p;
+    vkGetPhysicalDeviceFormatProperties(h_.physical, f.vk, &p);
     const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
     if ((p.optimalTilingFeatures & need) != need) return false;
     *filter = (p.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
@@ -231,7 +246,8 @@ void Resources::retireImage(VkImage image, VmaAllocation alloc, VkImageView view
 int Resources::createTexture(const TextureDesc& d, const void* data, uint64_t dataBytes, const SamplerKey& sampler) {
     if (d.width == 0 || d.height == 0 || data == nullptr || d.uploadedLevels == 0) return -1;
     if (d.generateMips && d.uploadedLevels != 1) return -1;
-    const uint32_t bpp = bytesPerPixel(d.format);
+    const TexFormatInfo fi = formatInfo(d.format, d);
+    if (fi.compressed && (d.generateMips || d.blockW == 0 || d.blockH == 0 || d.blockBytes == 0 || !formatSupported(d.vkFormat))) return -1;
     const uint32_t levels = d.generateMips ? fullChain(d.width, d.height) : d.uploadedLevels;
     if (levels > fullChain(d.width, d.height)) return -1;
 
@@ -243,21 +259,21 @@ int Resources::createTexture(const TextureDesc& d, const void* data, uint64_t da
         r.width = levelExtent(d.width, l);
         r.height = levelExtent(d.height, l);
         r.dataOffset = offset;
-        offset += static_cast<uint64_t>(r.width) * r.height * bpp;
+        offset += levelBytes(fi, r.width, r.height);
         regions.push_back(r);
     }
     if (offset != dataBytes) return -1;
 
     VkFilter filter = VK_FILTER_LINEAR;
-    if (d.generateMips && !blitFilter(d.format, &filter)) return -1;
+    if (d.generateMips && !blitFilter(fi, &filter)) return -1;
 
     TextureEntry t;
     t.width = d.width;
     t.height = d.height;
-    t.format = d.format;
+    t.info = fi;
     t.levels = levels;
     t.sampler = sampler;
-    if (!makeImage(d.width, d.height, d.format, levels, t.image, t.alloc, t.view)) return -1;
+    if (!makeImage(d.width, d.height, fi, levels, t.image, t.alloc, t.view)) return -1;
     if (!bindSampler(t.view, sampler, &t.slot, &t.set)) {
         retireImage(t.image, t.alloc, t.view);
         return -1;
@@ -291,10 +307,15 @@ bool Resources::updateTexture(int id, uint32_t level, uint32_t x, uint32_t y, ui
     TextureEntry& t = textures_[id];
     if (level >= t.levels || w == 0 || h == 0) return false;
     if (x + w > levelExtent(t.width, level) || y + h > levelExtent(t.height, level)) return false;
-    if (dataBytes != static_cast<uint64_t>(w) * h * bytesPerPixel(t.format)) return false;
+    if (dataBytes != levelBytes(t.info, w, h)) return false;
+    if (t.info.compressed) { // block-compressed updates must cover whole blocks (or run to the edge of the level)
+        const uint32_t lw = levelExtent(t.width, level), lh = levelExtent(t.height, level);
+        if (x % t.info.blockW != 0 || y % t.info.blockH != 0) return false;
+        if ((w % t.info.blockW != 0 && x + w != lw) || (h % t.info.blockH != 0 && y + h != lh)) return false;
+    }
 
     TextureEntry fresh = t;
-    if (!makeImage(t.width, t.height, t.format, t.levels, fresh.image, fresh.alloc, fresh.view)) return false;
+    if (!makeImage(t.width, t.height, t.info, t.levels, fresh.image, fresh.alloc, fresh.view)) return false;
     fresh.slot = -1;
     fresh.set = DescriptorLayouts::TextureSet();
     if (!bindSampler(fresh.view, t.sampler, &fresh.slot, &fresh.set)) {
@@ -325,12 +346,12 @@ bool Resources::regenerateMips(int id) {
     if (id < 0 || static_cast<size_t>(id) >= textures_.size() || !textures_[id].live) return false;
     TextureEntry& t = textures_[id];
     VkFilter filter;
-    if (!blitFilter(t.format, &filter)) return false;
+    if (!blitFilter(t.info, &filter)) return false;
     const uint32_t levels = fullChain(t.width, t.height);
 
     TextureEntry fresh = t;
     fresh.levels = levels;
-    if (!makeImage(t.width, t.height, t.format, levels, fresh.image, fresh.alloc, fresh.view)) return false;
+    if (!makeImage(t.width, t.height, t.info, levels, fresh.image, fresh.alloc, fresh.view)) return false;
     fresh.slot = -1;
     fresh.set = DescriptorLayouts::TextureSet();
     if (!bindSampler(fresh.view, t.sampler, &fresh.slot, &fresh.set)) {

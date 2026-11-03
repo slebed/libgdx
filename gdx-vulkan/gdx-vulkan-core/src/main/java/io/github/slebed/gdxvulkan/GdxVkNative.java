@@ -25,6 +25,9 @@ final class GdxVkNative {
     static native void nativeDestroyBuffer(long ctx, int id);
     static native int nativeCreateTexture(long ctx, int width, int height, int format, int uploadedLevels, boolean generateMips, byte[] data,
         int minFilter, int magFilter, int mipFilter, int wrapU, int wrapV, int anisotropy);
+    static native int nativeCreateCompressedTexture(long ctx, int width, int height, int vkFormat, int blockW, int blockH, int blockBytes, int levels,
+        byte[] data, int minFilter, int magFilter, int mipFilter, int wrapU, int wrapV, int anisotropy);
+    static native boolean nativeFormatSupported(long ctx, int vkFormat);
     static native boolean nativeUpdateTexture(long ctx, int id, int level, int x, int y, int w, int h, byte[] data);
     static native boolean nativeRegenerateMips(long ctx, int id);
     static native int[] nativeTextureInfo(long ctx, int id);

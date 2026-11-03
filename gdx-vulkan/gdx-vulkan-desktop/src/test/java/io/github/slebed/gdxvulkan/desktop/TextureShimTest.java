@@ -361,6 +361,89 @@ class TextureShimTest {
         pm.dispose();
     }
 
+    // ------------------------------------------------------------------------------------------------------------- compressed
+
+    private static final int GL_DXT1_RGBA = 0x83F1, GL_ETC2_RGB = 0x9274, GL_ASTC_4x4 = 0x93B0;
+    private static final int BC1_RGBA_UNORM = 131;
+
+    /** One BC1 block that decodes to a single colour: colour0 = rgb565, colour1 = 0, every index 0. */
+    private static void bc1Solid(ByteBuffer out, int rgb565) {
+        out.put((byte)rgb565).put((byte)(rgb565 >> 8)).putShort((short)0).putInt(0);
+    }
+
+    /** A custom TextureData that uploads the given BC1 levels (8x8 quadrants red, green, blue, white; level 1 is one white block). */
+    private static com.badlogic.gdx.graphics.TextureData bc1Data() {
+        return new com.badlogic.gdx.graphics.TextureData() {
+            public TextureDataType getType() { return TextureDataType.Custom; }
+            public boolean isPrepared() { return true; }
+            public void prepare() {}
+            public Pixmap consumePixmap() { throw new GdxRuntimeException("custom"); }
+            public boolean disposePixmap() { return false; }
+            public void consumeCustomData(int target) {
+                ByteBuffer l0 = BufferUtils.newByteBuffer(32).order(ByteOrder.LITTLE_ENDIAN);
+                bc1Solid(l0, 0xF800); // top-left red
+                bc1Solid(l0, 0x07E0); // top-right green
+                bc1Solid(l0, 0x001F); // bottom-left blue
+                bc1Solid(l0, 0xFFFF); // bottom-right white
+                l0.flip();
+                Gdx.gl.glCompressedTexImage2D(target, 0, GL_DXT1_RGBA, 8, 8, 0, 32, l0);
+            }
+            public int getWidth() { return 8; }
+            public int getHeight() { return 8; }
+            public Pixmap.Format getFormat() { return Pixmap.Format.RGBA8888; }
+            public boolean useMipMaps() { return false; }
+            public boolean isManaged() { return true; }
+        };
+    }
+
+    @Test void bc1CompressedTexturesAreSampledAndUpdatable() {
+        assumeTrue(ctx.resources().formatSupported(BC1_RGBA_UNORM), "device cannot sample BC1");
+        Texture t = nearest(new Texture(bc1Data()));
+        assertRgba(texel(t, 1, 1, 0), 255, 0, 0, 255, 0, "red block");
+        assertRgba(texel(t, 5, 1, 0), 0, 255, 0, 255, 0, "green block");
+        assertRgba(texel(t, 1, 5, 0), 0, 0, 255, 255, 0, "blue block");
+        assertRgba(texel(t, 6, 6, 0), 255, 255, 255, 255, 0, "white block");
+
+        t.bind();
+        ByteBuffer patch = BufferUtils.newByteBuffer(8).order(ByteOrder.LITTLE_ENDIAN);
+        bc1Solid(patch, 0xFFE0); // yellow
+        patch.flip();
+        gl.glCompressedTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 4, 4, 4, 4, GL_DXT1_RGBA, 8, patch); // block-aligned update: renames
+        assertRgba(texel(t, 5, 5, 0), 255, 255, 0, 255, 0, "patched block");
+        assertRgba(texel(t, 1, 1, 0), 255, 0, 0, 255, 0, "untouched block survives the rename");
+
+        ByteBuffer off = BufferUtils.newByteBuffer(8).order(ByteOrder.LITTLE_ENDIAN);
+        bc1Solid(off, 0xFFE0);
+        off.flip();
+        assertThrows(IllegalArgumentException.class, () -> gl.glCompressedTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 1, 1, 4, 4, GL_DXT1_RGBA, 8, off),
+            "updates not aligned to the block grid are refused");
+        t.dispose();
+    }
+
+    @Test void compressedFormatTheDeviceCannotSampleIsRefusedClearly() {
+        // Desktop GPUs have BC but not ETC2/ASTC and mobile GPUs the reverse: find a format this device lacks, if any.
+        int[][] candidates = {{GL_ETC2_RGB, 147}, {GL_ASTC_4x4, 157}, {GL_DXT1_RGBA, BC1_RGBA_UNORM}};
+        for (int[] c : candidates) {
+            if (ctx.resources().formatSupported(c[1])) continue;
+            Texture t = new Texture(1, 1, Pixmap.Format.RGBA8888);
+            t.bind();
+            ByteBuffer data = BufferUtils.newByteBuffer(16);
+            GdxRuntimeException e = assertThrows(GdxRuntimeException.class,
+                () -> gl.glCompressedTexImage2D(GL20.GL_TEXTURE_2D, 0, c[0], 4, 4, 0, 16, data));
+            assertTrue(e.getMessage().contains("cannot sample"), e.getMessage());
+            t.dispose();
+            return;
+        }
+        assumeTrue(false, "this device samples BC, ETC2 and ASTC");
+    }
+
+    @Test void unknownCompressedFormatIsRefused() {
+        Texture t = new Texture(1, 1, Pixmap.Format.RGBA8888);
+        t.bind();
+        assertThrows(GdxRuntimeException.class, () -> gl.glCompressedTexImage2D(GL20.GL_TEXTURE_2D, 0, 0x1234, 4, 4, 0, 8, BufferUtils.newByteBuffer(8)));
+        t.dispose();
+    }
+
     @Test void queryTableAndVersionString() {
         assertTrue(Gdx.graphics.supportsExtension("GL_ARB_framebuffer_object"), "MipMapGenerator needs glGenerateMipmap");
         assertTrue(Gdx.graphics.supportsExtension("GL_OES_framebuffer_object"));

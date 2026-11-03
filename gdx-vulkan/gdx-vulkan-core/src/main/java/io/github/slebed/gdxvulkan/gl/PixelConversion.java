@@ -55,6 +55,18 @@ final class PixelConversion {
             + Integer.toHexString(glType));
     }
 
+    /** The {@code size} bytes at a ByteBuffer's position, copied out (compressed texture data is passed through untouched). */
+    static byte[] bytesOf(Buffer data, int size) {
+        if (!(data instanceof ByteBuffer)) {
+            throw new GdxRuntimeException("gdx-vulkan: compressed texture data must be a ByteBuffer, was " + (data == null ? "null" : data.getClass().getSimpleName()));
+        }
+        ByteBuffer src = ((ByteBuffer)data).duplicate();
+        if (src.remaining() < size) throw new GdxRuntimeException("gdx-vulkan: compressed data has " + src.remaining() + " bytes, imageSize says " + size);
+        byte[] out = new byte[size];
+        src.get(out);
+        return out;
+    }
+
     /** @param pixels the source (position to limit); null yields zeroed storage, as glTexImage2D with no data does */
     static Converted convert(int glFormat, int glType, int width, int height, int alignment, Buffer pixels) {
         int format = nativeFormat(glFormat, glType);

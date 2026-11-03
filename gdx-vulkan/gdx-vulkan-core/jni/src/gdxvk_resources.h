@@ -23,17 +23,31 @@ namespace gdxvk {
 enum class TexFormat : int {
     Rgba8 = 0,            // R8G8B8A8_UNORM
     R8Alpha = 1,          // R8_UNORM, sampled as (0, 0, 0, R)   (GL_ALPHA)
-    Rg8LuminanceAlpha = 2 // R8G8_UNORM, sampled as (R, R, R, G) (GL_LUMINANCE_ALPHA)
+    Rg8LuminanceAlpha = 2, // R8G8_UNORM, sampled as (R, R, R, G) (GL_LUMINANCE_ALPHA)
+    Compressed = 3         // a block-compressed VkFormat given by TextureDesc::vkFormat (BC, ETC2, ASTC)
 };
-
-constexpr uint32_t bytesPerPixel(TexFormat f) { return f == TexFormat::Rgba8 ? 4 : f == TexFormat::Rg8LuminanceAlpha ? 2 : 1; }
 
 struct TextureDesc {
     uint32_t width = 0, height = 0;
     TexFormat format = TexFormat::Rgba8;
+    // Compressed only: the VkFormat and its block geometry. A level of w x h texels takes ceil(w/blockW) * ceil(h/blockH) * blockBytes bytes.
+    uint32_t vkFormat = 0, blockW = 4, blockH = 4, blockBytes = 8;
     uint32_t uploadedLevels = 1; // levels present in the data, packed level 0 first, no padding
     bool generateMips = false;   // build the rest of the chain by blitting (then uploadedLevels must be 1)
 };
+
+// What the rest of the code needs to know about a texture format: the Vulkan format, the image view swizzle, and the block geometry
+// (1x1 blocks of bytes-per-pixel for the plain formats, so one formula sizes every level).
+struct TexFormatInfo {
+    VkFormat vk = VK_FORMAT_R8G8B8A8_UNORM;
+    VkComponentMapping swizzle{VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY};
+    uint32_t blockW = 1, blockH = 1, blockBytes = 4;
+    bool compressed = false;
+};
+TexFormatInfo formatInfo(TexFormat f, const TextureDesc& desc);
+inline uint64_t levelBytes(const TexFormatInfo& f, uint32_t w, uint32_t h) {
+    return static_cast<uint64_t>((w + f.blockW - 1) / f.blockW) * ((h + f.blockH - 1) / f.blockH) * f.blockBytes;
+}
 
 class Resources {
 public:
@@ -59,6 +73,8 @@ public:
     // Tier A: *slot is the table index for u_indices.y. Tier B: *set is the descriptor set to bind as set 1.
     bool textureBinding(int id, int* slot, VkDescriptorSet* set);
     bool textureInfo(int id, uint32_t* width, uint32_t* height, uint32_t* levels);
+    // Can this device sample (and linearly filter) images in the given VkFormat? Compressed formats vary by GPU: BC on desktop, ETC2/ASTC on mobile.
+    bool formatSupported(uint32_t vkFormat);
 
     // Uploads queued while no frame is being recorded (headless use, tests): records them in a one-off command buffer,
     // submits and waits. A running Presenter does this every frame instead.
@@ -90,17 +106,17 @@ private:
         VmaAllocation alloc = nullptr;
         VkImageView view = VK_NULL_HANDLE;
         uint32_t width = 0, height = 0, levels = 1;
-        TexFormat format = TexFormat::Rgba8;
+        TexFormatInfo info;
         SamplerKey sampler;
         int slot = -1;                     // Tier A
         DescriptorLayouts::TextureSet set; // Tier B
     };
 
-    bool makeImage(uint32_t w, uint32_t h, TexFormat f, uint32_t levels, VkImage& image, VmaAllocation& alloc, VkImageView& view);
+    bool makeImage(uint32_t w, uint32_t h, const TexFormatInfo& f, uint32_t levels, VkImage& image, VmaAllocation& alloc, VkImageView& view);
     bool bindSampler(VkImageView view, const SamplerKey& key, int* newSlot, DescriptorLayouts::TextureSet* newSet);
     void retireBinding(int slot, DescriptorLayouts::TextureSet set);
     void retireImage(VkImage image, VmaAllocation alloc, VkImageView view);
-    bool blitFilter(TexFormat f, VkFilter* filter); // false if the format cannot be a blit source and destination
+    bool blitFilter(const TexFormatInfo& f, VkFilter* filter); // false if the format cannot be a blit source and destination
 
     ContextHandles& h_;
     std::mutex mutex_;

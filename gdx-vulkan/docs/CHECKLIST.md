@@ -15,13 +15,13 @@ the plan names; the phone is currently unplugged.
 | Core decisions | 30 | 7 | 19 | 56 |
 | Phase 1a: Extraction, window surfaces and CI | 13 | 7 | 2 | 22 |
 | Phase 1b: Memory, layout and caches | 15 | 1 | 4 | 20 |
-| Phase 2: Unmodified 2D | 4 | 2 | 18 | 24 |
+| Phase 2: Unmodified 2D | 19 | 4 | 2 | 25 |
 | Phase 3: Stock FrameBuffer | 0 | 0 | 13 | 13 |
 | Phase 4: Android lifecycle | 0 | 2 | 10 | 12 |
 | Phase 5: 3D with stock models | 0 | 0 | 12 | 12 |
 | Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 1 | 0 | 4 | 5 |
-| **All** | **63** | **19** | **86** | **168** |
+| **All** | **78** | **21** | **70** | **169** |
 ---
 
 ## Core decisions
@@ -178,34 +178,35 @@ the plan names; the phone is currently unplugged.
 - [x] Uploads recorded ahead of the frame's draws in the same submit, whenever they were queued during the frame (separate upload command buffer recorded at `endFrame`)
 - [x] Texture calls with lazy image creation, level > 0 uploads, copy-on-write (15 shim tests drive unmodified stock `Texture` and `Pixmap`; both tiers; RTX 5080/2080; lavapipe)
 - [~] Format conversion: `RGB888 -> RGBA8888`, `Alpha -> R8_UNORM` swizzle `(0,0,0,R)`, `LuminanceAlpha -> R8G8_UNORM` swizzle `(R,R,R,G)` done; `RGBA4444` and `RGB565` are expanded to RGBA8 (the plan's fallback), packed Vulkan formats where supported are not used yet; `GL_UNPACK_ALIGNMENT` honoured
-- [ ] Compressed uploads: ETC2/ASTC on Android, BC on desktop, chosen by format support
-- [ ] Ordered state packets for clear, viewport, scissor, enable/disable (the calls are accepted and ignored; viewport is recorded for queries)
+- [x] Compressed uploads (`glCompressedTexImage2D`/`SubImage2D`): DXT1/3/5 -> BC1/2/3, ETC1/ETC2, ASTC 4x4..12x12, picked by what the device samples; an unsupported format fails with a message naming it. Verified with hand-built BC1 blocks incl. a block-aligned rename update (RTX 5080); ETC2/ASTC paths are unexercised on hardware that supports them (desktop GPUs here do not)
+- [x] Ordered state packets for clear, viewport, scissor, enable/disable: recorded into the command stream so they interleave with batch draws; replayed across frames
 - [x] The shim query table (see Core decision 3)
 - [x] `VulkanStage`, `VulkanScrollPane`, `Vulkan*Viewport`, `VulkanTextureLoader`, `VulkanPixmapPacker` not carried over (fresh project; stock classes are the goal)
 
 ### 2. Command stream
-- [ ] Java encodes packets into a direct `ByteBuffer`: `VIEWPORT`, `SCISSOR`, `CLEAR`, `BEGIN_PASS`, `END_PASS`, `BIND_PIPELINE`, `PUSH_CONSTANTS`, `BIND_TEXTURE_SET`, `DRAW_INDEXED`
-- [ ] One `GdxVk.submitCommandStream(ptr, bytes)` call per flush; submit once per frame
-- [~] Interim: direct `createPipeline`/`draw`/`bindFrameData`/`bindTexture` calls on the presenter (to be replaced by the stream)
+- [~] Java encodes packets into a direct `ByteBuffer`: `BIND_PIPELINE`, `PUSH_CONSTANTS`, `VIEWPORT`, `SCISSOR`, `SCISSOR_ENABLE`, `CLEAR`, `BIND_VERTEX`, `BIND_INDEX_BUFFER`/`_RING`, `BIND_TEXTURE`, `DRAW_INDEXED`, `DRAW` (the pass begin/end are implicit in `beginFrame`/`endFrame` until Phase 3 adds render targets)
+- [x] One `nativeSubmitCommands` call per frame; one queue submit per frame (uploads ahead of it in the same submit)
+- [x] The batches and renderers all record through the stream (the direct presenter calls remain for the low-level tests)
 
 ### 3. Batches
-- [ ] `VulkanSpriteBatch` (implements `Batch`); Tier A slot index per vertex, Tier B flush on texture switch
-- [ ] `VulkanPolygonSpriteBatch` (implements `PolygonBatch`)
-- [ ] `VulkanShapeRenderer`
-- [ ] `VulkanShaderPipelineBundle` replacing custom `ShaderProgram` GLSL
-- [ ] Per-frame vertex ring
+- [x] `VulkanSpriteBatch` (implements `Batch`); Tier A slot index per vertex, Tier B flush on texture switch. Draw code is generated from stock's `SpriteBatch` (`tools/generate_spritebatch_draws.py`). A batch that uses one texture sends stock's 20-byte vertices in one block copy with the slot in the push constants (`sprite_single.vert`)
+- [x] `VulkanPolygonSpriteBatch` (implements `PolygonBatch`), generated from stock's `PolygonSpriteBatch`
+- [x] `VulkanShapeRenderer` (generated from stock's `ShapeRenderer`) and `VulkanImmediateModeRenderer`; points and lines are 1 px (wide lines are an optional Vulkan feature)
+- [~] `VulkanShaderPipelineBundle` replacing custom `ShaderProgram` GLSL: bundles of precompiled SPIR-V (both tiers) with `u_custom0/1` push values, set with `setShaderBundle` on `VulkanSpriteBatch` and `VulkanPolygonSpriteBatch`; tested with the example `sprite_gray.frag`. No GLSL-to-SPIR-V at run time, and no bundle support in the shape renderer yet
+- [x] Per-frame vertex ring (host-cached system memory, per-frame blocks that grow)
 
 ### Gate 2 (stock tests, both tiers, compared to stock GL on llvmpipe)
-- [ ] Scene2D `Table`, `Skin`, clipped `ScrollPane` through `ScissorStack`
-- [ ] `BitmapFont`
-- [ ] `FreeTypeFontGenerator` with glyphs added mid-frame
-- [ ] `TextureAtlas`
-- [ ] `ParticleEffect`
+- [x] Scene2D `Table`, `Skin`, clipped `ScrollPane` through `ScissorStack` (scenes `gate2_scene2d`, `gate2_window`)
+- [x] `BitmapFont`
+- [x] `FreeTypeFontGenerator` with glyphs added mid-frame (incremental glyphs while the batch is open)
+- [x] `TextureAtlas`
+- [x] `ParticleEffect`
+- [x] Compared against stock GL: oracle diffs 0 px for the Batch scenes (particles within 13/255 per channel), shapes 0.18% of pixels; exact goldens on lavapipe, both tiers (CI)
 
 ### Stress test 2 (vs stock `SpriteBatch` on `gdx-backend-lwjgl3`)
-- [ ] `VulkanSpriteBatch` Tier A, 128 textures: >= 3x stock fps
-- [ ] `VulkanSpriteBatch` Tier A, 1 texture: >= 1.0x
-- [ ] `VulkanSpriteBatch` Tier B, 128 textures and 1 texture: >= 1.0x
+- [x] `VulkanSpriteBatch` Tier A, 128 textures: >= 3x stock fps. RTX 5080, 20,000 sprites/frame, 800x600, vsync off: 17.5 fps stock GL, 413 fps (23.6x). (`gradlew :gdx-vulkan-desktop:stress2`)
+- [ ] `VulkanSpriteBatch` Tier A, 1 texture: >= 1.0x. **Missed**: 950-965 fps vs 1,050-1,060 stock (0.91x) on the RTX 5080. CPU-bound (same fps with 3 px sprites); the vertex copy into mapped memory is the cost, down from 0.70x after the single-texture 20-byte path and cached host memory
+- [~] `VulkanSpriteBatch` Tier B (fence path), 128 textures: 55-70 fps vs 17.5 (3.1-4.1x) passes; 1 texture 0.91x misses like Tier A. RTX 2080 not compared: its Vulkan run is capped at its 120 Hz presentation while the GL run uses the display GPU
 - [ ] `VulkanSpriteBatchInstanced`, 1,000,000 sprites moved by compute: 60+ fps on RTX 2080
 
 ---

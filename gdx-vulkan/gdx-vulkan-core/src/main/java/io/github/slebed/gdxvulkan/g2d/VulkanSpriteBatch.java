@@ -12,9 +12,11 @@ import io.github.slebed.gdxvulkan.CommandStream;
 import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkPipelineDesc;
 import io.github.slebed.gdxvulkan.GdxVkPresenter;
+import io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle;
 import io.github.slebed.gdxvulkan.gl.VulkanGL20;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 /**
  * A {@link com.badlogic.gdx.graphics.g2d.Batch} that draws through the Vulkan command stream (plan, Phase 2). Application code is the stock
@@ -41,6 +43,7 @@ public class VulkanSpriteBatch extends VulkanSpriteBatchDraws implements VulkanG
     private final Matrix4 projectionMatrix = new Matrix4();
     private final Matrix4 combinedMatrix = new Matrix4();
     private final float[] push = new float[32];
+    private VulkanShaderPipelineBundle bundle; // null: the default sprite shaders
 
     private boolean blendingDisabled = false;
     private int blendSrcFunc = GL20.GL_SRC_ALPHA;
@@ -159,7 +162,11 @@ public class VulkanSpriteBatch extends VulkanSpriteBatchDraws implements VulkanG
         totalRenderCalls++;
         final int sprites = idx / 20;
         if (sprites > maxSpritesInBatch) maxSpritesInBatch = sprites;
-        final long bytes = (long)sprites * 4 * VERTEX_BYTES;
+        // One texture in the whole batch and no custom shaders: stock's vertices go out as they are (20 bytes, one block copy); the
+        // Tier A slot rides in the push constants. Several textures: expand to 24 bytes with the slot in every vertex.
+        single = bundle == null && (!tierA || markerCount <= 1);
+        final int vertexBytes = single ? VERTEX_BYTES - 4 : VERTEX_BYTES;
+        final long bytes = (long)sprites * 4 * vertexBytes;
 
         final GdxVkPresenter presenter = frame.presenter();
         final long a = presenter.allocVertex(bytes);
@@ -167,11 +174,41 @@ public class VulkanSpriteBatch extends VulkanSpriteBatchDraws implements VulkanG
         final long offset = GdxVkPresenter.offsetOf(a);
         final ByteBuffer out = frame.vertexBlock(block);
 
-        // Expand stock's 5-float vertices to 24 bytes by adding the texture slot, which changes at the recorded markers (Tier A).
+        if (single) {
+            ByteBuffer dst = out.duplicate().order(ByteOrder.nativeOrder());
+            dst.position((int)offset);
+            dst.asFloatBuffer().put(vertices, 0, idx);
+        } else {
+            expandVertices(out, (int)offset, sprites);
+        }
+        presenter.flushVertices(block, offset, bytes);
+
+        final CommandStream s = frame.stream();
+        s.bindPipeline(pipeline());
+        System.arraycopy(combinedMatrix.val, 0, push, 0, 16);
+        push[16] = push[17] = push[18] = push[19] = 1f;
+        push[21] = tierA && single ? Float.intBitsToFloat(markerCount > 0 ? markerSlot[0] : 0) : 0f; // u_indices.y
+        if (bundle != null) {
+            System.arraycopy(bundle.custom0, 0, push, 24, 4);
+            System.arraycopy(bundle.custom1, 0, push, 28, 4);
+        }
+        s.pushConstants(push);
+        if (!tierA) s.bindTexture(nativeTexture(lastTexture));
+        s.bindVertex(block, offset);
+        s.bindIndexBuffer(frame.quadIndexBuffer(), 0, CommandStream.INDEX_U16);
+        s.drawIndexed(sprites * 6, 0, 0);
+
+        idx = 0;
+        markerCount = 0;
+        if (tierA && lastTexture != null) addMarker(0, gl.slotOf(nativeTexture(lastTexture))); // the batch carries on with this texture
+    }
+
+    /** Expands stock's 5-float vertices to 24 bytes by adding the texture slot, which changes at the recorded markers (Tier A). */
+    private void expandVertices (ByteBuffer out, int offset, int sprites) {
         final float[] v = vertices;
         int marker = 0, slot = tierA ? markerSlot[0] : 0;
         int nextChange = (tierA && markerCount > 1) ? markerQuad[1] : Integer.MAX_VALUE;
-        int pos = (int)offset, src = 0;
+        int pos = offset, src = 0;
         for (int q = 0; q < sprites; q++) {
             while (q >= nextChange) {
                 marker++;
@@ -187,25 +224,12 @@ public class VulkanSpriteBatch extends VulkanSpriteBatchDraws implements VulkanG
                 out.putInt(pos + 20, slot);
             }
         }
-        presenter.flushVertices(block, offset, bytes);
-
-        final CommandStream s = frame.stream();
-        s.bindPipeline(pipeline());
-        System.arraycopy(combinedMatrix.val, 0, push, 0, 16);
-        push[16] = push[17] = push[18] = push[19] = 1f;
-        s.pushConstants(push);
-        if (!tierA) s.bindTexture(nativeTexture(lastTexture));
-        s.bindVertex(block, offset);
-        s.bindIndexBuffer(frame.quadIndexBuffer(), 0, CommandStream.INDEX_U16);
-        s.drawIndexed(sprites * 6, 0, 0);
-
-        idx = 0;
-        markerCount = 0;
-        if (tierA && lastTexture != null) addMarker(0, gl.slotOf(nativeTexture(lastTexture))); // the batch carries on with this texture
     }
 
+    private boolean single; // this flush takes the 20-byte path
+
     private int pipeline () {
-        return SpritePipelines.get(frame, blendingDisabled, blendSrcFunc, blendDstFunc, blendSrcFuncAlpha, blendDstFuncAlpha);
+        return SpritePipelines.get(frame, bundle, single, blendingDisabled, blendSrcFunc, blendDstFunc, blendSrcFuncAlpha, blendDstFuncAlpha);
     }
 
     @Override public void disableBlending () {
@@ -288,6 +312,17 @@ public class VulkanSpriteBatch extends VulkanSpriteBatchDraws implements VulkanG
 
     @Override public ShaderProgram getShader () {
         return null;
+    }
+
+    /** Custom shading: draws after this call use the bundle's shaders. Null restores the default. Flushes what is queued first. */
+    public void setShaderBundle (VulkanShaderPipelineBundle bundle) {
+        if (bundle == this.bundle) return;
+        if (drawing) flush();
+        this.bundle = bundle;
+    }
+
+    public VulkanShaderPipelineBundle getShaderBundle () {
+        return bundle;
     }
 
     @Override public boolean isBlendingEnabled () {

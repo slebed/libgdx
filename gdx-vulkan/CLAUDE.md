@@ -21,19 +21,25 @@ Native core (`gdx-vulkan-core/jni/src`), one file per subsystem, all owned by `C
 - `gdxvk_resources` buffers (VmaVirtualBlock sub-allocation) and RGBA8 textures behind int ids; `gdxvk_reflect` SPIRV-Reflect validator
   (vendored in `jni/vendor/spirv-reflect`); shaders compile twice (`name.spv` Tier B, `name.a.spv` with `-DGDX_TIER_A=1`).
 - Java: `GdxVkContext`, `GdxVkPresenter`, `GdxVkResources`, `GdxVkSampler`, `GdxVkShaders`.
-- Phase 2 so far (`io.github.slebed.gdxvulkan.gl`): `VulkanGL20` (texture shim + query table over `GdxVkResources`), `PixelConversion`,
-  and `VulkanGL20Base`, **generated** from libGDX's `GL20.java` by `tools/generate_gl20_base.py` (regenerate, do not edit). Textures are
-  recorded as GL state in Java and the native image is created at first use (`nativeTexture(glHandle)`); pixel changes afterwards rename the
-  image natively (staging `updateImage`). Uploads are recorded at `endFrame` into a separate command buffer submitted ahead of the frame,
-  so anything created or changed mid-frame is in place for that frame's draws. Not done: command stream, `VulkanSpriteBatch` and the rest.
+- Phase 2 (`io.github.slebed.gdxvulkan.gl` and `.g2d`): `VulkanGL20` (texture shim incl. compressed formats, query table, ordered state into the
+  command stream) over `GdxVkResources`, `PixelConversion`, and `VulkanGL20Base`, **generated** from libGDX's `GL20.java` by
+  `tools/generate_gl20_base.py` (regenerate, do not edit). Textures are recorded as GL state in Java and the native image is created at first
+  use (`nativeTexture(glHandle)`); pixel changes afterwards rename the image natively. Uploads are recorded at `endFrame` into a separate
+  command buffer submitted ahead of the frame. Draws go through `CommandStream` (`gdxvk_commands.h`) and one `nativeSubmitCommands` per frame.
+  `VulkanSpriteBatch`, `VulkanPolygonSpriteBatch`, `VulkanShapeRenderer` have their draw code **generated from stock source**
+  (`tools/generate_*.py`; keep it that way so the Gate 2 oracle stays honest). `VulkanShaderPipelineBundle` = custom SPIR-V for the batches.
+  Not done: `VulkanSpriteBatchInstanced` (compute), Tier A 1-texture parity with stock GL (0.91x).
 
-Tests (`gdx-vulkan-desktop`): `PresenterTest`, `TriangleTest`, `GoldenTest` (lavapipe goldens, exact on lavapipe, tolerance on GPUs),
+Tests (`gdx-vulkan-desktop`): `TextureShimTest`, `SpriteBatchTest`, `Gate2GoldenTest` (7 scenes: stock-GL oracle with tolerance, then exact lavapipe goldens),
+`PresenterTest`, `TriangleTest`, `GoldenTest` (lavapipe goldens, exact on lavapipe, tolerance on GPUs),
 `ResourcesTest` (all three sets reach the shader, deferred deletion, pipeline cache file, reflection rejects bad shaders), and `SoakTest`
 via its own Gradle task `soakTest` (`-Dgdxvulkan.soakSeconds=600` for the full run). CI: `.github/workflows/gdx-vulkan.yml` ->
 `ci/Dockerfile` + `ci/run-checks.sh` (see `ci/README.md`). Android: `gdx-vulkan-android` (separate Gradle 8.14/AGP 8.13 build).
 
 Open items: Android device run of 1b and Phase 2 (phone unplugged; both compile for arm64); 10-minute soak in Tier B; Wayland/macOS; debug-utils object names; armeabi-v7a/x86_64;
-CI has never run on GitHub itself; the GL20 shim and everything after Phase 1b.
+CI has never run on GitHub itself; `VulkanSpriteBatchInstanced`; Phases 3-6.
+`./gradlew :gdx-vulkan-desktop:stress2` is Stress test 2 (stock GL vs VulkanSpriteBatch, each in its own JVM). Note GL runs on the display GPU, so a
+second-GPU Vulkan comparison is capped by presentation and means nothing.
 
 ## Verification state
 - **`-Dgdxvulkan.device=N` was not being forwarded to the test JVM until Phase 1b**, so every earlier "RTX 2080" result was really the

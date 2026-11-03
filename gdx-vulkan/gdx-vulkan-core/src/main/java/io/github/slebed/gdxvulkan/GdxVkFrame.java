@@ -122,6 +122,15 @@ public final class GdxVkFrame {
      * A pipeline by key, created on first use. {@code vertName}/{@code fragName} are shader resources ({@code name.vert}); the Tier A or
      * Tier B build is chosen to match the device.
      */
+    public int pipeline(String key, String name, VulkanShaderPipelineBundle bundle, GdxVkPipelineDesc desc) {
+        Integer id = pipelines.get(key);
+        if (id == null) {
+            id = presenter.createPipeline(name, bundle.vertex(tierA), bundle.fragment(tierA), desc);
+            pipelines.put(key, id);
+        }
+        return id;
+    }
+
     public int pipeline(String key, String name, String vertName, String fragName, GdxVkPipelineDesc desc) {
         Integer id = pipelines.get(key);
         if (id == null) {

@@ -39,6 +39,7 @@ public class VulkanGL20 extends VulkanGL20Base {
         final int handle;
         int nativeId = -1;
         int format = -1; // GdxVkResources.FORMAT_*, fixed by the first level-0 upload
+        int vkFormat, blockW, blockH, blockBytes; // FORMAT_COMPRESSED only
         int width, height;
         final byte[][] levelData = new byte[MAX_LEVELS][]; // CPU copies until the image exists
         final int[] levelW = new int[MAX_LEVELS], levelH = new int[MAX_LEVELS];
@@ -341,8 +342,72 @@ public class VulkanGL20 extends VulkanGL20Base {
         }
     }
 
+    /** GL compressed internal format -> {VkFormat, blockW, blockH, blockBytes}, or null. */
+    private static int[] compressedFormat(int glFormat) {
+        switch (glFormat) {
+        case 0x83F0: case 0x83F1: return new int[] {131, 4, 4, 8}; // DXT1 RGB / RGBA -> BC1_RGBA_UNORM
+        case 0x83F2: return new int[] {135, 4, 4, 16}; // DXT3 -> BC2
+        case 0x83F3: return new int[] {137, 4, 4, 16}; // DXT5 -> BC3
+        case 0x8D64: case 0x9274: return new int[] {147, 4, 4, 8}; // ETC1 / ETC2 RGB8 -> ETC2_R8G8B8
+        case 0x9276: return new int[] {149, 4, 4, 8}; // ETC2 RGB8 punch-through alpha
+        case 0x9278: return new int[] {151, 4, 4, 16}; // ETC2 RGBA8
+        default:
+            if (glFormat >= 0x93B0 && glFormat <= 0x93BD) { // ASTC 4x4 ... 12x12
+                final int[][] blocks = {{4, 4}, {5, 4}, {5, 5}, {6, 5}, {6, 6}, {8, 5}, {8, 6}, {8, 8}, {10, 5}, {10, 6}, {10, 8}, {10, 10}, {12, 10}, {12, 12}};
+                final int i = glFormat - 0x93B0;
+                return new int[] {157 + i * 2, blocks[i][0], blocks[i][1], 16}; // ASTC_nxm_UNORM_BLOCK = 157, 159, ...
+            }
+            return null;
+        }
+    }
+
+    @Override public void glCompressedTexImage2D (int target, int level, int internalformat, int width, int height, int border, int imageSize, Buffer data) {
+        GlTexture t = bound(target);
+        if (level < 0 || level >= MAX_LEVELS) throw new GdxRuntimeException("gdx-vulkan: mip level " + level + " out of range");
+        int[] f = compressedFormat(internalformat);
+        if (f == null) throw unsupported("compressed texture format 0x" + Integer.toHexString(internalformat));
+        if (!resources.formatSupported(f[0])) {
+            throw new GdxRuntimeException("gdx-vulkan: this GPU cannot sample compressed format 0x" + Integer.toHexString(internalformat)
+                + " (VkFormat " + f[0] + "); BC formats are desktop-only, ETC2 and ASTC mobile-only");
+        }
+        if (data == null) throw unsupported("glCompressedTexImage2D without data");
+        byte[] bytes = PixelConversion.bytesOf(data, imageSize);
+        int expected = ((width + f[1] - 1) / f[1]) * ((height + f[2] - 1) / f[2]) * f[3];
+        if (bytes.length != expected) throw new GdxRuntimeException("gdx-vulkan: compressed level is " + bytes.length + " bytes, expected " + expected);
+        if (t.nativeId >= 0) {
+            if (level != 0) throw unsupported("glCompressedTexImage2D of level " + level + " after the image was created");
+            resources.destroyTexture(t.nativeId);
+            t.nativeId = -1;
+            t.appliedSampler = null;
+            java.util.Arrays.fill(t.levelData, null);
+            t.generateMips = false;
+            rebound(t);
+        }
+        t.levelData[level] = bytes;
+        t.levelW[level] = width;
+        t.levelH[level] = height;
+        if (level == 0) {
+            t.format = GdxVkResources.FORMAT_COMPRESSED;
+            t.vkFormat = f[0];
+            t.blockW = f[1];
+            t.blockH = f[2];
+            t.blockBytes = f[3];
+            t.width = width;
+            t.height = height;
+        }
+    }
+
+    @Override public void glCompressedTexSubImage2D (int target, int level, int xoffset, int yoffset, int width, int height, int format, int imageSize, Buffer data) {
+        GlTexture t = bound(target);
+        if (t.format != GdxVkResources.FORMAT_COMPRESSED) throw new GdxRuntimeException("gdx-vulkan: glCompressedTexSubImage2D into an uncompressed texture");
+        if (t.nativeId < 0) throw unsupported("glCompressedTexSubImage2D before the image exists (draw with it once first)");
+        resources.updateTexture(t.nativeId, level, xoffset, yoffset, width, height, PixelConversion.bytesOf(data, imageSize));
+        rebound(t);
+    }
+
     @Override public void glGenerateMipmap (int target) {
         GlTexture t = bound(target);
+        if (t.format == GdxVkResources.FORMAT_COMPRESSED) return; // compressed images cannot be blitted; GL leaves them as uploaded too
         if (t.nativeId >= 0) {
             resources.regenerateMips(t.nativeId);
             rebound(t);
@@ -455,7 +520,11 @@ public class VulkanGL20 extends VulkanGL20Base {
             at += t.levelData[l].length;
         }
         GdxVkSampler s = samplerOf(t);
-        t.nativeId = resources.createTexture(t.width, t.height, t.format, levels, t.generateMips, data, s);
+        if (t.format == GdxVkResources.FORMAT_COMPRESSED) {
+            t.nativeId = resources.createCompressedTexture(t.width, t.height, t.vkFormat, t.blockW, t.blockH, t.blockBytes, levels, data, s);
+        } else {
+            t.nativeId = resources.createTexture(t.width, t.height, t.format, levels, t.generateMips, data, s);
+        }
         t.appliedSampler = s;
         java.util.Arrays.fill(t.levelData, null); // the image owns the pixels now
         return t.nativeId;

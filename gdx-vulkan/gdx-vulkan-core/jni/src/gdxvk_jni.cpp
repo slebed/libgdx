@@ -290,6 +290,35 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateT
     return id;
 }
 
+// A block-compressed texture: `levels` tightly packed mip levels of the given Vulkan format (blockW x blockH texels in blockBytes).
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateCompressedTexture(JNIEnv* env, jclass, jlong ctx, jint width,
+                                                                                                  jint height, jint vkFormat, jint blockW,
+                                                                                                  jint blockH, jint blockBytes, jint levels,
+                                                                                                  jbyteArray data, jint minFilter,
+                                                                                                  jint magFilter, jint mipFilter, jint wrapU,
+                                                                                                  jint wrapV, jint anisotropy) {
+    if (data == nullptr) return -1;
+    gdxvk::TextureDesc desc;
+    desc.width = static_cast<uint32_t>(width);
+    desc.height = static_cast<uint32_t>(height);
+    desc.format = gdxvk::TexFormat::Compressed;
+    desc.vkFormat = static_cast<uint32_t>(vkFormat);
+    desc.blockW = static_cast<uint32_t>(blockW);
+    desc.blockH = static_cast<uint32_t>(blockH);
+    desc.blockBytes = static_cast<uint32_t>(blockBytes);
+    desc.uploadedLevels = static_cast<uint32_t>(levels);
+    const jsize bytes = env->GetArrayLength(data);
+    jbyte* p = static_cast<jbyte*>(env->GetPrimitiveArrayCritical(data, nullptr));
+    if (p == nullptr) return -1;
+    const int id = res(ctx).createTexture(desc, p, static_cast<uint64_t>(bytes), samplerKey(minFilter, magFilter, mipFilter, wrapU, wrapV, anisotropy));
+    env->ReleasePrimitiveArrayCritical(data, p, JNI_ABORT);
+    return id;
+}
+
+JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeFormatSupported(JNIEnv*, jclass, jlong ctx, jint vkFormat) {
+    return res(ctx).formatSupported(static_cast<uint32_t>(vkFormat)) ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeUpdateTexture(JNIEnv* env, jclass, jlong ctx, jint id,
                                                                                             jint level, jint x, jint y, jint w, jint h,
                                                                                             jbyteArray data) {

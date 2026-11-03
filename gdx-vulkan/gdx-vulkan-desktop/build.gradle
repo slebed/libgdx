@@ -84,6 +84,18 @@ test {
     System.getProperty('gdxvulkan.requireGl')?.with { v -> systemProperty('gdxvulkan.requireGl', v) }
 }
 
+// Stress test 2: VulkanSpriteBatch against stock SpriteBatch on lwjgl3, same machine. Prints a table against the plan's targets.
+// -Dgdxvulkan.device=N picks the GPU for the Vulkan runs; -Dgdxvulkan.stress2.report=true never fails the build.
+tasks.register('stress2', JavaExec) {
+    description = 'Stress test 2: VulkanSpriteBatch vs stock SpriteBatch (needs an OpenGL driver).'
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.github.slebed.gdxvulkan.desktop.Stress2Main'
+    dependsOn 'testClasses', ':gdx-vulkan-core:buildNatives'
+    systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
+    System.properties.each { k, v -> if (k.toString().startsWith('gdxvulkan.')) systemProperty k.toString(), v.toString() }
+}
+
 tasks.register('runTriangleDemo', JavaExec) {
     description = 'Opens a window with a spinning triangle. -Dgdxvulkan.forceTierB=true for Tier B.'
     classpath = sourceSets.main.runtimeClasspath

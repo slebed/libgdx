@@ -312,6 +312,31 @@ class SpriteBatchTest {
         green.dispose();
     }
 
+    @Test void shaderBundleReplacesTheFragmentShaderAndCarriesCustomUniforms() {
+        Texture orange = solid(1f, 0.5f, 0f, 1f);
+        io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle gray =
+            io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle.fromResources("gray", "sprite.vert", "sprite_gray.frag");
+        byte[] f = render(BLACK, b -> {
+            b.begin();
+            b.draw(orange, 0, 32, 16, 16); // default shader: colour as is
+            b.setShaderBundle(gray);
+            gray.custom0[0] = 1f;
+            b.draw(orange, 16, 32, 16, 16); // fully grayscale
+            b.flush(); // custom values are read at flush time
+            gray.custom0[0] = 0f;
+            b.draw(orange, 32, 32, 16, 16); // bundle with the effect off
+            b.setShaderBundle(null);
+            b.draw(orange, 48, 32, 16, 16); // default again
+            b.end();
+        });
+        int lum = Math.round(0.299f * 255 + 0.587f * 128);
+        assertPx(f, 8, 24, 255, 128, 0, 1, "default shader");
+        assertPx(f, 24, 24, lum, lum, lum, 2, "grayscale bundle");
+        assertPx(f, 40, 24, 255, 128, 0, 1, "bundle with custom0.x = 0");
+        assertPx(f, 56, 24, 255, 128, 0, 1, "default restored");
+        orange.dispose();
+    }
+
     @Test void apiContractAroundShadersAndDrawing() {
         assertEquals(Color.WHITE_FLOAT_BITS, new VulkanSpriteBatch(frame).getPackedColor());
         GLFW.glfwPollEvents();
