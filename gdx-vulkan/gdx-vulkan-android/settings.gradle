@@ -1,0 +1,17 @@
+// A separate Gradle build from the desktop one: AGP needs a released Gradle (8.14), the desktop build runs on 9.0-milestone.
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode = RepositoriesMode.FAIL_ON_PROJECT_REPOS
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = 'gdx-vulkan-android'
+include ':library', ':testapp'

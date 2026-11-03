@@ -1,0 +1,3 @@
+rootProject.name = 'gdx-vulkan'
+include 'gdx-vulkan-core', 'gdx-vulkan-desktop'
+// gdx-vulkan-android is its own Gradle build (see gdx-vulkan-android/README.md): AGP needs a released Gradle.

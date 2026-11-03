@@ -1,0 +1,25 @@
+// On-device Phase 1a check: a SurfaceView that runs the pixel self-test, then spins the triangle.
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.slebed.gdxvulkan.testapp'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'io.github.slebed.gdxvulkan.testapp'
+        minSdk 29
+        targetSdk 36
+        versionCode 1
+        versionName '0.1'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    implementation project(':library')
+}

@@ -1,0 +1,48 @@
+// Desktop glue: native window handles from GLFW (as stock gdx-backend-lwjgl3 uses it) and a clear-screen demo.
+// gdx-vulkan renders into the surface itself, so the GLFW windows here are created with GLFW_NO_API.
+dependencies {
+    api project(':gdx-vulkan-core')
+    api "com.badlogicgames.gdx:gdx-backend-lwjgl3:${gdxVersion}"
+
+    testImplementation platform("org.junit:junit-bom:${junitVersion}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+def coreNative = project(':gdx-vulkan-core').layout.buildDirectory.dir('native')
+
+test {
+    useJUnitPlatform()
+    dependsOn ':gdx-vulkan-core:buildNatives'
+    systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
+    systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'true')
+    systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
+    systemProperty 'gdxvulkan.requireDriver', System.getProperty('gdxvulkan.requireDriver', 'false')
+    // Golden images (src/test/resources/goldens). Write them with -Dgdxvulkan.updateGoldens=true on lavapipe only.
+    systemProperty 'gdxvulkan.goldenDir', file('src/test/resources/goldens').absolutePath
+    systemProperty 'gdxvulkan.diffDir', layout.buildDirectory.dir('golden-diff').get().asFile.absolutePath
+    systemProperty 'gdxvulkan.updateGoldens', System.getProperty('gdxvulkan.updateGoldens', 'false')
+    // Synchronization validation on every test run (plan, Core decision 8); any message fails the test.
+    environment 'VK_LAYER_ENABLES', 'VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT'
+    testLogging { events 'passed', 'skipped', 'failed'; showStandardStreams = true }
+}
+
+tasks.register('runTriangleDemo', JavaExec) {
+    description = 'Opens a window with a spinning triangle. -Dgdxvulkan.forceTierB=true for Tier B.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'io.github.slebed.gdxvulkan.desktop.TriangleDemo'
+    dependsOn ':gdx-vulkan-core:buildNatives'
+    systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
+    systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'true')
+    systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
+}
+
+tasks.register('runClearDemo', JavaExec) {
+    description = 'Opens a window and cycles the clear colour. -Dgdxvulkan.forceTierB=true for Tier B.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'io.github.slebed.gdxvulkan.desktop.ClearScreenDemo'
+    dependsOn ':gdx-vulkan-core:buildNatives'
+    systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
+    systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'true')
+    systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
+}

@@ -1,0 +1,16 @@
+subprojects {
+    apply plugin: 'java-library'
+    group = 'io.github.slebed.gdx-vulkan'
+    version = '0.1.0-SNAPSHOT'
+
+    repositories {
+        mavenCentral()
+    }
+
+    // Build with any JDK 11+; emit Java 8 class files like libGDX 1.14 (Android desugaring).
+    tasks.withType(JavaCompile).configureEach {
+        options.release = 8
+        options.encoding = 'UTF-8'
+        options.compilerArgs << '-Xlint:all'
+    }
+}

@@ -1,0 +1,37 @@
+// Shared by gdx-vulkan-core (desktop) and gdx-vulkan-android (a separate Gradle build).
+//   apply from: '<path>/gradle/compile-shaders.gradle'
+//   registerCompileShaders(project, file('src/main/shaders'), layout.buildDirectory.dir('generated/shaders'))
+// Compiles *.vert / *.frag / *.comp to <outDir>/shaders/<name>.spv with glslc. *.glsl files are includes.
+// glslc is looked up in $VULKAN_SDK/Bin, then on PATH, then in the Android NDK's shader-tools.
+ext.registerCompileShaders = { Project p, File shaderSrc, Provider<Directory> shaderGen ->
+    p.tasks.register('compileShaders') {
+        inputs.dir(shaderSrc)
+        outputs.dir(shaderGen)
+        doLast {
+            def win = System.getProperty('os.name').toLowerCase().contains('win')
+            def exe = win ? 'glslc.exe' : 'glslc'
+            def candidates = []
+            def sdk = System.getenv('VULKAN_SDK')
+            if (sdk) candidates << new File(sdk, "Bin/${exe}")
+            def ndkRoot = System.getenv('ANDROID_NDK_ROOT') ?: System.getenv('ANDROID_NDK_HOME')
+            if (ndkRoot) candidates.addAll(new File(ndkRoot, 'shader-tools').listFiles()?.collect { new File(it, exe) } ?: [])
+            def found = candidates.find { it.exists() }
+            def glslc = found ? found.absolutePath : 'glslc' // else PATH
+
+            def outDir = new File(shaderGen.get().asFile, 'shaders')
+            outDir.mkdirs()
+            p.fileTree(shaderSrc) { include '*.vert', '*.frag', '*.comp' }.each { File f ->
+                def out = new File(outDir, f.name + '.spv')
+                def proc
+                try {
+                    proc = new ProcessBuilder(glslc, '--target-env=vulkan1.1', '-O', '-I', shaderSrc.absolutePath,
+                        '-o', out.absolutePath, f.absolutePath).redirectErrorStream(true).start()
+                } catch (IOException e) {
+                    throw new GradleException("glslc not found (set VULKAN_SDK, put glslc on PATH): ${e.message}")
+                }
+                def log = proc.inputStream.text
+                if (proc.waitFor() != 0) throw new GradleException("glslc failed for ${f.name}:\n${log}")
+            }
+        }
+    }
+}

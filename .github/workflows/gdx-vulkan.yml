@@ -1,0 +1,58 @@
+name: gdx-vulkan
+
+# Required check for gdx-vulkan (plan, Phase 1a): every test, in Tier A and forceTierB, on lavapipe under Xvfb, with the
+# Khronos validation layer and synchronization validation enabled. Goldens are exact lavapipe renders, so the Mesa version is
+# pinned in gdx-vulkan/ci/mesa-version.txt and the job fails if the image's Mesa differs. See gdx-vulkan/ci/README.md.
+#
+# Windows (RTX 2080) and Android (Galaxy S20) runs are manual: GitHub's hosted runners have no GPU.
+
+on:
+  push:
+    paths: ['gdx-vulkan/**', '.github/workflows/gdx-vulkan.yml']
+  pull_request:
+    paths: ['gdx-vulkan/**', '.github/workflows/gdx-vulkan.yml']
+  workflow_dispatch:
+    inputs:
+      update_goldens:
+        description: 'Regenerate goldens on lavapipe (Mesa pin change) and upload them as an artifact instead of checking'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  lavapipe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build CI image
+        run: docker build -t gdx-vulkan-ci gdx-vulkan/ci
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle-ci
+          key: gdx-vulkan-gradle-${{ hashFiles('gdx-vulkan/**/*.gradle', 'gdx-vulkan/gradle/wrapper/gradle-wrapper.properties', 'gdx-vulkan/gradle.properties') }}
+          restore-keys: gdx-vulkan-gradle-
+
+      - name: Run checks (Tier A and Tier B) on lavapipe
+        run: |
+          mkdir -p "$HOME/.gradle-ci" "$RUNNER_TEMP/out"
+          docker run --rm \
+            -e UPDATE_GOLDENS=${{ inputs.update_goldens && '1' || '0' }} \
+            -e SKIP_MESA_PIN=${{ inputs.update_goldens && '1' || '0' }} \
+            -v "$GITHUB_WORKSPACE/gdx-vulkan:/src:ro" \
+            -v "$RUNNER_TEMP/out:/out" \
+            -v "$HOME/.gradle-ci:/root/.gradle" \
+            gdx-vulkan-ci bash /src/ci/run-checks.sh
+
+      - name: Upload reports and golden diffs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdx-vulkan-reports
+          path: ${{ runner.temp }}/out
+          if-no-files-found: ignore

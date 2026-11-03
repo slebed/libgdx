@@ -1,0 +1,8 @@
+.gradle/
+build/
+*.class
+*.log
+hs_err_pid*
+.idea/
+*.iml
+local.properties

@@ -1,0 +1,51 @@
+// Core library: depends on stock libGDX only (no LWJGL, no backend).
+dependencies {
+    api "com.badlogicgames.gdx:gdx:${gdxVersion}"
+
+    testImplementation platform("org.junit:junit-bom:${junitVersion}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+def jniDir      = file('jni')
+def nativeBuild = layout.buildDirectory.dir('native')
+
+// Plain CMake build (Phase 1a decision: gdx-jnigen deferred until cross-compile support is verified).
+tasks.register('cmakeConfigure', Exec) {
+    inputs.file('jni/CMakeLists.txt')
+    outputs.dir(nativeBuild)
+    commandLine 'cmake', '-S', jniDir, '-B', nativeBuild.get().asFile, '-DCMAKE_BUILD_TYPE=Release'
+}
+tasks.register('buildNatives', Exec) {
+    dependsOn 'cmakeConfigure'
+    inputs.dir('jni/src')
+    inputs.dir('jni/vendor')
+    inputs.dir('jni/test')
+    outputs.dir(nativeBuild)
+    commandLine 'cmake', '--build', nativeBuild.get().asFile, '--config', 'Release', '--parallel'
+}
+tasks.register('nativeTests', Exec) {
+    dependsOn 'buildNatives'
+    workingDir nativeBuild
+    commandLine 'ctest', '--output-on-failure', '-C', 'Release'
+}
+
+// Shaders: src/main/shaders/*.{vert,frag,comp} -> SPIR-V resources at /shaders/<name>.<stage>.spv (see gradle/compile-shaders.gradle).
+apply from: "${rootDir}/gradle/compile-shaders.gradle"
+def shaderGen = layout.buildDirectory.dir('generated/shaders')
+registerCompileShaders(project, file('src/main/shaders'), shaderGen)
+sourceSets.main.resources.srcDir(shaderGen)
+processResources.dependsOn 'compileShaders'
+
+test {
+    useJUnitPlatform()
+    dependsOn 'buildNatives'
+    systemProperty 'gdxvulkan.native.path', nativeBuild.get().asFile.absolutePath
+    systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'true')
+    systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
+    systemProperty 'gdxvulkan.requireDriver', System.getProperty('gdxvulkan.requireDriver', 'false')
+    // Synchronization validation on every test run (plan, Core decision 8); any message fails the test.
+    environment 'VK_LAYER_ENABLES', 'VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT'
+    testLogging { events 'passed', 'skipped', 'failed'; showStandardStreams = true }
+}
+check.dependsOn 'nativeTests'

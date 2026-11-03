@@ -1,0 +1,45 @@
+// gdx-vulkan for Android: the core Java sources, the native library built with the NDK from the shared CMake tree, and the shaders.
+plugins {
+    id 'com.android.library'
+}
+
+apply from: "${rootDir}/../gradle/compile-shaders.gradle"
+def shaderGen = layout.buildDirectory.dir('generated/shaders')
+registerCompileShaders(project, file('../../gdx-vulkan-core/src/main/shaders'), shaderGen)
+
+android {
+    namespace 'io.github.slebed.gdxvulkan.android'
+    compileSdk 36
+    ndkVersion '28.2.13676358'
+
+    defaultConfig {
+        minSdk 29 // Vulkan 1.1 is mandatory from Android 10
+        ndk { abiFilters 'arm64-v8a' } // armeabi-v7a and x86_64 join in Phase 4
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_static', '-DGDXVK_BUILD_TESTS=OFF'
+                cppFlags ''
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path file('../../gdx-vulkan-core/jni/CMakeLists.txt')
+            version '3.22.1'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    sourceSets.main {
+        java.srcDir '../../gdx-vulkan-core/src/main/java'
+        resources.srcDir shaderGen
+    }
+}
+
+dependencies {
+    api "com.badlogicgames.gdx:gdx:${gdxVersion}"
+}
+
+tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn 'compileShaders' }
