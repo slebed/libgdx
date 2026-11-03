@@ -48,10 +48,62 @@ final class Gate2Scenes {
         void dispose();
     }
 
+    /** A scene drawn with a ShapeRenderer instead of a Batch. */
+    interface ShapeScene extends Scene {
+        void drawShapes(ShapeApi shapes, int width, int height) throws Exception;
+    }
+
     private Gate2Scenes() {}
 
     static Scene[] all() {
-        return new Scene[] {new Scene2dScene(), new WindowScene(), new BitmapFontScene(), new AtlasScene(), new ParticleScene(), new FreeTypeScene()};
+        return new Scene[] {new Scene2dScene(), new WindowScene(), new BitmapFontScene(), new AtlasScene(), new ParticleScene(), new FreeTypeScene(),
+            new ShapesScene()};
+    }
+
+    /** Points, lines, filled and outlined shapes, alpha blended: what stock's ShapeRenderer is used for (debug drawing, UI backdrops, charts). */
+    private static final class ShapesScene implements ShapeScene {
+        public String name() { return "gate2_shapes"; }
+
+        public void prepare(FileHandle data, int w, int h) {}
+
+        public void draw(Batch batch, int w, int h) {
+            throw new UnsupportedOperationException("a shape scene is drawn with drawShapes");
+        }
+
+        public void drawShapes(ShapeApi s, int w, int h) {
+            Gdx.gl.glEnable(com.badlogic.gdx.graphics.GL20.GL_BLEND);
+            Gdx.gl.glBlendFunc(com.badlogic.gdx.graphics.GL20.GL_SRC_ALPHA, com.badlogic.gdx.graphics.GL20.GL_ONE_MINUS_SRC_ALPHA);
+            s.begin(ShapeApi.Kind.Filled);
+            s.setColor(1f, 0.3f, 0.2f, 1f);
+            s.rect(16, 150, 90, 90);
+            s.setColor(0.2f, 0.6f, 1f, 0.6f); // translucent: shows the first rectangle through it
+            s.rect(60, 120, 100, 100);
+            s.setColor(0.3f, 1f, 0.4f, 1f);
+            s.circle(200, 190, 36, 40);
+            s.setColor(1f, 0.9f, 0.2f, 1f);
+            s.triangle(20, 20, 100, 20, 60, 90);
+            s.setColor(0.9f, 0.4f, 1f, 0.8f);
+            s.arc(190, 70, 50, 20, 250, 30);
+            s.end();
+
+            s.begin(ShapeApi.Kind.Line);
+            s.setColor(1f, 1f, 1f, 1f);
+            s.rect(8, 8, 240, 240);
+            s.line(110, 20, 240, 100);
+            s.line(110, 100, 240, 20);
+            s.setColor(0.4f, 1f, 1f, 1f);
+            s.circle(200, 190, 44, 48);
+            s.curve(120, 240, 150, 150, 170, 250, 240, 140, 32);
+            s.end();
+
+            s.begin(ShapeApi.Kind.Point);
+            s.setColor(1f, 1f, 1f, 1f);
+            for (int i = 0; i < 12; i++) s.point(110 + i * 4, 112);
+            s.end();
+            Gdx.gl.glDisable(com.badlogic.gdx.graphics.GL20.GL_BLEND);
+        }
+
+        public void dispose() {}
     }
 
     private static final class Scene2dScene implements Scene {

@@ -71,7 +71,16 @@ public final class GlReferenceMain extends ApplicationAdapter {
             ScreenUtils.clear(bg[0], bg[1], bg[2], bg[3]);
             Gdx.gl.glViewport(0, 0, w, h);
             batch.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
-            scene.draw(batch, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            if (scene instanceof Gate2Scenes.ShapeScene) {
+                ShapeApi shapes = ShapeApi.stock(); // stock ShapeRenderer, which draws through GL programs
+                try {
+                    ((Gate2Scenes.ShapeScene)scene).drawShapes(shapes, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                } finally {
+                    shapes.dispose();
+                }
+            } else {
+                scene.draw(batch, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            }
             byte[] rgba = ScreenUtils.getFrameBufferPixels(0, 0, w, h, true); // row 0 at the top
             BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
             for (int i = 0, p = 0; p < w * h; p++, i += 4) {

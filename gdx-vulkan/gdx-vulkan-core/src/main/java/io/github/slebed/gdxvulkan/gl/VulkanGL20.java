@@ -189,7 +189,33 @@ public class VulkanGL20 extends VulkanGL20Base {
         if (stream != null) stream.scissor(x, y, width, height);
     }
 
+    // Blend state is pipeline state in Vulkan. The batches own theirs; the immediate-mode renderer follows what the application set here.
+    private boolean blendEnabled;
+    private int blendSrcRgb = GL_ONE, blendDstRgb = GL_ZERO, blendSrcAlpha = GL_ONE, blendDstAlpha = GL_ZERO;
+
+    public boolean isBlendEnabled () {
+        return blendEnabled;
+    }
+
+    /** {srcRGB, dstRGB, srcAlpha, dstAlpha} as set by glBlendFunc / glBlendFuncSeparate. */
+    public int[] blendFunctions () {
+        return new int[] {blendSrcRgb, blendDstRgb, blendSrcAlpha, blendDstAlpha};
+    }
+
+    @Override public void glBlendFunc (int sfactor, int dfactor) {
+        blendSrcRgb = blendSrcAlpha = sfactor;
+        blendDstRgb = blendDstAlpha = dfactor;
+    }
+
+    @Override public void glBlendFuncSeparate (int srcRGB, int dstRGB, int srcAlpha, int dstAlpha) {
+        blendSrcRgb = srcRGB;
+        blendDstRgb = dstRGB;
+        blendSrcAlpha = srcAlpha;
+        blendDstAlpha = dstAlpha;
+    }
+
     @Override public void glEnable (int cap) {
+        if (cap == GL_BLEND) blendEnabled = true;
         if (cap == GL_SCISSOR_TEST) {
             scissorEnabled = true;
             if (stream != null) stream.scissorEnable(true);
@@ -197,6 +223,7 @@ public class VulkanGL20 extends VulkanGL20Base {
     }
 
     @Override public void glDisable (int cap) {
+        if (cap == GL_BLEND) blendEnabled = false;
         if (cap == GL_SCISSOR_TEST) {
             scissorEnabled = false;
             if (stream != null) stream.scissorEnable(false);

@@ -87,7 +87,7 @@ class Gate2GoldenTest {
         try {
             scene.prepare(data, w, h);
             checkWith(scene, false);
-            checkWith(scene, true);
+            if (!(scene instanceof Gate2Scenes.ShapeScene)) checkWith(scene, true); // shapes do not go through a batch
         } finally {
             scene.dispose();
         }
@@ -98,11 +98,20 @@ class Gate2GoldenTest {
         String label = scene.name() + (polygonBatch ? " (VulkanPolygonSpriteBatch)" : " (VulkanSpriteBatch)");
         GLFW.glfwPollEvents();
         assertTrue(frame.begin(bg[0], bg[1], bg[2], bg[3]));
-        com.badlogic.gdx.graphics.g2d.Batch batch = polygonBatch ? new VulkanPolygonSpriteBatch(frame) : new VulkanSpriteBatch(frame);
-        try {
-            scene.draw(batch, w, h);
-        } finally {
-            batch.dispose();
+        if (scene instanceof Gate2Scenes.ShapeScene) {
+            ShapeApi shapes = ShapeApi.vulkan(frame);
+            try {
+                ((Gate2Scenes.ShapeScene)scene).drawShapes(shapes, w, h);
+            } finally {
+                shapes.dispose();
+            }
+        } else {
+            com.badlogic.gdx.graphics.g2d.Batch batch = polygonBatch ? new VulkanPolygonSpriteBatch(frame) : new VulkanSpriteBatch(frame);
+            try {
+                scene.draw(batch, w, h);
+            } finally {
+                batch.dispose();
+            }
         }
         byte[] px = frame.endAndCapture();
 
@@ -112,10 +121,23 @@ class Gate2GoldenTest {
         }
         assertTrue(drawn > w * h / 50, label + " is nearly blank: " + drawn + " of " + w * h + " pixels differ from the background");
 
-        GoldenImages.assertMatches(scene.name(), px, w, h, ctx.caps().deviceName);
-        boolean compared = OracleImages.compare(scene.name(), px, w, h);
-        if (!compared && Boolean.getBoolean("gdxvulkan.requireGl")) {
-            throw new AssertionError("No stock-GL reference image for " + scene.name() + " in gdxvulkan.glReferenceDir");
+        // Both checks always run and report, so a failure of one never hides the numbers of the other.
+        Throwable first = null;
+        try {
+            boolean compared = OracleImages.compare(scene.name(), px, w, h);
+            if (!compared && Boolean.getBoolean("gdxvulkan.requireGl")) {
+                throw new AssertionError("No stock-GL reference image for " + scene.name() + " in gdxvulkan.glReferenceDir");
+            }
+        } catch (Throwable t) {
+            first = t;
         }
+        try {
+            GoldenImages.assertMatches(scene.name(), px, w, h, ctx.caps().deviceName);
+        } catch (Throwable t) {
+            if (first == null) first = t;
+            else first.addSuppressed(t);
+        }
+        if (first instanceof Exception) throw (Exception)first;
+        if (first instanceof Error) throw (Error)first;
     }
 }
