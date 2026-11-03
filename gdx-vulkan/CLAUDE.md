@@ -2,7 +2,7 @@
 
 Standalone Vulkan renderer for libGDX (stock libGDX, no fork; gdx 1.14.2 until 1.14.3 is published). Read `docs/PLAN.md` first. The full plan is
 "libGDX Vulkan Backend Plan v5.0" in the user's Claude Project "libGDX Vulkan" (plans/ and claude/ docs hold v2-v5 and their reviews).
-Work happens on branch `gdx-vulkan-phase1` (Phase 1a, 1b and the checklist are committed).
+Work happens on branch `gdx-vulkan-phase1` (pushed to the fork `slebed/libgdx`; GitHub Actions runs the lavapipe suite on every push).
 
 ## Status
 Phase 1a is complete on Windows, Linux (lavapipe) and Android. Phase 1b is implemented and verified on desktop GPUs and lavapipe; the

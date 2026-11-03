@@ -12,16 +12,16 @@ the plan names.
 
 | Section | Done | Partial | Not started | Total |
 |---|---|---|---|---|
-| Core decisions | 30 | 7 | 19 | 56 |
-| Phase 1a: Extraction, window surfaces and CI | 13 | 7 | 2 | 22 |
-| Phase 1b: Memory, layout and caches | 15 | 2 | 3 | 20 |
-| Phase 2: Unmodified 2D | 20 | 4 | 1 | 25 |
+| Core decisions | 41 | 5 | 10 | 56 |
+| Phase 1a: Extraction, window surfaces and CI | 16 | 5 | 1 | 22 |
+| Phase 1b: Memory, layout and caches | 15 | 3 | 2 | 20 |
+| Phase 2: Unmodified 2D | 21 | 3 | 1 | 25 |
 | Phase 3: Stock FrameBuffer | 9 | 1 | 3 | 13 |
 | Phase 4: Android lifecycle | 0 | 2 | 10 | 12 |
 | Phase 5: 3D with stock models | 0 | 0 | 12 | 12 |
 | Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 1 | 0 | 4 | 5 |
-| **All** | **88** | **23** | **58** | **169** |
+| **All** | **103** | **19** | **47** | **169** |
 ---
 
 ## Core decisions
@@ -48,14 +48,14 @@ the plan names.
 - [x] SPIRV-Reflect validates every declared `(set, binding, type)` at shader load and fails naming the shader
 
 ### 3. GL20 shim scope (`VulkanGL20`)
-- [~] `glGenTexture`, `glBindTexture`, `glActiveTexture`, `glTexImage2D`, `glTexSubImage2D`, `glTexParameteri/f`, `glGenerateMipmap`, `glDeleteTexture`, `glPixelStorei` done and tested with stock `Texture`/`Pixmap`; `glCompressedTexImage2D` throws (not started); only `GL_TEXTURE_2D` (no cube maps)
+- [x] `glGenTexture`, `glBindTexture`, `glActiveTexture`, `glTexImage2D`, `glTexSubImage2D`, `glTexParameteri/f`, `glGenerateMipmap`, `glDeleteTexture`, `glPixelStorei`, `glCompressedTexImage2D`/`SubImage2D` done and tested with stock `Texture`/`Pixmap`; only `GL_TEXTURE_2D` (no cube maps)
 - [x] Lazy `VkImage` creation at first use (`VulkanGL20.nativeTexture`), once the mip chain is known; level > 0 uploads; `glGenerateMipmap` by GPU blit chain
-- [ ] Ordered state packets: `glClear`, `glClearColor`, `glViewport`, `glScissor`, `glEnable`/`glDisable` (scissor, blend, depth), `glBindFramebuffer`
+- [x] Ordered state packets: `glClear` (colour, depth, stencil), `glClearColor`, `glViewport`, `glScissor`, `glEnable`/`glDisable` (scissor, depth, stencil, cull face), `glDepthFunc`/`Mask`, `glStencil*`, `glCullFace`, `glBindFramebuffer`: all stream packets, replayed in order with the draws
 - [ ] Buffers: `glGenBuffer`, `glBindBuffer`, `glBufferData`, `glBufferSubData`, `glDeleteBuffer`
-- [ ] Framebuffers: `glGenFramebuffer`, `glFramebufferTexture2D`, renderbuffers, `glCheckFramebufferStatus`, deletes
+- [x] Framebuffers: `glGenFramebuffer`, `glFramebufferTexture2D`, renderbuffers, `glCheckFramebufferStatus`, deletes (Phase 3)
 - [x] Query table (in `VulkanGL20`, not a separate `VulkanGL20Queries`): extension strings, `GL_MAX_TEXTURE_SIZE`, anisotropy, `GL_VIEWPORT` (last `glViewport`), `GL_FRAMEBUFFER_BINDING` (0), `glGetString(GL_VERSION)`; unknown enums log once and return 0
-- [ ] `Gdx.gl30` always null (nothing sets `Gdx.gl*` yet)
-- [~] Whole interface covered: all 162 `GL20` methods exist (generated from libGDX's `GL20.java` by `tools/generate_gl20_base.py`); drawing, programs and vertex state throw a message naming the call and pointing at the Vulkan batches; pure state (blend, depth, scissor, clear, ...) is accepted and ignored until the command stream exists. Buffer and framebuffer GL calls still throw
+- [~] `Gdx.gl30` always null: true in every test harness (`TestGdx`, the device suite); a real `Application` that installs `Gdx.gl*` arrives with `VulkanApplication` (Phase 4/5)
+- [~] Whole interface covered: all 162 `GL20` methods exist (generated from libGDX's `GL20.java` by `tools/generate_gl20_base.py`); drawing, programs and vertex state throw a message naming the call and pointing at the Vulkan batches. Buffer calls (`glGenBuffer`, `glBindBuffer`, `glBufferData`, ...) still throw: they arrive with stock `Mesh` support in Phase 5. Textures, framebuffers and ordered state are implemented
 
 ### 4. Copy-on-write renaming
 - [x] Sampler change: new slot/set, old one retired (soak-tested ~1,000/s, bounded sampler count)
@@ -74,26 +74,26 @@ the plan names.
 
 ### 6. Coordinate, winding, depth and colour conventions
 - [x] Swapchain: negative-height viewport, `COUNTER_CLOCKWISE` front face (pixel-tested upright + culling, both tiers)
-- [ ] Offscreen FBO: positive-height viewport, `CLOCKWISE` front face
-- [ ] `glViewport`/`glScissor` y mapping (`vkY = targetH - (glY + glH)` swapchain, `vkY = glY` offscreen)
+- [x] Offscreen FBO: positive-height viewport, `CLOCKWISE` front face (`FrameBufferTest`, `Gate3GoldenTest`; the cull test checks the winding against GL's on both target kinds)
+- [x] `glViewport`/`glScissor` y mapping (`vkY = targetH - (glY + glH)` swapchain, `vkY = glY` offscreen), re-derived on every target switch
 - [x] Tier A: front face is dynamic state; Tier B: baked in the pipeline
 - [x] Depth remapped `[-1,1] -> [0,1]` in the vertex shader via `gdx_vk_common.glsl`, no extension branch
 - [x] Swapchain formats `B8G8R8A8_UNORM` / `R8G8B8A8_UNORM`, never sRGB
 
 ### 7. Hardware tiers
 - [x] Tier A: dynamic rendering
-- [~] Tier B: `VkRenderPass`; one swapchain pass only, not the "cache built from formats and samples" yet (needed with FBOs, Phase 3)
-- [~] Dynamic raster state on Tier A: cull mode and front face; depth test/write dynamic state arrives with depth attachments
-- [ ] Blend as pipeline variants (blend not exercised yet)
+- [x] Tier B: `VkRenderPass`; swapchain clear/load passes plus an offscreen cache keyed by colour and depth format and the clear flags (all variants share identical subpass dependencies, which the validation layer requires for compatibility)
+- [x] Dynamic raster state on Tier A: cull mode, front face, depth test/write/compare, stencil test and ops; Tier B bakes them into pipeline variants (stencil reference and masks dynamic on both)
+- [x] Blend as pipeline variants (`SpritePipelines`: one pipeline per blend state, built on first use)
 - [x] Tier A bindless table with no flush on texture switch (the batch side is Phase 2); Tier B per-texture sets
-- [ ] Tier B flush on texture switch (a batch concern, Phase 2)
+- [x] Tier B flush on texture switch (`SpriteBatchTest.textureChangesFlushOnlyOnTierB`: four textures take four draw calls on Tier B, one on Tier A)
 - [x] `forceTierB` runs Tier B anywhere (`GdxVkConfig.forceTierB`; the plan calls it `VulkanApplicationConfiguration.forceTierB`)
 - [x] CI runs every test in both tiers (`ci/run-checks.sh`; first executed on GitHub on 2026-11-03: workflow run 41735391607 for commit 61b156d58 passed in 2m24s)
 - [~] Device tests: RTX 5080 and RTX 2080 both tiers; Android phone (Adreno 840) both tiers, Phase 1a self-test and the Phase 1b/2 device suite; **no Galaxy S20**
 
 ### 8. Test oracle
-- [ ] Compatibility reference = stock GL libGDX on llvmpipe (needs the GL harness, Phase 2)
-- [ ] GL-vs-Vulkan image comparison with per-channel threshold plus maximum differing share
+- [x] Compatibility reference = stock GL libGDX on llvmpipe (`GlReferenceMain`, `OracleImages`; on CI the GL side is llvmpipe, on a workstation the installed driver)
+- [x] GL-vs-Vulkan image comparison with per-channel threshold (16) plus a maximum differing share (0.5%); Gate 2 and Gate 3 scenes
 - [x] Regression reference = committed lavapipe goldens, compared exactly on lavapipe (4 scenes)
 - [x] Goldens regenerated only on a Mesa pin change (`ci/mesa-version.txt` guard, `UPDATE_GOLDENS` flow)
 - [x] Validation layer with sync validation on every test; any message fails (soak run in fence mode uses core validation only, documented)
@@ -122,10 +122,10 @@ the plan names.
 - [x] Android: `ANativeWindow_fromSurface()` from a minimal `SurfaceView` host
 
 ### 4. CI
-- [~] GitHub Actions workflow with version-pinned Mesa image: written; run only through the same script in local Docker, **never on GitHub**
-- [ ] llvmpipe (OpenGL) side of the Mesa image is unused until the GL oracle exists
+- [x] GitHub Actions workflow with version-pinned Mesa image: runs on every push touching `gdx-vulkan/**` (first green run 2026-11-03; a Maven Central or wrapper-validation network flake needs a re-run, not a code change)
+- [x] llvmpipe (OpenGL) side of the Mesa image is the Gate 2 / Gate 3 GL oracle
 - [x] Every test in Tier A and `forceTierB` with validation and sync validation (lavapipe, Docker)
-- [~] Golden harness: exact lavapipe goldens done; GL-vs-Vulkan tolerance comparison not done
+- [x] Golden harness: exact lavapipe goldens, plus the GL-vs-Vulkan tolerance comparison
 - [x] Windows (RTX) runs, manual
 - [~] Android run, manual: REDMAGIC NX809J, not the Galaxy S20
 
@@ -145,7 +145,7 @@ the plan names.
 - [x] `uint64` serial incremented on every `vkQueueSubmit`
 - [x] Completion by timeline semaphore (1.2+) or a fence per serial (1.1; `forceTierB` selects fences)
 - [x] Retired `VkBuffer` ranges, `VkImage`, `VkImageView` and Set 1 slots/sets freed once `completed >= retirement serial`
-- [ ] Retired `VkFramebuffer` and render-pass cache entries (swapchain framebuffers still destroyed after `vkDeviceWaitIdle`)
+- [~] Retired `VkFramebuffer`: offscreen framebuffers go through the deletion queue; swapchain framebuffers are still destroyed after `vkDeviceWaitIdle` at resize. Render passes live as long as the presenter
 - [x] Retirement thread-safe: `dispose()` from `create()`, between frames and from loader threads (soak: 4 worker threads)
 - [ ] Retirement across multiple windows (single presenter tested)
 
@@ -184,7 +184,7 @@ the plan names.
 - [x] `VulkanStage`, `VulkanScrollPane`, `Vulkan*Viewport`, `VulkanTextureLoader`, `VulkanPixmapPacker` not carried over (fresh project; stock classes are the goal)
 
 ### 2. Command stream
-- [~] Java encodes packets into a direct `ByteBuffer`: `BIND_PIPELINE`, `PUSH_CONSTANTS`, `VIEWPORT`, `SCISSOR`, `SCISSOR_ENABLE`, `CLEAR`, `BIND_VERTEX`, `BIND_INDEX_BUFFER`/`_RING`, `BIND_TEXTURE`, `DRAW_INDEXED`, `DRAW` (the pass begin/end are implicit in `beginFrame`/`endFrame` until Phase 3 adds render targets)
+- [x] Java encodes packets (`int[]` scratch copied in bulk into a direct `ByteBuffer`): pipelines, push constants (whole block or a range), viewport, scissor, clear, vertex/index/storage binds, textures, draws, `BindTarget`, depth/stencil/cull state; pass begin/end are driven by `BindTarget` and the first draw or clear
 - [x] One `nativeSubmitCommands` call per frame; one queue submit per frame (uploads ahead of it in the same submit)
 - [x] The batches and renderers all record through the stream (the direct presenter calls remain for the low-level tests)
 
