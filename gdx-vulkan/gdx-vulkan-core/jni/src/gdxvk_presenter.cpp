@@ -115,6 +115,14 @@ struct Presenter::Impl {
         VkCullModeFlags cull;
     };
     std::vector<PipelineRec> pipelines;
+    std::vector<VkPipeline> computePipelines;
+    struct ComputeJob {
+        VkPipeline pipeline;
+        VkDescriptorSet set;
+        float push[32];
+        uint32_t groups;
+    };
+    std::vector<ComputeJob> computeQueue; // this frame's dispatches, recorded into the upload command buffer at endFrame
     VkRect2D scissor{};      // command stream state, reset every frame
     bool scissorOn = false;
 
@@ -149,12 +157,48 @@ struct Presenter::Impl {
         images.clear();
     }
 
+    // Records the frame's queued dispatches (after the staged uploads, in `cmd`). Returns whether anything was recorded.
+    bool recordCompute(VkCommandBuffer cmd) {
+        if (computeQueue.empty()) return false;
+        constexpr VkPipelineStageFlags kShaderStages = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+        auto barrier = [&](VkPipelineStageFlags srcStage, VkAccessFlags srcAccess, VkPipelineStageFlags dstStage, VkAccessFlags dstAccess) {
+            VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+            mb.srcAccessMask = srcAccess;
+            mb.dstAccessMask = dstAccess;
+            vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 1, &mb, 0, nullptr, 0, nullptr);
+        };
+        constexpr VkAccessFlags kRw = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        // Earlier frames' vertex shaders may still be reading what the first dispatch writes, and the staged uploads above write
+        // the same buffers (initial sprite data).
+        barrier(kShaderStages | VK_PIPELINE_STAGE_TRANSFER_BIT, kRw | VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, kRw);
+        VkPipeline bound = VK_NULL_HANDLE;
+        for (size_t i = 0; i < computeQueue.size(); ++i) {
+            const ComputeJob& job = computeQueue[i];
+            if (job.pipeline != bound) {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, job.pipeline);
+                bound = job.pipeline;
+            }
+            const uint32_t offsets[2] = {0, 0};
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, h.layouts->pipelineLayout(), 0, 1, &job.set, 2, offsets);
+            vkCmdPushConstants(cmd, h.layouts->pipelineLayout(), DescriptorLayouts::kPushStages, 0, DescriptorLayouts::kPushConstantBytes, job.push);
+            vkCmdDispatch(cmd, job.groups, 1, 1);
+            if (i + 1 < computeQueue.size()) barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, kRw);
+        }
+        // The frame's draws (the next command buffer in the submit) read the results in their vertex shaders.
+        barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, kShaderStages, kRw);
+        computeQueue.clear();
+        return true;
+    }
+
     void destroyAll() {
         if (h.device == VK_NULL_HANDLE) return;
         vkDeviceWaitIdle(h.device);
         destroySwapchainViews();
         for (const PipelineRec& pl : pipelines) vkDestroyPipeline(h.device, pl.pipeline, nullptr);
         pipelines.clear();
+        for (VkPipeline p : computePipelines) vkDestroyPipeline(h.device, p, nullptr);
+        computePipelines.clear();
+        computeQueue.clear();
         if (captureBuf != VK_NULL_HANDLE) vmaDestroyBuffer(h.allocator, captureBuf, captureAlloc);
         captureBuf = VK_NULL_HANDLE;
         if (renderPass != VK_NULL_HANDLE) vkDestroyRenderPass(h.device, renderPass, nullptr);
@@ -467,6 +511,7 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
     h.deletion->collect(); // the GPU has finished with everything retired before the frames that are now complete
     h.staging->collect(h.timeline->completed());
     s.rings[s.frameIndex]->reset(); // this slot's previous frame has completed
+    s.computeQueue.clear();
 
     r = vkAcquireNextImageKHR(h.device, s.swapchain, UINT64_MAX, f.acquired, VK_NULL_HANDLE, &s.imageIndex);
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -592,10 +637,12 @@ FrameStatus Presenter::endFrame(bool capture) {
     ubi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(f.uploadCmd, &ubi);
     s.stagingRecorded = h.staging->recordPending(f.uploadCmd);
+    const bool computed = s.recordCompute(f.uploadCmd);
     vkEndCommandBuffer(f.uploadCmd);
+    const bool preCmd = s.stagingRecorded || computed; // the upload command buffer has something in it
     VkCommandBuffer cmds[2] = {f.uploadCmd, f.cmd};
-    si.commandBufferCount = s.stagingRecorded ? 2 : 1;
-    si.pCommandBuffers = s.stagingRecorded ? cmds : &f.cmd;
+    si.commandBufferCount = preCmd ? 2 : 1;
+    si.pCommandBuffers = preCmd ? cmds : &f.cmd;
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = &s.renderDone[s.imageIndex];
     VkResult r = h.timeline->submit(si, &f.serial);
@@ -736,6 +783,53 @@ int Presenter::createPipelineEx(const char* name, const uint32_t* vertSpv, size_
     }
     s.pipelines.push_back({pipeline, static_cast<VkCullModeFlags>(desc.cullMode)});
     return static_cast<int>(s.pipelines.size() - 1);
+}
+
+int Presenter::createComputePipeline(const char* name, const uint32_t* spv, size_t words) {
+    Impl& s = *impl_;
+    const ContextHandles& h = s.h;
+    s.error = validateShader((name ? std::string(name) : std::string("(unnamed)")) + ".comp", spv, words, VK_SHADER_STAGE_COMPUTE_BIT, h.tierA,
+                             h.layouts->tableSize());
+    if (!s.error.empty()) return -1;
+    VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+    mi.codeSize = words * sizeof(uint32_t);
+    mi.pCode = spv;
+    VkShaderModule module = VK_NULL_HANDLE;
+    if (vkCreateShaderModule(h.device, &mi, nullptr, &module) != VK_SUCCESS) {
+        s.error = "vkCreateShaderModule failed (invalid SPIR-V?)";
+        return -1;
+    }
+    VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+    ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    ci.stage.module = module;
+    ci.stage.pName = "main";
+    ci.layout = h.layouts->pipelineLayout();
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    const VkResult r = vkCreateComputePipelines(h.device, h.pipelineCache->handle(), 1, &ci, nullptr, &pipeline);
+    vkDestroyShaderModule(h.device, module, nullptr);
+    if (r != VK_SUCCESS) {
+        s.error = "vkCreateComputePipelines failed (VkResult " + std::to_string(r) + ")";
+        return -1;
+    }
+    s.computePipelines.push_back(pipeline);
+    return static_cast<int>(s.computePipelines.size() - 1);
+}
+
+FrameStatus Presenter::dispatch(int computePipeline, const float push[32], uint32_t groupsX, int buffer) {
+    Impl& s = *impl_;
+    if (!s.frameOpen) return s.fail("dispatch called outside beginFrame/endFrame");
+    if (computePipeline < 0 || static_cast<size_t>(computePipeline) >= s.computePipelines.size()) return s.fail("dispatch: unknown compute pipeline id");
+    VkBuffer buf;
+    uint64_t base, size;
+    if (!s.h.resources->bufferInfo(buffer, buf, base, size)) return s.fail("dispatch: unknown buffer");
+    Impl::ComputeJob job{};
+    job.pipeline = s.computePipelines[computePipeline];
+    if (!s.rings[s.frameIndex]->externalStorageSet(buf, base, size, job.set)) return s.fail("dispatch: out of descriptor sets");
+    std::memcpy(job.push, push, sizeof(job.push));
+    job.groups = groupsX;
+    s.computeQueue.push_back(job);
+    return FrameStatus::Ok;
 }
 
 FrameStatus Presenter::draw(int pipeline, uint32_t vertexCount, const float push[32]) {
@@ -922,6 +1016,17 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 vkCmdDrawIndexed(cmd, static_cast<uint32_t>(w[i]), 1, static_cast<uint32_t>(w[i + 1]), w[i + 2], 0);
                 i += 3;
                 break;
+            case cmd::BindStorage: {
+                if (!need(1)) return s.fail("command stream truncated (BindStorage)");
+                VkBuffer buf;
+                uint64_t base, size;
+                if (!s.h.resources->bufferInfo(w[i++], buf, base, size)) return s.fail("command stream: unknown storage buffer");
+                VkDescriptorSet set;
+                if (!ring.externalStorageSet(buf, base, size, set)) return s.fail("command stream: out of descriptor sets");
+                const uint32_t offsets[2] = {0, 0};
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.h.layouts->pipelineLayout(), 0, 1, &set, 2, offsets);
+                break;
+            }
             case cmd::Draw:
                 if (!need(2)) return s.fail("command stream truncated (Draw)");
                 vkCmdDraw(cmd, static_cast<uint32_t>(w[i]), 1, static_cast<uint32_t>(w[i + 1]), 0);

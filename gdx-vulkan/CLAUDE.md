@@ -6,7 +6,7 @@ Work happens on branch `gdx-vulkan-phase1` (Phase 1a, 1b and the checklist are c
 
 ## Status
 Phase 1a is complete on Windows, Linux (lavapipe) and Android. Phase 1b is implemented and verified on desktop GPUs and lavapipe; the
-Android side of 1b compiles but has not run on a device. Open items are at the end of this section.
+Android side of 1b and Phase 2 runs on the Adreno 840 (`DeviceSuite`, both tiers; 10-minute Tier A soak passed). Open items are at the end of this section.
 
 Native core (`gdx-vulkan-core/jni/src`), one file per subsystem, all owned by `Context` (`gdxvk_internal.h` has `ContextHandles`):
 - `gdxvk_context` instance/device/VMA/tier; `gdxvk_presenter` surface + swapchain + per-frame loop (+ Phase 1a-only `createPipeline`/`draw`).
@@ -28,17 +28,19 @@ Native core (`gdx-vulkan-core/jni/src`), one file per subsystem, all owned by `C
   command buffer submitted ahead of the frame. Draws go through `CommandStream` (`gdxvk_commands.h`) and one `nativeSubmitCommands` per frame.
   `VulkanSpriteBatch`, `VulkanPolygonSpriteBatch`, `VulkanShapeRenderer` have their draw code **generated from stock source**
   (`tools/generate_*.py`; keep it that way so the Gate 2 oracle stays honest). `VulkanShaderPipelineBundle` = custom SPIR-V for the batches.
-  Not done: `VulkanSpriteBatchInstanced` (compute), Tier A 1-texture parity with stock GL (0.91x).
+  `VulkanSpriteBatchInstanced` (1M sprites moved by compute, 722 fps on the RTX 2080): compute dispatches are queued with `GdxVkFrame.dispatch`
+  and recorded at `endFrame` in the upload command buffer (before the render pass); `CommandStream.bindStorage` binds a resource buffer as Set 0 storage.
+  Not done: Tier A 1-texture parity with stock GL (0.91x).
 
-Tests (`gdx-vulkan-desktop`): `TextureShimTest`, `SpriteBatchTest`, `Gate2GoldenTest` (7 scenes: stock-GL oracle with tolerance, then exact lavapipe goldens),
+Tests (`gdx-vulkan-desktop`): `TextureShimTest`, `SpriteBatchTest`, `InstancedBatchTest`, `Gate2GoldenTest` (7 scenes: stock-GL oracle with tolerance, then exact lavapipe goldens),
 `PresenterTest`, `TriangleTest`, `GoldenTest` (lavapipe goldens, exact on lavapipe, tolerance on GPUs),
 `ResourcesTest` (all three sets reach the shader, deferred deletion, pipeline cache file, reflection rejects bad shaders), and `SoakTest`
 via its own Gradle task `soakTest` (`-Dgdxvulkan.soakSeconds=600` for the full run). CI: `.github/workflows/gdx-vulkan.yml` ->
 `ci/Dockerfile` + `ci/run-checks.sh` (see `ci/README.md`). Android: `gdx-vulkan-android` (separate Gradle 8.14/AGP 8.13 build).
 
-Open items: Android device run of 1b and Phase 2 (phone unplugged; both compile for arm64); 10-minute soak in Tier B; Wayland/macOS; debug-utils object names; armeabi-v7a/x86_64;
+Open items: 10-minute soak in Tier B (desktop and Android); Adreno Tier A throughput (see below); Wayland/macOS; debug-utils object names; armeabi-v7a/x86_64;
 CI has never run on GitHub itself; `VulkanSpriteBatchInstanced`; Phases 3-6.
-`./gradlew :gdx-vulkan-desktop:stress2` is Stress test 2 (stock GL vs VulkanSpriteBatch, each in its own JVM). Note GL runs on the display GPU, so a
+`./gradlew :gdx-vulkan-desktop:stress3 -Dgdxvulkan.device=1` is Stress test 3 (1M instanced sprites). `./gradlew :gdx-vulkan-desktop:stress2` is Stress test 2 (stock GL vs VulkanSpriteBatch, each in its own JVM). Note GL runs on the display GPU, so a
 second-GPU Vulkan comparison is capped by presentation and means nothing.
 
 ## Verification state
@@ -51,9 +53,15 @@ second-GPU Vulkan comparison is capped by presentation and means nothing.
 - Linux: `ci/run-checks.sh` in the Docker image passes on lavapipe, Mesa 25.2.8-0ubuntu0.24.04.4, both tiers, exact goldens. Soak rates are
   scaled down 10x on software devices (it checks hazards and leaks there, not throughput).
 - Android (REDMAGIC NX809J, Adreno 840, Android 16, Vulkan 1.4; **not** the Galaxy S20 in the plan): Phase 1a SelfTest passed in both tiers
-  and survived HOME/return x3. After Phase 1b the module only compile-checks for arm64 (phone unplugged). Logcat is restricted on that phone;
-  the app writes `files/gdxvk-test.log` (`adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log`). No validation
-  layer on the device.
+  and survived HOME/return x3. The phone connects over wireless debugging; USB was flaky. `DeviceSuite` runs the Phase 1b/2 checks on it:
+  `adb shell am start -n io.github.slebed.gdxvulkan.testapp/.MainActivity --ez suite true [--ez forceTierB true] [--ez vsync false]
+  [--ei soakSeconds N] [--ei stressSeconds N]`, then read the log. 14/14 pass in both tiers (sprite batch scenes, shader bundle, mipmaps,
+  ETC2 and ASTC textures, 20 s texture-churn soak with flat native heap, Stress 2 workload without the GL half). Logcat is restricted on that
+  phone; the app writes `files/gdxvk-test.log` (`adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log`). Native crashes:
+  `adb shell dumpsys dropbox --print data_app_native_crash`. No validation layer on the device.
+  The device found a bug desktop never showed: `DeletionQueue::collect()` self-moved a `std::function` (empty on the NDK's libc++).
+  Adreno 840 throughput, 20,000 sprites at 1216x2688, vsync off: Tier A 548 fps with 1 texture but 38 fps with 128; Tier B 1,428 and 8.6 fps.
+  Tier A 1-texture being 2.6x slower than Tier B is not investigated (suspect the bindless table on Adreno).
 - Validation-layer caveat: sync validation cost grows with the number of barrier commands (batching image-upload barriers took the Tier A soak from 0.1 fps back to 60 fps), and with fence completion sync validation slows super-linearly under the soak load (60 fps -> <5 fps) although the
   same run with validation off is perfect, so `soakTest` turns sync validation off when `forceTierB` is set. Ubuntu's older layer also needs
   an explicit dependency between consecutive captures (added to the capture path).

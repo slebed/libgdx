@@ -19,6 +19,7 @@ import io.github.slebed.gdxvulkan.GdxVkPresenter;
 import io.github.slebed.gdxvulkan.VulkanCaps;
 import io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle;
 import io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch;
+import io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatchInstanced;
 import io.github.slebed.gdxvulkan.gl.VulkanGL20;
 
 import java.lang.reflect.InvocationHandler;
@@ -67,9 +68,11 @@ final class DeviceSuite {
         s.check("compressedAstc", s::compressedAstc);
         s.check("compressedFormatQuery", s::formatQuery);
         s.check("mipmapsAndFiltering", s::mipmaps);
+        s.check("instancedSpritesComputeAndDraw", s::instanced);
         s.check("soakTextureChurn", () -> s.soak(soakSeconds));
         s.check("stress2Single", () -> s.stress(1, stressSeconds));
         s.check("stress2Textures128", () -> s.stress(128, stressSeconds));
+        s.check("instancedMillionSprites", () -> s.instancedMillion(stressSeconds));
         TestLog.i(TAG, "validationMessages=" + ctx.validationMessageCount());
         TestLog.i(TAG, (s.failed == 0 ? "DEVICESUITE PASS " : "DEVICESUITE FAIL ") + s.passed + " passed, " + s.failed + " failed, "
             + s.skipped + " skipped");
@@ -389,6 +392,96 @@ final class DeviceSuite {
         require(c[0] > 40 && c[2] > 40, "minified checker should blend red and blue, got " + java.util.Arrays.toString(c));
         t.dispose();
         pm.dispose();
+    }
+
+    // ---------------------------------------------------------------------------------------------------------- instanced sprites
+
+    private void instanced() {
+        Texture t = solid(1, 1, 1, 1);
+        VulkanSpriteBatchInstanced b = new VulkanSpriteBatchInstanced(frame, 8);
+        b.getProjectionMatrix().setToOrtho2D(0, 0, S, S);
+        b.setBounds(S, S);
+        b.setSpriteSize(8, 8);
+        b.setTexture(t);
+        b.setColor(0, 1, 0, 1);
+        float[] s = new float[8 * 4];
+        for (int i = 0; i < 8; i++) {
+            s[i * 4] = 6 + i * 3f;
+            s[i * 4 + 1] = 4 + i * 7f;
+            s[i * 4 + 2] = (i % 2 == 0 ? 1 : -1) * (10 + i * 4f);
+            s[i * 4 + 3] = (i % 3 == 0 ? 1 : -1) * 2f;
+        }
+        b.setSprites(s, 8);
+        float[] ref = s.clone();
+        final float dt = 0.25f, max = S - 8;
+        byte[] f = null;
+        for (int step = 0; step < 6; step++) {
+            for (int attempt = 0; attempt < 100 && !frame.begin(0, 0, 0, 1); attempt++) { }
+            b.update(dt);
+            b.draw();
+            f = frame.endAndCapture();
+            for (int i = 0; i < 8; i++) {
+                for (int axis = 0; axis < 2; axis++) {
+                    int p = i * 4 + axis, v = p + 2;
+                    ref[p] += ref[v] * dt;
+                    if (ref[p] < 0) {
+                        ref[p] = -ref[p];
+                        ref[v] = Math.abs(ref[v]);
+                    } else if (ref[p] > max) {
+                        ref[p] = 2 * max - ref[p];
+                        ref[v] = -Math.abs(ref[v]);
+                    }
+                }
+            }
+        }
+        for (int i = 0; i < 8; i++) {
+            int[] c = px(f, (int)(ref[i * 4] + 4), S - 1 - (int)(ref[i * 4 + 1] + 4));
+            require(c[0] <= 2 && c[1] >= 253 && c[2] <= 2, "instanced sprite " + i + " centre was " + java.util.Arrays.toString(c));
+        }
+        b.dispose();
+        t.dispose();
+    }
+
+    private void instancedMillion(int seconds) {
+        Texture t = solid(1, 1, 1, 1);
+        final int n = 1_000_000;
+        VulkanSpriteBatchInstanced b = new VulkanSpriteBatchInstanced(frame, n);
+        b.setTexture(t);
+        b.setSpriteSize(3, 3);
+        b.setBounds(W, H);
+        b.setColor(0.3f, 0.8f, 1f, 0.5f);
+        b.getProjectionMatrix().setToOrtho2D(0, 0, W, H);
+        float[] data = new float[n * 4];
+        Random r = new Random(11);
+        for (int i = 0; i < n; i++) {
+            data[i * 4] = r.nextFloat() * (W - 3);
+            data[i * 4 + 1] = r.nextFloat() * (H - 3);
+            data[i * 4 + 2] = (r.nextFloat() - 0.5f) * 300f;
+            data[i * 4 + 3] = (r.nextFloat() - 0.5f) * 300f;
+        }
+        b.setSprites(data, n);
+        long warm = System.nanoTime() + 1_000_000_000L, end = 0, frames = 0, measure = 0;
+        while (true) {
+            if (!frame.begin(0.02f, 0.02f, 0.05f, 1f)) continue;
+            b.update(1f / 60f);
+            b.draw();
+            frame.end();
+            long now = System.nanoTime();
+            if (measure == 0) {
+                if (now >= warm) {
+                    measure = now;
+                    end = now + seconds * 1_000_000_000L;
+                }
+            } else {
+                frames++;
+                if (now >= end) break;
+            }
+        }
+        double fps = frames / ((System.nanoTime() - measure) / 1e9);
+        TestLog.i(TAG, String.format("instanced %d sprites at %dx%d: %.1f fps (Tier %s)", n, W, H, fps, ctx.caps().tier));
+        b.dispose();
+        t.dispose();
+        require(fps > 5, "instanced million too slow: " + fps);
     }
 
     // -------------------------------------------------------------------------------------------------------------- soak / perf

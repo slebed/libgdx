@@ -77,6 +77,15 @@ public:
     int createPipelineEx(const char* name, const uint32_t* vertSpv, size_t vertWords, const uint32_t* fragSpv, size_t fragWords,
                          const PipelineDesc& desc);
 
+    // Compute (plan, Phase 2: VulkanSpriteBatchInstanced). A compute pipeline uses the shared layout; the shader is reflected like the
+    // others. Returns the compute pipeline id, or -1 with lastError() set.
+    int createComputePipeline(const char* name, const uint32_t* spv, size_t words);
+
+    // Queues a dispatch for this frame. Dispatches run in queue order, at the start of the frame's GPU work: after the staged uploads
+    // and before any draw, outside the render pass. Set 0's storage binding reads the resource buffer `buffer` (read/write for the
+    // shader); the vertex shaders of the frame's draws see the results. `push` is the full 128-byte block.
+    FrameStatus dispatch(int computePipeline, const float push[32], uint32_t groupsX, int buffer);
+
     // Vertex/index memory for the command stream: host-visible, mapped, valid for the frame being recorded. Returns false when
     // out of memory. A block's address changes only when the ring grows; query it with vertexBlock().
     bool allocVertex(uint64_t bytes, uint32_t* block, uint64_t* offset);

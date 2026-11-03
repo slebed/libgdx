@@ -12,7 +12,7 @@ import java.nio.ByteOrder;
  */
 public final class CommandStream {
     public static final int BIND_PIPELINE = 1, PUSH_CONSTANTS = 2, VIEWPORT = 3, SCISSOR = 4, SCISSOR_ENABLE = 5, CLEAR = 6, BIND_VERTEX = 7,
-        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12;
+        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13;
     public static final int INDEX_U16 = 0, INDEX_U32 = 1;
 
     private ByteBuffer buffer = ByteBuffer.allocateDirect(64 * 1024).order(ByteOrder.LITTLE_ENDIAN);
@@ -115,6 +115,13 @@ public final class CommandStream {
         ensure(2);
         put(BIND_TEXTURE);
         put(nativeTexture);
+    }
+
+    /** Set 0's storage binding reads the whole resource buffer for the draws that follow (instanced sprites, compute-driven data). */
+    public void bindStorage(int resourceBuffer) {
+        ensure(2);
+        put(BIND_STORAGE);
+        put(resourceBuffer);
     }
 
     public void drawIndexed(int indexCount, int firstIndex, int vertexOffset) {

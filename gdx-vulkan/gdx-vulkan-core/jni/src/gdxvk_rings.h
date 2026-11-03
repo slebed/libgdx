@@ -27,6 +27,11 @@ public:
     // Fails (false) when the uniform data exceeds the 16 KB descriptor range or memory runs out.
     bool allocate(const void* uniform, uint32_t uniformBytes, const void* storage, uint64_t storageBytes, Binding& out);
 
+    // Set 0 with the storage binding pointing at a buffer the caller owns (a resource buffer: persistent simulation data, read by
+    // compute and by vertex shaders). The uniform binding is the ring's current block. Bind with dynamic offsets {0, 0}. The same
+    // set is returned for the same range for the rest of the frame.
+    bool externalStorageSet(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range, VkDescriptorSet& set);
+
     // Vertex/index data for the command stream: host-visible blocks, persistently mapped, addressed as (block, offset). Java writes
     // into the mapped memory directly. Growth appends a block, so earlier (block, offset) pairs stay valid for the frame.
     bool allocVertex(uint64_t bytes, uint32_t* block, uint64_t* offset);
@@ -56,6 +61,12 @@ private:
     VkDescriptorPool pool_ = VK_NULL_HANDLE;
     VkDescriptorSet set_ = VK_NULL_HANDLE; // describes (uniform_.back(), storage_.back()) at the time it was written
     VkBuffer setUniform_ = VK_NULL_HANDLE, setStorage_ = VK_NULL_HANDLE;
+    struct ExternalSet {
+        VkBuffer buffer, uniform;
+        VkDeviceSize offset, range;
+        VkDescriptorSet set;
+    };
+    std::vector<ExternalSet> external_; // sets written this frame for external storage buffers
 };
 
 } // namespace gdxvk

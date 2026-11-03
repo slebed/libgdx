@@ -179,6 +179,30 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateP
         reinterpret_cast<gdxvk::Presenter*>(handle)->createPipeline(label.c_str(), v.data(), v.size(), f.data(), f.size()));
 }
 
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateComputePipeline(JNIEnv* env, jclass, jlong handle, jstring name,
+                                                                                               jbyteArray spv) {
+    const jsize n = env->GetArrayLength(spv);
+    if (n % 4 != 0) return -1;
+    std::vector<uint32_t> code(static_cast<size_t>(n) / 4);
+    env->GetByteArrayRegion(spv, 0, n, reinterpret_cast<jbyte*>(code.data()));
+    std::string label = "(unnamed)";
+    if (name != nullptr) {
+        const char* chars = env->GetStringUTFChars(name, nullptr);
+        if (chars != nullptr) {
+            label = chars;
+            env->ReleaseStringUTFChars(name, chars);
+        }
+    }
+    return static_cast<jint>(reinterpret_cast<gdxvk::Presenter*>(handle)->createComputePipeline(label.c_str(), code.data(), code.size()));
+}
+
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDispatch(JNIEnv* env, jclass, jlong handle, jint pipeline, jfloatArray push,
+                                                                                   jint groupsX, jint buffer) {
+    float block[32];
+    env->GetFloatArrayRegion(push, 0, 32, block);
+    return static_cast<jint>(reinterpret_cast<gdxvk::Presenter*>(handle)->dispatch(pipeline, block, static_cast<uint32_t>(groupsX), buffer));
+}
+
 JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDraw(JNIEnv* env, jclass, jlong handle, jint pipeline,
                                                                                jint vertexCount, jfloatArray push) {
     float block[32];

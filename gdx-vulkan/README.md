@@ -3,7 +3,7 @@
 A Vulkan renderer for libGDX, built as a standalone library on **stock libGDX 1.14.3**. No fork of libGDX is required.
 See `docs/PLAN.md` for the architecture and phases.
 
-**Status: Phase 2 (nearly complete).** Context, tier selection, window surface, swapchain and a triangle work on Windows, Linux (lavapipe CI) and Android, in both tiers. Golden-image tests and a CI workflow exist. Phase 1b (two-set layout, deferred deletion, rings and staging, caches, shader reflection, soak test) is implemented and verified on desktop GPUs and lavapipe; Phase 2 runs unmodified stock `Texture`, `Pixmap`, `SpriteBatch` code paths, Scene2D, `BitmapFont`, FreeType, `TextureAtlas` and `ParticleEffect` against Vulkan, compared with stock GL; `VulkanSpriteBatchInstanced` and Android device verification are pending.
+**Status: Phase 2 (nearly complete).** Context, tier selection, window surface, swapchain and a triangle work on Windows, Linux (lavapipe CI) and Android, in both tiers. Golden-image tests and a CI workflow exist. Phase 1b (two-set layout, deferred deletion, rings and staging, caches, shader reflection, soak test) is implemented and verified on desktop GPUs and lavapipe; Phase 2 runs unmodified stock `Texture`, `Pixmap`, `SpriteBatch` code paths, Scene2D, `BitmapFont`, FreeType, `TextureAtlas` and `ParticleEffect` against Vulkan, compared with stock GL; `VulkanSpriteBatchInstanced` (compute-moved sprites) and Android device verification (Adreno 840, both tiers) pass.
 
 ## Layout
 - `gdx-vulkan-core/` Java API and the C++ core (`jni/`: CMake, vendored volk, VMA and Vulkan headers)

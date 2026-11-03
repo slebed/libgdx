@@ -116,6 +116,27 @@ public final class GdxVkPresenter implements AutoCloseable {
         translate(status);
     }
 
+    /** A compute pipeline from SPIR-V (compiled for this device's tier), validated against the shared layout. */
+    public int createComputePipeline(String name, byte[] spv) {
+        check();
+        int id = GdxVkNative.nativeCreateComputePipeline(handle, name, spv);
+        if (id < 0) throw new GdxVkException(GdxVkNative.nativeLastError(handle));
+        return id;
+    }
+
+    /**
+     * Queues a compute dispatch for the open frame. It runs at the start of the frame's GPU work, after staged uploads and before any
+     * draw, with Set 0's storage binding reading and writing the resource buffer {@code buffer}; the frame's vertex shaders see the result.
+     *
+     * @param push the whole 128-byte push-constant block as 32 floats
+     */
+    public void dispatch(int computePipeline, float[] push, int groupsX, int buffer) {
+        check();
+        if (!frameOpen) throw new IllegalStateException("dispatch called outside beginFrame/endFrame");
+        if (push.length != 32) throw new IllegalArgumentException("push must hold 32 floats, was " + push.length);
+        translate(GdxVkNative.nativeDispatch(handle, computePipeline, push, groupsX, buffer));
+    }
+
     /**
      * Records a draw between {@link #beginFrame} and {@link #endFrame}. {@code push} is the whole 128-byte push-constant block
      * as 32 floats (u_transform 0-15, u_color 16-19, u_indices 20-23 as raw int bits, u_custom0/1 24-31).

@@ -6,7 +6,7 @@ Source: `docs/libGDX Vulkan Backend Plan v5.0.md`. Marks reflect what has actual
 
 "Verified" means: passes `gradlew check -Dgdxvulkan.requireDriver=true` (validation + sync validation clean) on the RTX 5080 and RTX 2080 in both
 tiers, and `ci/run-checks.sh` on lavapipe in Docker. Android items were verified on a REDMAGIC NX809J (Adreno 840), which is **not** the Galaxy S20
-the plan names; the phone is currently unplugged.
+the plan names.
 
 ## Summary
 
@@ -14,14 +14,14 @@ the plan names; the phone is currently unplugged.
 |---|---|---|---|---|
 | Core decisions | 30 | 7 | 19 | 56 |
 | Phase 1a: Extraction, window surfaces and CI | 13 | 7 | 2 | 22 |
-| Phase 1b: Memory, layout and caches | 15 | 1 | 4 | 20 |
-| Phase 2: Unmodified 2D | 19 | 4 | 2 | 25 |
+| Phase 1b: Memory, layout and caches | 15 | 2 | 3 | 20 |
+| Phase 2: Unmodified 2D | 20 | 4 | 1 | 25 |
 | Phase 3: Stock FrameBuffer | 0 | 0 | 13 | 13 |
 | Phase 4: Android lifecycle | 0 | 2 | 10 | 12 |
 | Phase 5: 3D with stock models | 0 | 0 | 12 | 12 |
 | Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 1 | 0 | 4 | 5 |
-| **All** | **78** | **21** | **70** | **169** |
+| **All** | **79** | **22** | **68** | **169** |
 ---
 
 ## Core decisions
@@ -89,7 +89,7 @@ the plan names; the phone is currently unplugged.
 - [ ] Tier B flush on texture switch (a batch concern, Phase 2)
 - [x] `forceTierB` runs Tier B anywhere (`GdxVkConfig.forceTierB`; the plan calls it `VulkanApplicationConfiguration.forceTierB`)
 - [x] CI runs every test in both tiers (`ci/run-checks.sh`; not yet executed on GitHub itself)
-- [~] Device tests: RTX 5080 and RTX 2080 both tiers; Android phone (Adreno 840) both tiers for Phase 1a only; **no Galaxy S20**
+- [~] Device tests: RTX 5080 and RTX 2080 both tiers; Android phone (Adreno 840) both tiers, Phase 1a self-test and the Phase 1b/2 device suite; **no Galaxy S20**
 
 ### 8. Test oracle
 - [ ] Compatibility reference = stock GL libGDX on llvmpipe (needs the GL harness, Phase 2)
@@ -168,7 +168,7 @@ the plan names; the phone is currently unplugged.
 - [x] 10-minute run, RTX 5080, Tier A, strict (>=90% of target rates, >=55 fps): 36,000 frames at 60.0 fps, 50,000 buffer cycles/s, 2,000 textures/s, ~1,000 sampler changes/s, 33 M retirements, VMA flat at 176 MB from minute 1, 4 samplers, zero validation messages, clean shutdown
 - [x] 10-minute run, RTX 2080 (device index 1), Tier A, same strict criteria and the same flat result (36,001 frames, 60.0 fps)
 - [ ] 10-minute run in Tier B (fence completion path) on desktop
-- [ ] Android device run, Tier A and Tier B (the plan names the Galaxy S20)
+- [~] Android device run: Adreno 840, both tiers, `DeviceSuite` (16 checks incl. instanced sprites and a 20 s texture-churn soak, flat native heap) passes. 10-minute soak, Tier A: 36,016 frames at 60 fps, native heap flat (24,939 -> 25,000 KB), zero validation messages. Not done: the 10-minute soak in Tier B, and the Galaxy S20. Found and fixed a real bug: `DeletionQueue::collect()` self-moved a `std::function` (empty on the NDK libc++, `bad_function_call` abort)
 
 ---
 
@@ -178,7 +178,7 @@ the plan names; the phone is currently unplugged.
 - [x] Uploads recorded ahead of the frame's draws in the same submit, whenever they were queued during the frame (separate upload command buffer recorded at `endFrame`)
 - [x] Texture calls with lazy image creation, level > 0 uploads, copy-on-write (15 shim tests drive unmodified stock `Texture` and `Pixmap`; both tiers; RTX 5080/2080; lavapipe)
 - [~] Format conversion: `RGB888 -> RGBA8888`, `Alpha -> R8_UNORM` swizzle `(0,0,0,R)`, `LuminanceAlpha -> R8G8_UNORM` swizzle `(R,R,R,G)` done; `RGBA4444` and `RGB565` are expanded to RGBA8 (the plan's fallback), packed Vulkan formats where supported are not used yet; `GL_UNPACK_ALIGNMENT` honoured
-- [x] Compressed uploads (`glCompressedTexImage2D`/`SubImage2D`): DXT1/3/5 -> BC1/2/3, ETC1/ETC2, ASTC 4x4..12x12, picked by what the device samples; an unsupported format fails with a message naming it. Verified with hand-built BC1 blocks incl. a block-aligned rename update (RTX 5080); ETC2/ASTC paths are unexercised on hardware that supports them (desktop GPUs here do not)
+- [x] Compressed uploads (`glCompressedTexImage2D`/`SubImage2D`): DXT1/3/5 -> BC1/2/3, ETC1/ETC2, ASTC 4x4..12x12, picked by what the device samples; an unsupported format fails with a message naming it. Verified with hand-built BC1 blocks incl. a block-aligned rename update (RTX 5080); ETC2 and ASTC 4x4 verified on the Adreno 840 with hand-built blocks (ETC2 differential block, ASTC void-extent block); the Adreno also samples BC1
 - [x] Ordered state packets for clear, viewport, scissor, enable/disable: recorded into the command stream so they interleave with batch draws; replayed across frames
 - [x] The shim query table (see Core decision 3)
 - [x] `VulkanStage`, `VulkanScrollPane`, `Vulkan*Viewport`, `VulkanTextureLoader`, `VulkanPixmapPacker` not carried over (fresh project; stock classes are the goal)
@@ -207,7 +207,7 @@ the plan names; the phone is currently unplugged.
 - [x] `VulkanSpriteBatch` Tier A, 128 textures: >= 3x stock fps. RTX 5080, 20,000 sprites/frame, 800x600, vsync off: 17.5 fps stock GL, 413 fps (23.6x). (`gradlew :gdx-vulkan-desktop:stress2`)
 - [ ] `VulkanSpriteBatch` Tier A, 1 texture: >= 1.0x. **Missed**: 950-965 fps vs 1,050-1,060 stock (0.91x) on the RTX 5080. CPU-bound (same fps with 3 px sprites); the vertex copy into mapped memory is the cost, down from 0.70x after the single-texture 20-byte path and cached host memory
 - [~] `VulkanSpriteBatch` Tier B (fence path), 128 textures: 55-70 fps vs 17.5 (3.1-4.1x) passes; 1 texture 0.91x misses like Tier A. RTX 2080 not compared: its Vulkan run is capped at its 120 Hz presentation while the GL run uses the display GPU
-- [ ] `VulkanSpriteBatchInstanced`, 1,000,000 sprites moved by compute: 60+ fps on RTX 2080
+- [x] `VulkanSpriteBatchInstanced`, 1,000,000 sprites moved by compute: 60+ fps on RTX 2080. **722 fps** (Tier A) and 726 fps (Tier B) on the RTX 2080 at 1280x720, vsync off; 1,879 fps on the RTX 5080; 208-225 fps on the Adreno 840 at 1216x2688 (`gradlew :gdx-vulkan-desktop:stress3 -Dgdxvulkan.device=1`). 5 tests (`InstancedBatchTest`: pixel-exact against a CPU simulation of the same bouncing, upload-then-dispatch ordering in one frame, gravity, 1,000,000 sprites) pass on both GPUs, both tiers, lavapipe, and the Adreno (device suite)
 
 ---
 
@@ -281,7 +281,7 @@ the plan names; the phone is currently unplugged.
 - [ ] Directional shadow cascades; up to 4 point-light cubemap shadow casters (desktop), 1 cascade (mobile)
 
 ### 4. Compute
-- [ ] `VulkanComputeShader` with automatic barriers `COMPUTE_SHADER -> DRAW_INDIRECT | VERTEX_ATTRIBUTE_INPUT`
+- [ ] `VulkanComputeShader` with automatic barriers `COMPUTE_SHADER -> DRAW_INDIRECT | VERTEX_ATTRIBUTE_INPUT` (groundwork exists from `VulkanSpriteBatchInstanced`: compute pipelines on the shared layout, dispatches queued per frame and recorded ahead of the render pass, a buffer bound as Set 0 storage for compute and vertex shaders; no indirect draws or public API yet)
 
 ### Gate 5 and stress test 5
 - [ ] Animated `knight.g3db` via unmodified `G3dModelLoader` + a `ModelBuilder` scene: normal mapping, skeletal animation, directional shadows, vs stock GL within tolerance (own lavapipe golden for shadows)

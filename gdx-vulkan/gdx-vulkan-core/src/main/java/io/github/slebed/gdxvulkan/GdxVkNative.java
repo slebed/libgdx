@@ -54,6 +54,12 @@ final class GdxVkNative {
     /** @return pipeline id, or -1 (see nativeLastError) */
     static native int nativeCreatePipeline(long handle, String name, byte[] vertSpv, byte[] fragSpv);
 
+    /** @return compute pipeline id, or -1 (see nativeLastError) */
+    static native int nativeCreateComputePipeline(long handle, String name, byte[] spv);
+
+    /** Queues a dispatch for the open frame. @param push 32 floats. Returns a native FrameStatus code. */
+    static native int nativeDispatch(long handle, int pipeline, float[] push, int groupsX, int buffer);
+
     /** @param push exactly 32 floats (the 128-byte push-constant block). Returns a native FrameStatus code. */
     static native int nativeCreatePipelineEx(long handle, String name, byte[] vertSpv, byte[] fragSpv, int[] desc);
 

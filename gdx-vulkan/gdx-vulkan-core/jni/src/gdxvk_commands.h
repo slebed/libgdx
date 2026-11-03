@@ -24,6 +24,7 @@ enum Op : int32_t {
     BindTexture = 10,   // texture id (Tier B binds its descriptor set; Tier A needs nothing: the slot travels in the vertices)
     DrawIndexed = 11,   // index count, first index, vertex offset
     Draw = 12,          // vertex count, first vertex
+    BindStorage = 13,   // resource buffer id: Set 0's storage binding reads that buffer (whole range) instead of the frame ring's
 };
 
 constexpr int32_t kGlColorBufferBit = 0x00004000;

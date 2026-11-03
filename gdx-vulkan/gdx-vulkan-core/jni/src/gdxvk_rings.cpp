@@ -129,6 +129,39 @@ bool FrameRing::allocate(const void* uniform, uint32_t uniformBytes, const void*
     return true;
 }
 
+bool FrameRing::externalStorageSet(VkBuffer buffer, VkDeviceSize offset, VkDeviceSize range, VkDescriptorSet& set) {
+    if (pool_ == VK_NULL_HANDLE || uniform_.empty()) return false;
+    const VkBuffer uniform = uniform_.back().buffer;
+    for (const ExternalSet& e : external_) {
+        if (e.buffer == buffer && e.offset == offset && e.range == range && e.uniform == uniform) {
+            set = e.set;
+            return true;
+        }
+    }
+    VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    VkDescriptorSetLayout layout = h_.layouts->set0Layout();
+    ai.descriptorPool = pool_;
+    ai.descriptorSetCount = 1;
+    ai.pSetLayouts = &layout;
+    if (vkAllocateDescriptorSets(h_.device, &ai, &set) != VK_SUCCESS) return false;
+    VkDescriptorBufferInfo ub{uniform, 0, h_.layouts->uniformRange()};
+    VkDescriptorBufferInfo sb{buffer, offset, range};
+    VkWriteDescriptorSet w[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    w[0].dstSet = set;
+    w[0].dstBinding = 0;
+    w[0].descriptorCount = 1;
+    w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+    w[0].pBufferInfo = &ub;
+    w[1].dstSet = set;
+    w[1].dstBinding = 1;
+    w[1].descriptorCount = 1;
+    w[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+    w[1].pBufferInfo = &sb;
+    vkUpdateDescriptorSets(h_.device, 2, w, 0, nullptr);
+    external_.push_back({buffer, uniform, offset, range, set});
+    return true;
+}
+
 bool FrameRing::allocVertex(uint64_t bytes, uint32_t* block, uint64_t* offset) {
     if (vertex_.empty() || bytes == 0) return false;
     const VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
@@ -177,6 +210,7 @@ void FrameRing::reset() {
     if (pool_ != VK_NULL_HANDLE) vkResetDescriptorPool(h_.device, pool_, 0);
     set_ = VK_NULL_HANDLE;
     setUniform_ = setStorage_ = VK_NULL_HANDLE;
+    external_.clear();
 }
 
 } // namespace gdxvk

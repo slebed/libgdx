@@ -131,6 +131,21 @@ public final class GdxVkFrame {
         return id;
     }
 
+    /** A compute pipeline by key, created on first use from the shader resource {@code compName} (like {@code sprite_move.comp}). */
+    public int computePipeline(String key, String name, String compName) {
+        Integer id = pipelines.get("compute:" + key);
+        if (id == null) {
+            id = presenter.createComputePipeline(name, GdxVkShaders.load(compName, tierA));
+            pipelines.put("compute:" + key, id);
+        }
+        return id;
+    }
+
+    /** Queues a compute dispatch for this frame; see {@link GdxVkPresenter#dispatch}. */
+    public void dispatch(int computePipeline, float[] push, int groupsX, int buffer) {
+        presenter.dispatch(computePipeline, push, groupsX, buffer);
+    }
+
     public int pipeline(String key, String name, String vertName, String fragName, GdxVkPipelineDesc desc) {
         Integer id = pipelines.get(key);
         if (id == null) {
