@@ -11,8 +11,10 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.Texture.TextureFilter;
+import com.badlogic.gdx.graphics.g2d.PolygonRegion;
 import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.math.EarClippingTriangulator;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
 import io.github.slebed.gdxvulkan.GdxVkConfig;
@@ -20,6 +22,7 @@ import io.github.slebed.gdxvulkan.GdxVkContext;
 import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkPresenter;
 import io.github.slebed.gdxvulkan.VulkanCaps;
+import io.github.slebed.gdxvulkan.g2d.VulkanPolygonSpriteBatch;
 import io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch;
 import io.github.slebed.gdxvulkan.gl.VulkanGL20;
 
@@ -325,5 +328,38 @@ class SpriteBatchTest {
         t.dispose();
         b.dispose();
         frame.end();
+    }
+
+    @Test void polygonBatchDrawsRealPolygons() {
+        Texture red = solid(1, 0, 0, 1), blue = solid(0, 0, 1, 1);
+        // a triangle (not a quad) and a pentagon, in different textures so Tier A mixes slots within one flush
+        PolygonRegion triangle = new PolygonRegion(new TextureRegion(red), new float[] {0, 0, 40, 0, 20, 40}, new short[] {0, 1, 2});
+        float[] pentagon = new float[10];
+        for (int i = 0; i < 5; i++) {
+            pentagon[i * 2] = 18 * (float)Math.cos(Math.PI / 2 + i * 2 * Math.PI / 5);
+            pentagon[i * 2 + 1] = 18 * (float)Math.sin(Math.PI / 2 + i * 2 * Math.PI / 5);
+        }
+        PolygonRegion five = new PolygonRegion(new TextureRegion(blue), pentagon, new EarClippingTriangulator().computeTriangles(pentagon).toArray());
+        int[] calls = new int[1];
+        GLFW.glfwPollEvents();
+        assertTrue(frame.begin(0, 0, 0, 1));
+        VulkanPolygonSpriteBatch b = new VulkanPolygonSpriteBatch(frame);
+        b.getProjectionMatrix().setToOrtho2D(0, 0, S, S);
+        b.begin();
+        b.draw(triangle, 4, 4);
+        b.draw(five, 44, 24);
+        b.draw(new PolygonRegion(new TextureRegion(red), new float[] {0, 0, 10, 0, 10, 10, 0, 10}, new short[] {0, 1, 2, 2, 3, 0}), 40, 52);
+        b.end();
+        calls[0] = b.renderCalls;
+        b.dispose();
+        byte[] f = frame.endAndCapture();
+        assertPx(f, 24, 64 - 12, 255, 0, 0, 1, "inside the triangle");
+        assertPx(f, 6, 64 - 30, 0, 0, 0, 0, "outside the triangle, left of its slanted edge");
+        assertPx(f, 44, 64 - 24, 0, 0, 255, 1, "inside the pentagon");
+        assertPx(f, 44 + 22, 64 - 24, 0, 0, 0, 0, "outside the pentagon");
+        assertPx(f, 45, 64 - 57, 255, 0, 0, 1, "an explicit quad polygon");
+        assertEquals(tierA ? 1 : 3, calls[0], "draw calls: Tier A mixes textures in one draw, Tier B flushes per texture change");
+        red.dispose();
+        blue.dispose();
     }
 }

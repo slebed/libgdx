@@ -8,9 +8,9 @@ name: gdx-vulkan
 
 on:
   push:
-    paths: ['gdx-vulkan/**', '.github/workflows/gdx-vulkan.yml']
+    paths: ['gdx-vulkan/**', 'tests/gdx-tests-android/assets/**', '.github/workflows/gdx-vulkan.yml']
   pull_request:
-    paths: ['gdx-vulkan/**', '.github/workflows/gdx-vulkan.yml']
+    paths: ['gdx-vulkan/**', 'tests/gdx-tests-android/assets/**', '.github/workflows/gdx-vulkan.yml']
   workflow_dispatch:
     inputs:
       update_goldens:
@@ -45,6 +45,7 @@ jobs:
             -e UPDATE_GOLDENS=${{ inputs.update_goldens && '1' || '0' }} \
             -e SKIP_MESA_PIN=${{ inputs.update_goldens && '1' || '0' }} \
             -v "$GITHUB_WORKSPACE/gdx-vulkan:/src:ro" \
+            -v "$GITHUB_WORKSPACE/tests/gdx-tests-android/assets:/assets:ro" \
             -v "$RUNNER_TEMP/out:/out" \
             -v "$HOME/.gradle-ci:/root/.gradle" \
             gdx-vulkan-ci bash /src/ci/run-checks.sh

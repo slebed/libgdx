@@ -105,8 +105,12 @@ final class GoldenImages {
     private static BufferedImage read(File f) {
         try {
             BufferedImage in = ImageIO.read(f);
+            // Copy the pixels exactly. Painting the image into an ARGB one (drawImage) would premultiply and un-premultiply, which moves
+            // every partially transparent pixel (blended text edges, for one) by one unit and made an exact compare impossible.
             BufferedImage out = new BufferedImage(in.getWidth(), in.getHeight(), BufferedImage.TYPE_INT_ARGB);
-            out.getGraphics().drawImage(in, 0, 0, null); // normalise whatever PNG flavour was stored
+            for (int y = 0; y < in.getHeight(); y++) {
+                for (int x = 0; x < in.getWidth(); x++) out.setRGB(x, y, in.getRGB(x, y));
+            }
             return out;
         } catch (IOException e) {
             throw new IllegalStateException("Could not read golden " + f, e);

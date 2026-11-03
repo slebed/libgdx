@@ -4,6 +4,8 @@ import com.badlogic.gdx.Application;
 import com.badlogic.gdx.Application.ApplicationType;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Graphics;
+import com.badlogic.gdx.Input;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Files;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 
 import io.github.slebed.gdxvulkan.GdxVkContext;
@@ -50,6 +52,12 @@ final class TestGdx {
                 }
             }
         });
+        Gdx.input = proxy(Input.class, new InvocationHandler() {
+            @Override public Object invoke(Object p, Method m, Object[] a) {
+                return defaultFor(m.getReturnType());
+            }
+        });
+        Gdx.files = new Lwjgl3Files(); // the real stock file handles: skins, fonts and atlases load as in an application
         Gdx.gl = gl;
         Gdx.gl20 = gl;
         Gdx.gl30 = null; // always null: a non-null value would switch stock Mesh to VAOs (plan, Core decision 3)
@@ -59,6 +67,8 @@ final class TestGdx {
     static void uninstall() {
         Gdx.app = null;
         Gdx.graphics = null;
+        Gdx.input = null;
+        Gdx.files = null;
         Gdx.gl = null;
         Gdx.gl20 = null;
         Gdx.gl30 = null;

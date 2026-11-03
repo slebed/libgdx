@@ -46,18 +46,29 @@ collect() {
 }
 trap collect EXIT
 
+# libGDX's test assets (skin, fonts, atlases, ...) live in the repository next to gdx-vulkan; mount them at /assets.
+ASSETS_ARG=""
+[ -d /assets ] && ASSETS_ARG="-Dgdxvulkan.assetsDir=/assets"
 run() { xvfb-run -a -s "-screen 0 1280x1024x24" ./gradlew --console=plain --no-daemon "$@"; }
 
 if [ "${UPDATE_GOLDENS:-0}" = "1" ]; then
-    run :gdx-vulkan-desktop:test --tests '*GoldenTest*' -Dgdxvulkan.requireDriver=true -Dgdxvulkan.updateGoldens=true
+    run :gdx-vulkan-desktop:test --tests '*GoldenTest*' -Dgdxvulkan.requireDriver=true -Dgdxvulkan.updateGoldens=true $ASSETS_ARG
     rm -rf "$OUT/goldens" && mkdir -p "$OUT/goldens"
     cp gdx-vulkan-desktop/src/test/resources/goldens/*.png "$OUT/goldens/"
     echo "Regenerated goldens copied to $OUT/goldens (Mesa $MESA)."
     exit 0
 fi
 
+# Diagnostics: ONLY_TESTS="*SpriteBatchTest* *Gate2GoldenTest*" runs just those classes together (Tier A) in one JVM, then exits.
+if [ -n "${ONLY_TESTS:-}" ]; then
+    TEST_ARGS=""
+    for t in $ONLY_TESTS; do TEST_ARGS="$TEST_ARGS --tests $t"; done
+    run :gdx-vulkan-desktop:test $TEST_ARGS --rerun-tasks -Dgdxvulkan.requireDriver=true $ASSETS_ARG
+    exit 0
+fi
+
 for tier in false true; do
     echo "================ forceTierB=$tier ================"
-    run check --rerun-tasks -Dgdxvulkan.requireDriver=true -Dgdxvulkan.forceTierB=$tier
+    run check --rerun-tasks -Dgdxvulkan.requireDriver=true -Dgdxvulkan.forceTierB=$tier $ASSETS_ARG
 done
 echo "All checks passed on lavapipe (Mesa $MESA), Tier A and Tier B."

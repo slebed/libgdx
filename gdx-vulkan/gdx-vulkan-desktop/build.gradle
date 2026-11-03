@@ -6,6 +6,10 @@ dependencies {
     // libGDX's own natives (gdx2d: Pixmap decoding/drawing), which the stock classes under test need.
     api "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-desktop"
 
+    // FreeType for the Gate 2 FreeTypeFontGenerator scene (tests only; the library does not depend on it).
+    testImplementation "com.badlogicgames.gdx:gdx-freetype:${gdxVersion}"
+    testRuntimeOnly "com.badlogicgames.gdx:gdx-freetype-platform:${gdxVersion}:natives-desktop"
+
     testImplementation platform("org.junit:junit-bom:${junitVersion}")
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -20,6 +24,8 @@ def configureGpuTest = { Test t ->
     t.systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
     t.systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'true')
     t.systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
+    // libGDX's own test assets (skin, fonts, atlases, particle effects, TTFs) are the content for the Gate 2 scenes.
+    t.systemProperty 'gdxvulkan.assetsDir', System.getProperty('gdxvulkan.assetsDir') ?: file('../../tests/gdx-tests-android/assets').absolutePath
     t.systemProperty 'gdxvulkan.requireDriver', System.getProperty('gdxvulkan.requireDriver', 'false')
     // -Dgdxvulkan.device=N picks a physical device by index; the soak and golden output print the device name actually used.
     System.getProperty('gdxvulkan.device')?.with { v -> t.systemProperty('gdxvulkan.device', v) }
@@ -58,6 +64,25 @@ tasks.register('soakTest', Test) {
     }
 }
 check.dependsOn 'soakTest'
+
+// The compatibility reference (plan, Core decision 8): stock libGDX SpriteBatch on OpenGL draws the Gate 2 scenes. It needs an OpenGL
+// driver and a display, so a failure here is not fatal for the build; the Gate 2 test skips the comparison unless -Dgdxvulkan.requireGl=true.
+def glReferenceDir = layout.buildDirectory.dir('gl-reference')
+tasks.register('glReferences', JavaExec) {
+    description = 'Renders the Gate 2 scenes with stock SpriteBatch on OpenGL into build/gl-reference.'
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.github.slebed.gdxvulkan.desktop.GlReferenceMain'
+    dependsOn 'testClasses'
+    ignoreExitValue = true
+    args glReferenceDir.get().asFile.absolutePath, (System.getProperty('gdxvulkan.assetsDir') ?: file('../../tests/gdx-tests-android/assets').absolutePath)
+    doFirst { glReferenceDir.get().asFile.deleteDir() }
+}
+test.dependsOn 'glReferences'
+test {
+    systemProperty 'gdxvulkan.glReferenceDir', glReferenceDir.get().asFile.absolutePath
+    System.getProperty('gdxvulkan.requireGl')?.with { v -> systemProperty('gdxvulkan.requireGl', v) }
+}
 
 tasks.register('runTriangleDemo', JavaExec) {
     description = 'Opens a window with a spinning triangle. -Dgdxvulkan.forceTierB=true for Tier B.'

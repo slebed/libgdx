@@ -205,22 +205,7 @@ public class VulkanSpriteBatch extends VulkanSpriteBatchDraws implements VulkanG
     }
 
     private int pipeline () {
-        final String key = blendingDisabled ? "sprite|opaque"
-            : "sprite|" + blendSrcFunc + "," + blendDstFunc + "," + blendSrcFuncAlpha + "," + blendDstFuncAlpha;
-        GdxVkPipelineDesc d = new GdxVkPipelineDesc();
-        d.stride = VERTEX_BYTES;
-        d.attribute(0, GdxVkPipelineDesc.FORMAT_R32G32_SFLOAT, 0).attribute(1, GdxVkPipelineDesc.FORMAT_R8G8B8A8_UNORM, 8)
-            .attribute(2, GdxVkPipelineDesc.FORMAT_R32G32_SFLOAT, 12);
-        if (tierA) d.attribute(3, GdxVkPipelineDesc.FORMAT_R32_UINT, 20); // the slot only exists in the Tier A shaders
-        d.cullMode = GdxVkPipelineDesc.CULL_NONE;
-        if (!blendingDisabled) {
-            d.blend = true;
-            d.srcColor = blendSrcFunc;
-            d.dstColor = blendDstFunc;
-            d.srcAlpha = blendSrcFuncAlpha;
-            d.dstAlpha = blendDstFuncAlpha;
-        }
-        return frame.pipeline(key, "sprite", "sprite.vert", "sprite.frag", d);
+        return SpritePipelines.get(frame, blendingDisabled, blendSrcFunc, blendDstFunc, blendSrcFuncAlpha, blendDstFuncAlpha);
     }
 
     @Override public void disableBlending () {
