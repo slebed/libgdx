@@ -12,7 +12,7 @@ import java.nio.ByteOrder;
  */
 public final class CommandStream {
     public static final int BIND_PIPELINE = 1, PUSH_CONSTANTS = 2, VIEWPORT = 3, SCISSOR = 4, SCISSOR_ENABLE = 5, CLEAR = 6, BIND_VERTEX = 7,
-        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13;
+        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13, BIND_TARGET = 14, DEPTH_STATE = 15, STENCIL_STATE = 16;
     public static final int INDEX_U16 = 0, INDEX_U32 = 1;
 
     private ByteBuffer buffer = ByteBuffer.allocateDirect(64 * 1024).order(ByteOrder.LITTLE_ENDIAN);
@@ -73,15 +73,43 @@ public final class CommandStream {
         put(on ? 1 : 0);
     }
 
-    /** @param glMask GL_COLOR_BUFFER_BIT etc.; only the colour bit is acted on so far */
-    public void clear(int glMask, float r, float g, float b, float a) {
-        ensure(6);
+    /**
+     * @param glMask GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT. Depth and stencil are ignored on a target that has
+     *           none (the swapchain), as in GL. A full clear that starts a pass becomes the pass's load op.
+     */
+    public void clear(int glMask, float r, float g, float b, float a, float depth, int stencil) {
+        ensure(8);
         put(CLEAR);
         put(glMask);
         putF(r);
         putF(g);
         putF(b);
         putF(a);
+        putF(depth);
+        put(stencil);
+    }
+
+    /** OpenGL depth state: test enable, write mask and compare function (a GL enum, GL_LESS etc.). */
+    public void depthState(boolean test, boolean write, int glFunc) {
+        ensure(4);
+        put(DEPTH_STATE);
+        put(test ? 1 : 0);
+        put(write ? 1 : 0);
+        put(glFunc);
+    }
+
+    /** OpenGL stencil state, front and back alike. Operations and the function are GL enums. */
+    public void stencilState(boolean test, int glFunc, int ref, int compareMask, int writeMask, int glFail, int glDepthFail, int glPass) {
+        ensure(9);
+        put(STENCIL_STATE);
+        put(test ? 1 : 0);
+        put(glFunc);
+        put(ref);
+        put(compareMask);
+        put(writeMask);
+        put(glFail);
+        put(glDepthFail);
+        put(glPass);
     }
 
     public void bindVertex(int block, long offset) {
@@ -122,6 +150,18 @@ public final class CommandStream {
         ensure(2);
         put(BIND_STORAGE);
         put(resourceBuffer);
+    }
+
+    /**
+     * Draws go to this render-target texture (a native texture id) from here on, or to the swapchain with -1. The open pass ends; the
+     * next one starts at the first draw or clear, and a full clear that starts it becomes its load op. The depth image (from
+     * {@code GdxVkResources.createDepthImage}) may be -1.
+     */
+    public void bindTarget(int nativeTextureOrMinus1, int depthImageOrMinus1) {
+        ensure(3);
+        put(BIND_TARGET);
+        put(nativeTextureOrMinus1);
+        put(depthImageOrMinus1);
     }
 
     public void drawIndexed(int indexCount, int firstIndex, int vertexOffset) {

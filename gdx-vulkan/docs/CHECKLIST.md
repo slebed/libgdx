@@ -16,12 +16,12 @@ the plan names.
 | Phase 1a: Extraction, window surfaces and CI | 13 | 7 | 2 | 22 |
 | Phase 1b: Memory, layout and caches | 15 | 2 | 3 | 20 |
 | Phase 2: Unmodified 2D | 20 | 4 | 1 | 25 |
-| Phase 3: Stock FrameBuffer | 0 | 0 | 13 | 13 |
+| Phase 3: Stock FrameBuffer | 4 | 1 | 8 | 13 |
 | Phase 4: Android lifecycle | 0 | 2 | 10 | 12 |
 | Phase 5: 3D with stock models | 0 | 0 | 12 | 12 |
 | Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 1 | 0 | 4 | 5 |
-| **All** | **79** | **22** | **68** | **169** |
+| **All** | **83** | **23** | **63** | **169** |
 ---
 
 ## Core decisions
@@ -207,20 +207,20 @@ the plan names.
 - [x] `VulkanSpriteBatch` Tier A, 128 textures: >= 3x stock fps. RTX 5080, 20,000 sprites/frame, 800x600, vsync off: 17.5 fps stock GL, 413 fps (23.6x). (`gradlew :gdx-vulkan-desktop:stress2`)
 - [ ] `VulkanSpriteBatch` Tier A, 1 texture: >= 1.0x. **Missed**: 950-965 fps vs 1,050-1,060 stock (0.91x) on the RTX 5080. CPU-bound (same fps with 3 px sprites); the vertex copy into mapped memory is the cost, down from 0.70x after the single-texture 20-byte path and cached host memory
 - [~] `VulkanSpriteBatch` Tier B (fence path), 128 textures: 55-70 fps vs 17.5 (3.1-4.1x) passes; 1 texture 0.91x misses like Tier A. RTX 2080 not compared: its Vulkan run is capped at its 120 Hz presentation while the GL run uses the display GPU
-- [x] `VulkanSpriteBatchInstanced`, 1,000,000 sprites moved by compute: 60+ fps on RTX 2080. **722 fps** (Tier A) and 726 fps (Tier B) on the RTX 2080 at 1280x720, vsync off; 1,879 fps on the RTX 5080; 208-225 fps on the Adreno 840 at 1216x2688 (`gradlew :gdx-vulkan-desktop:stress3 -Dgdxvulkan.device=1`). 5 tests (`InstancedBatchTest`: pixel-exact against a CPU simulation of the same bouncing, upload-then-dispatch ordering in one frame, gravity, 1,000,000 sprites) pass on both GPUs, both tiers, lavapipe, and the Adreno (device suite)
+- [x] `VulkanSpriteBatchInstanced`, 1,000,000 sprites moved by compute: 60+ fps on RTX 2080. **722 fps** (Tier A) and 726 fps (Tier B) on the RTX 2080 at 1280x720, vsync off; 1,879 fps on the RTX 5080; 208-225 fps on the Adreno 840 at 1216x2688 (`gradlew :gdx-vulkan-desktop:stressInstanced -Dgdxvulkan.device=1`). 5 tests (`InstancedBatchTest`: pixel-exact against a CPU simulation of the same bouncing, upload-then-dispatch ordering in one frame, gravity, 1,000,000 sprites) pass on both GPUs, both tiers, lavapipe, and the Adreno (device suite)
 
 ---
 
 ## Phase 3: Stock FrameBuffer
 
 ### 1. Framebuffer shim
-- [ ] `glBindFramebuffer` emits `END_PASS`, layout barriers, `BEGIN_PASS`; render targets never renamed
-- [ ] Offscreen passes use the positive-height viewport and clockwise front face
+- [x] `glBindFramebuffer` emits `BindTarget` into the stream; the native side ends the open pass, moves the image between SHADER_READ_ONLY and COLOR_ATTACHMENT with barriers, and starts the next pass lazily at the first draw or clear (a full clear that starts a pass becomes its load op). Render targets are never renamed. Colour attachment 0, RGBA8 only (depth and stencil next). `FrameBufferTest`: 7 tests on stock `FrameBuffer` (GL orientation, ordering with the swapchain pass, loading across frames, ping-pong, scissor and viewport) pass on both GPUs, both tiers, lavapipe
+- [x] Offscreen passes use the positive-height viewport and clockwise front face (Tier A dynamic, Tier B pipeline variants per target kind)
 
 ### 2. Depth and stencil
-- [ ] Packed depth-stencil reported supported; separate depth/stencil renderbuffers folded into one image
-- [ ] Format by device support: `D24_UNORM_S8_UINT`, else `D32_SFLOAT_S8_UINT`; `DEPTH_COMPONENT16 -> D16_UNORM`
-- [ ] Renderbuffers as `TRANSIENT_ATTACHMENT` + `LAZILY_ALLOCATED`, `STORE_OP_DONT_CARE`
+- [x] Packed depth-stencil reported supported; separate depth and stencil renderbuffers on one framebuffer are folded into one combined image (`depthImageOf` in the shim). Depth and stencil state (`glEnable`/`glDepthFunc`/`glDepthMask`/`glClearDepthf`/`glStencil*`/`glClearStencil`) are ordered stream packets: dynamic state on Tier A, pipeline variants on Tier B. 5 depth/stencil tests in `FrameBufferTest` (12 in all) pass on both GPUs, both tiers, lavapipe; the Adreno 840 device suite (18 checks) passes both tiers. The swapchain itself has no depth buffer yet (Phase 5), so depth state is ignored there
+- [x] Format by device support: `D24_UNORM_S8_UINT`, else `D32_SFLOAT_S8_UINT`; `DEPTH_COMPONENT16 -> D16_UNORM` (24/32-bit depth without stencil is `D32_SFLOAT`)
+- [~] Renderbuffers are ordinary device-local depth images that are loaded and stored: GL keeps a framebuffer's depth between its passes (`fb.begin()` twice), which a transient `STORE_OP_DONT_CARE` image cannot do. The transient optimisation needs to know the depth is not read again; Phase 4 mobile tuning
 
 ### 3. Pass scheduling
 - [ ] Offscreen passes recorded before the swapchain pass where stream order allows

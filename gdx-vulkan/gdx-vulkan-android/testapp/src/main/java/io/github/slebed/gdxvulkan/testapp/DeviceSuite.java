@@ -11,6 +11,9 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.Texture.TextureFilter;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.utils.BufferUtils;
 
 import io.github.slebed.gdxvulkan.GdxVkContext;
@@ -69,6 +72,8 @@ final class DeviceSuite {
         s.check("compressedFormatQuery", s::formatQuery);
         s.check("mipmapsAndFiltering", s::mipmaps);
         s.check("instancedSpritesComputeAndDraw", s::instanced);
+        s.check("frameBufferColor", s::frameBufferColor);
+        s.check("frameBufferDepthAndStencil", s::frameBufferDepthAndStencil);
         s.check("soakTextureChurn", () -> s.soak(soakSeconds));
         s.check("stress2Single", () -> s.stress(1, stressSeconds));
         s.check("stress2Textures128", () -> s.stress(128, stressSeconds));
@@ -482,6 +487,93 @@ final class DeviceSuite {
         b.dispose();
         t.dispose();
         require(fps > 5, "instanced million too slow: " + fps);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------- framebuffers
+
+    private void beginFrame(float r, float g, float b) {
+        for (int attempt = 0; attempt < 100; attempt++) {
+            if (frame.begin(r, g, b, 1)) return;
+        }
+        throw new IllegalStateException("no frame could be started");
+    }
+
+    private void fill(VulkanSpriteBatch b, Texture white, float z, float x, float y, float w, float h, float r, float g, float bl) {
+        Matrix4 m = new Matrix4().setToOrtho2D(0, 0, S, S);
+        m.val[Matrix4.M23] = z;
+        b.setProjectionMatrix(m);
+        b.begin();
+        b.setColor(r, g, bl, 1);
+        b.draw(white, x, y, w, h);
+        b.end();
+    }
+
+    private byte[] showFlipped(VulkanSpriteBatch b, FrameBuffer fb) {
+        TextureRegion region = new TextureRegion(fb.getColorBufferTexture());
+        region.flip(false, true);
+        b.setProjectionMatrix(new Matrix4().setToOrtho2D(0, 0, S, S));
+        b.begin();
+        b.setColor(1, 1, 1, 1);
+        b.draw(region, 0, 0, S, S);
+        b.end();
+        return frame.endAndCapture();
+    }
+
+    private void frameBufferColor() {
+        Texture white = solid(1, 1, 1, 1);
+        FrameBuffer fb = new FrameBuffer(Pixmap.Format.RGBA8888, S, S, false);
+        beginFrame(0, 0, 1);
+        VulkanSpriteBatch b = new VulkanSpriteBatch(frame);
+        b.getProjectionMatrix().setToOrtho2D(0, 0, S, S);
+        fill(b, white, 0, 0, 0, 20, 64, 1, 0, 0); // on the swapchain, before the offscreen pass
+        fb.begin();
+        Gdx.gl.glClearColor(0, 0, 0, 1);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        fill(b, white, 0, 0, 0, 16, 16, 0, 1, 0); // GL bottom-left of the framebuffer
+        fb.end();
+        fill(b, white, 0, 44, 0, 20, 64, 1, 1, 0); // on the swapchain, after it
+        byte[] f = showFlipped(b, fb);
+        // the framebuffer is drawn over the whole screen, flipped back: green is at the bottom-left; the strips are covered
+        assertPx(f, 8, 56, 0, 255, 0, 1, "framebuffer corner, GL orientation");
+        assertPx(f, 56, 8, 0, 0, 0, 1, "framebuffer is otherwise cleared");
+        b.dispose();
+        fb.dispose();
+        white.dispose();
+    }
+
+    private void frameBufferDepthAndStencil() {
+        Texture white = solid(1, 1, 1, 1);
+        FrameBuffer fb = new FrameBuffer(Pixmap.Format.RGBA8888, S, S, true, true);
+        beginFrame(0, 0, 0);
+        VulkanSpriteBatch b = new VulkanSpriteBatch(frame);
+        fb.begin();
+        Gdx.gl.glClearColor(0, 0, 0, 1);
+        Gdx.gl.glClearDepthf(1f);
+        Gdx.gl.glClearStencil(0);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT | GL20.GL_STENCIL_BUFFER_BIT);
+        Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
+        fill(b, white, -0.5f, 0, 0, 32, 64, 1, 0, 0); // near first, far over it: near stays
+        fill(b, white, 0.5f, 0, 0, 32, 64, 0, 0, 1);
+        fill(b, white, 0.5f, 32, 0, 32, 64, 0, 1, 0); // far first, near over it: near wins
+        fill(b, white, -0.5f, 32, 0, 32, 64, 1, 1, 0);
+        Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+        Gdx.gl.glEnable(GL20.GL_STENCIL_TEST); // stencil: mark a square, then draw only inside it
+        Gdx.gl.glStencilFunc(GL20.GL_ALWAYS, 1, 0xFF);
+        Gdx.gl.glStencilOp(GL20.GL_KEEP, GL20.GL_KEEP, GL20.GL_REPLACE);
+        fill(b, white, 0, 24, 24, 16, 16, 1, 0, 1);
+        Gdx.gl.glStencilFunc(GL20.GL_EQUAL, 1, 0xFF);
+        Gdx.gl.glStencilOp(GL20.GL_KEEP, GL20.GL_KEEP, GL20.GL_KEEP);
+        fill(b, white, 0, 0, 0, 64, 20, 1, 1, 1); // a white band along the bottom: only the part inside the marked square would show
+        Gdx.gl.glDisable(GL20.GL_STENCIL_TEST);
+        fb.end();
+        byte[] f = showFlipped(b, fb);
+        assertPx(f, 16, 12, 255, 0, 0, 1, "depth: near drawn first stays on top");
+        assertPx(f, 48, 12, 255, 255, 0, 1, "depth: near drawn last wins");
+        assertPx(f, 32, 32, 255, 0, 255, 1, "stencil: the marked square");
+        assertPx(f, 8, 56, 255, 0, 0, 1, "stencil: the white band outside the marked square was rejected (the red from the depth part remains)");
+        b.dispose();
+        fb.dispose();
+        white.dispose();
     }
 
     // -------------------------------------------------------------------------------------------------------------- soak / perf

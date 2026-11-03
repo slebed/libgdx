@@ -68,6 +68,9 @@ public final class GdxVkResources {
     /** A block-compressed image; the Vulkan format and block geometry travel separately (see {@link #createCompressedTexture}). */
     public static final int FORMAT_COMPRESSED = 3;
 
+    /** RGBA8 that can also be rendered into (a framebuffer's colour texture): one level, never renamed. Passed to createTexture like FORMAT_RGBA8. */
+    public static final int FORMAT_RENDER_TARGET = 4;
+
     /**
      * A block-compressed texture: {@code levels} mip levels of {@code vkFormat}, tightly packed, level 0 first. Throws if the device
      * cannot sample the format (BC on desktop GPUs, ETC2 and ASTC on mobile ones; check {@link #formatSupported}).
@@ -142,6 +145,20 @@ public final class GdxVkResources {
 
     public void destroyTexture(int id) {
         GdxVkNative.nativeDestroyTexture(context.nativeHandle(), id);
+    }
+
+    /**
+     * A depth image (plus a stencil aspect with {@code stencil}) for a framebuffer's renderbuffers. The device picks the format: D16 for 16 bits,
+     * D32 otherwise, D24S8 or D32S8 with stencil. Never sampled.
+     */
+    public int createDepthImage(int width, int height, boolean stencil, int depthBits) {
+        int id = GdxVkNative.nativeCreateDepthImage(context.nativeHandle(), width, height, stencil, depthBits);
+        if (id < 0) throw new VulkanOutOfMemoryException("Could not create a " + width + "x" + height + " depth image");
+        return id;
+    }
+
+    public void destroyDepthImage(int id) {
+        GdxVkNative.nativeDestroyDepthImage(context.nativeHandle(), id);
     }
 
     /** The bindless slot (Tier A) or 0 (Tier B), or -1 if the texture does not exist. */

@@ -96,13 +96,13 @@ tasks.register('stress2', JavaExec) {
     System.properties.each { k, v -> if (k.toString().startsWith('gdxvulkan.')) systemProperty k.toString(), v.toString() }
 }
 
-// Stress test 3: VulkanSpriteBatchInstanced, 1,000,000 sprites moved by compute (plan target: 60+ fps on the RTX 2080, -Dgdxvulkan.device=1).
-// -Dgdxvulkan.stress3.sprites|seconds|size|report=true; fails the build below 60 fps unless report is set.
-tasks.register('stress3', JavaExec) {
-    description = 'Stress test 3: 1,000,000 sprites moved by compute and drawn instanced.'
+// Instanced sprite stress test: VulkanSpriteBatchInstanced, 1,000,000 sprites moved by compute (plan target: 60+ fps on the RTX 2080, -Dgdxvulkan.device=1).
+// -Dgdxvulkan.stressInstanced.sprites|seconds|size|report=true; fails the build below 60 fps unless report is set.
+tasks.register('stressInstanced', JavaExec) {
+    description = 'Instanced sprite stress test: 1,000,000 sprites moved by compute and drawn instanced.'
     group = 'verification'
     classpath = sourceSets.test.runtimeClasspath
-    mainClass = 'io.github.slebed.gdxvulkan.desktop.Stress3Main'
+    mainClass = 'io.github.slebed.gdxvulkan.desktop.StressInstancedMain'
     dependsOn 'testClasses', ':gdx-vulkan-core:buildNatives'
     systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
     systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'false')

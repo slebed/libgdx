@@ -17,7 +17,7 @@ enum Op : int32_t {
     Viewport = 3,       // x, y, w, h
     Scissor = 4,        // x, y, w, h
     ScissorEnable = 5,  // 0 / 1
-    Clear = 6,          // mask (GL bits), r, g, b, a (float bits). Colour only for now; respects the scissor
+    Clear = 6,          // mask (GL bits), r, g, b, a, depth (float bits), stencil. Colour, depth and stencil; respects the scissor
     BindVertex = 7,     // ring block, offset lo, offset hi
     BindIndexBuffer = 8, // resource buffer id, offset lo, offset hi, index type (0 = u16, 1 = u32)
     BindIndexRing = 9,  // ring block, offset lo, offset hi, index type
@@ -25,9 +25,12 @@ enum Op : int32_t {
     DrawIndexed = 11,   // index count, first index, vertex offset
     Draw = 12,          // vertex count, first vertex
     BindStorage = 13,   // resource buffer id: Set 0's storage binding reads that buffer (whole range) instead of the frame ring's
+    BindTarget = 14,    // render-target texture id (or -1 for the swapchain), depth image id (or -1). Ends the open pass; the next starts at the first draw/clear
+    DepthState = 15,    // test enable, write enable, compare func (GL enum)
+    StencilState = 16,  // test enable, func (GL), ref, compare mask, write mask, sfail, dpfail, dppass (GL enums)
 };
 
-constexpr int32_t kGlColorBufferBit = 0x00004000;
+constexpr int32_t kGlColorBufferBit = 0x00004000, kGlDepthBufferBit = 0x00000100, kGlStencilBufferBit = 0x00000400;
 
 } // namespace cmd
 } // namespace gdxvk

@@ -34,6 +34,9 @@ final class GdxVkNative {
     static native boolean nativeSetTextureSampler(long ctx, int id, int minFilter, int magFilter, int mipFilter, int wrapU, int wrapV,
         int anisotropy);
     static native void nativeDestroyTexture(long ctx, int id);
+    /** A depth (or depth+stencil) image for a framebuffer; -1 on failure. */
+    static native int nativeCreateDepthImage(long ctx, int width, int height, boolean stencil, int depthBits);
+    static native void nativeDestroyDepthImage(long ctx, int id);
     static native int nativeTextureSlot(long ctx, int id);
     static native boolean nativeFlushUploads(long ctx);
     static native int nativeCollectGarbage(long ctx);

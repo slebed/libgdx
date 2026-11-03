@@ -15,19 +15,19 @@ import java.util.Random;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * Stress test 3 (plan, Phase 2): {@code VulkanSpriteBatchInstanced} with 1,000,000 sprites moved by compute every frame, drawn into a
+ * Instanced sprite stress test (plan, Phase 2): {@code VulkanSpriteBatchInstanced} with 1,000,000 sprites moved by compute every frame, drawn into a
  * 1280x720 window with vsync off. The plan's target is 60+ fps on the RTX 2080 ({@code -Dgdxvulkan.device=1}). Exit code 1 below target
- * unless {@code -Dgdxvulkan.stress3.report=true}.
+ * unless {@code -Dgdxvulkan.stressInstanced.report=true}.
  *
- * <p>Properties: {@code gdxvulkan.stress3.sprites} (default 1000000), {@code .seconds} (5), {@code .size} (sprite edge in pixels, 3).
+ * <p>Properties: {@code gdxvulkan.stressInstanced.sprites} (default 1000000), {@code .seconds} (5), {@code .size} (sprite edge in pixels, 3).
  */
-public final class Stress3Main {
+public final class StressInstancedMain {
     static final int WIDTH = 1280, HEIGHT = 720;
-    static final int SPRITES = Integer.getInteger("gdxvulkan.stress3.sprites", 1_000_000);
-    static final double SECONDS = Double.parseDouble(System.getProperty("gdxvulkan.stress3.seconds", "5"));
-    static final float SIZE = Float.parseFloat(System.getProperty("gdxvulkan.stress3.size", "3"));
+    static final int SPRITES = Integer.getInteger("gdxvulkan.stressInstanced.sprites", 1_000_000);
+    static final double SECONDS = Double.parseDouble(System.getProperty("gdxvulkan.stressInstanced.seconds", "5"));
+    static final float SIZE = Float.parseFloat(System.getProperty("gdxvulkan.stressInstanced.size", "3"));
 
-    private Stress3Main() {}
+    private StressInstancedMain() {}
 
     public static void main(String[] args) {
         if (!GLFW.glfwInit()) throw new IllegalStateException("GLFW could not initialise");
@@ -40,7 +40,7 @@ public final class Stress3Main {
         TestGdx.width = presenter.width();
         TestGdx.height = presenter.height();
         GdxVkFrame frame = new GdxVkFrame(ctx, presenter, gl);
-        System.out.println("[stress3] " + ctx.caps().deviceName + " tier " + ctx.caps().tier + ", " + SPRITES + " sprites at "
+        System.out.println("[stressInstanced] " + ctx.caps().deviceName + " tier " + ctx.caps().tier + ", " + SPRITES + " sprites at "
             + presenter.width() + "x" + presenter.height());
 
         Pixmap pm = new Pixmap(2, 2, Pixmap.Format.RGBA8888);
@@ -87,7 +87,7 @@ public final class Stress3Main {
             last = now;
         }
         double fps = frames / ((System.nanoTime() - measureStart) / 1e9);
-        System.out.printf("[stress3] RESULT fps=%.1f worstMs=%.1f (target 60+ on the RTX 2080)%n", fps, worst);
+        System.out.printf("[stressInstanced] RESULT fps=%.1f worstMs=%.1f (target 60+ on the RTX 2080)%n", fps, worst);
 
         batch.dispose();
         texture.dispose();
@@ -96,7 +96,7 @@ public final class Stress3Main {
         ctx.close();
         GLFW.glfwDestroyWindow(window);
         GLFW.glfwTerminate();
-        boolean report = Boolean.getBoolean("gdxvulkan.stress3.report");
+        boolean report = Boolean.getBoolean("gdxvulkan.stressInstanced.report");
         System.exit(fps >= 60 || report ? 0 : 1);
     }
 }

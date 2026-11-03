@@ -44,6 +44,7 @@ public class VulkanGL20 extends VulkanGL20Base {
         final byte[][] levelData = new byte[MAX_LEVELS][]; // CPU copies until the image exists
         final int[] levelW = new int[MAX_LEVELS], levelH = new int[MAX_LEVELS];
         boolean generateMips;
+        boolean renderTarget; // attached to a framebuffer: the native image is also a colour attachment
         // GL defaults
         int minFilter = GL20.GL_NEAREST_MIPMAP_LINEAR, magFilter = GL20.GL_LINEAR, wrapS = GL20.GL_REPEAT, wrapT = GL20.GL_REPEAT;
         float anisotropy = 1f;
@@ -112,7 +113,7 @@ public class VulkanGL20 extends VulkanGL20Base {
         case GL_VIEWPORT:
             for (int i = 0; i < 4; i++) params.put(p + i, viewport[i]);
             break;
-        case GL_FRAMEBUFFER_BINDING_: params.put(p, 0); break; // the swapchain
+        case GL_FRAMEBUFFER_BINDING_: params.put(p, boundFramebuffer); break; // 0 = the swapchain
         case GL_NUM_COMPRESSED_TEXTURE_FORMATS: params.put(p, 0); break;
         case GL_MAX_TEXTURE_IMAGE_UNITS: params.put(p, 16); break;
         case GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS: params.put(p, 32); break;
@@ -154,6 +155,9 @@ public class VulkanGL20 extends VulkanGL20Base {
      */
     public void replayState() {
         if (stream == null) return;
+        if (boundFramebuffer != 0) emitTarget(); // a frame starts on the swapchain; GL state says otherwise
+        emitDepth();
+        emitStencil();
         if (viewportSet) stream.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
         if (scissorEnabled) {
             stream.scissor(scissor[0], scissor[1], scissor[2], scissor[3]);
@@ -215,11 +219,38 @@ public class VulkanGL20 extends VulkanGL20Base {
         blendDstAlpha = dstAlpha;
     }
 
+    // Depth and stencil state: ordered, like clear and scissor. The native side applies it as dynamic state (Tier A) or picks a pipeline
+    // variant (Tier B); it only matters while the current target has a depth attachment (a framebuffer's).
+    private static final int GL_DEPTH_TEST_ = 0x0B71, GL_STENCIL_TEST_ = 0x0B90, GL_LESS_ = 0x0201, GL_ALWAYS_ = 0x0207, GL_KEEP_ = 0x1E00;
+    private boolean depthTest, depthMask = true, stencilTest;
+    private int depthFunc = GL_LESS_, stencilFunc = GL_ALWAYS_, stencilRef, stencilCompareMask = -1, stencilWriteMask = -1;
+    private int stencilFail = GL_KEEP_, stencilDepthFail = GL_KEEP_, stencilPass = GL_KEEP_;
+    private float clearDepth = 1f;
+    private int clearStencil;
+
+    private void emitDepth () {
+        if (stream != null) stream.depthState(depthTest, depthMask, depthFunc);
+    }
+
+    private void emitStencil () {
+        if (stream != null) {
+            stream.stencilState(stencilTest, stencilFunc, stencilRef, stencilCompareMask, stencilWriteMask, stencilFail, stencilDepthFail, stencilPass);
+        }
+    }
+
     @Override public void glEnable (int cap) {
         if (cap == GL_BLEND) blendEnabled = true;
         if (cap == GL_SCISSOR_TEST) {
             scissorEnabled = true;
             if (stream != null) stream.scissorEnable(true);
+        }
+        if (cap == GL_DEPTH_TEST_) {
+            depthTest = true;
+            emitDepth();
+        }
+        if (cap == GL_STENCIL_TEST_) {
+            stencilTest = true;
+            emitStencil();
         }
     }
 
@@ -229,6 +260,51 @@ public class VulkanGL20 extends VulkanGL20Base {
             scissorEnabled = false;
             if (stream != null) stream.scissorEnable(false);
         }
+        if (cap == GL_DEPTH_TEST_) {
+            depthTest = false;
+            emitDepth();
+        }
+        if (cap == GL_STENCIL_TEST_) {
+            stencilTest = false;
+            emitStencil();
+        }
+    }
+
+    @Override public void glDepthFunc (int func) {
+        depthFunc = func;
+        emitDepth();
+    }
+
+    @Override public void glDepthMask (boolean flag) {
+        depthMask = flag;
+        emitDepth();
+    }
+
+    @Override public void glStencilFunc (int func, int ref, int mask) {
+        stencilFunc = func;
+        stencilRef = ref;
+        stencilCompareMask = mask;
+        emitStencil();
+    }
+
+    @Override public void glStencilMask (int mask) {
+        stencilWriteMask = mask;
+        emitStencil();
+    }
+
+    @Override public void glStencilOp (int fail, int zfail, int zpass) {
+        stencilFail = fail;
+        stencilDepthFail = zfail;
+        stencilPass = zpass;
+        emitStencil();
+    }
+
+    @Override public void glClearDepthf (float depth) {
+        clearDepth = depth;
+    }
+
+    @Override public void glClearStencil (int s) {
+        clearStencil = s;
     }
 
     @Override public void glClearColor (float red, float green, float blue, float alpha) {
@@ -239,7 +315,7 @@ public class VulkanGL20 extends VulkanGL20Base {
     }
 
     @Override public void glClear (int mask) {
-        if (stream != null) stream.clear(mask, clearR, clearG, clearB, clearA);
+        if (stream != null) stream.clear(mask, clearR, clearG, clearB, clearA, clearDepth, clearStencil);
     }
 
     // ----------------------------------------------------------------------------------------------------------------- textures
@@ -490,6 +566,193 @@ public class VulkanGL20 extends VulkanGL20Base {
         rebound(t);
     }
 
+    // ------------------------------------------------------------------------------------------------------------------ framebuffers
+
+    private static final int GL_FRAMEBUFFER = 0x8D40, GL_RENDERBUFFER = 0x8D41, GL_COLOR_ATTACHMENT0 = 0x8CE0, GL_DEPTH_ATTACHMENT = 0x8D00,
+        GL_STENCIL_ATTACHMENT = 0x8D20, GL_DEPTH_STENCIL_ATTACHMENT = 0x821A, GL_FRAMEBUFFER_COMPLETE = 0x8CD5,
+        GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT = 0x8CD7, GL_FRAMEBUFFER_UNSUPPORTED = 0x8CDD;
+
+    private static final class GlFramebuffer {
+        final int handle;
+        int colorTexture; // GL handle of the texture on COLOR_ATTACHMENT0, 0 = none
+        int depthRenderbuffer, stencilRenderbuffer, depthStencilRenderbuffer;
+        int depthImage = -1; // the native depth(-stencil) image, created at first use and recreated if the attachments change
+        long depthSignature;
+
+        GlFramebuffer(int handle) {
+            this.handle = handle;
+        }
+    }
+
+    private static final class GlRenderbuffer {
+        final int handle;
+        int format, width, height;
+
+        GlRenderbuffer(int handle) {
+            this.handle = handle;
+        }
+    }
+
+    private final IntMap<GlFramebuffer> framebuffers = new IntMap<GlFramebuffer>();
+    private final IntMap<GlRenderbuffer> renderbuffers = new IntMap<GlRenderbuffer>();
+    private int boundFramebuffer, boundRenderbuffer;
+
+    @Override public int glGenFramebuffer () {
+        int h = nextHandle++;
+        framebuffers.put(h, new GlFramebuffer(h));
+        return h;
+    }
+
+    @Override public void glGenFramebuffers (int n, IntBuffer buffers) {
+        for (int i = 0; i < n; i++) buffers.put(buffers.position() + i, glGenFramebuffer());
+    }
+
+    @Override public void glDeleteFramebuffer (int framebuffer) {
+        GlFramebuffer gone = framebuffers.remove(framebuffer);
+        if (gone != null && gone.depthImage >= 0) resources.destroyDepthImage(gone.depthImage);
+        if (boundFramebuffer == framebuffer) glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+
+    @Override public void glDeleteFramebuffers (int n, IntBuffer buffers) {
+        for (int i = 0; i < n; i++) glDeleteFramebuffer(buffers.get(buffers.position() + i));
+    }
+
+    @Override public int glGenRenderbuffer () {
+        int h = nextHandle++;
+        renderbuffers.put(h, new GlRenderbuffer(h));
+        return h;
+    }
+
+    @Override public void glGenRenderbuffers (int n, IntBuffer buffers) {
+        for (int i = 0; i < n; i++) buffers.put(buffers.position() + i, glGenRenderbuffer());
+    }
+
+    @Override public void glDeleteRenderbuffer (int renderbuffer) {
+        renderbuffers.remove(renderbuffer);
+        if (boundRenderbuffer == renderbuffer) boundRenderbuffer = 0;
+    }
+
+    @Override public void glDeleteRenderbuffers (int n, IntBuffer buffers) {
+        for (int i = 0; i < n; i++) glDeleteRenderbuffer(buffers.get(buffers.position() + i));
+    }
+
+    @Override public void glBindRenderbuffer (int target, int renderbuffer) {
+        if (target != GL_RENDERBUFFER) throw unsupported("glBindRenderbuffer(target 0x" + Integer.toHexString(target) + ")");
+        if (renderbuffer != 0 && renderbuffers.get(renderbuffer) == null) renderbuffers.put(renderbuffer, new GlRenderbuffer(renderbuffer));
+        boundRenderbuffer = renderbuffer;
+    }
+
+    @Override public void glRenderbufferStorage (int target, int internalformat, int width, int height) {
+        GlRenderbuffer rb = renderbuffers.get(boundRenderbuffer);
+        if (target != GL_RENDERBUFFER || rb == null) throw new GdxRuntimeException("gdx-vulkan: glRenderbufferStorage with no renderbuffer bound");
+        rb.format = internalformat;
+        rb.width = width;
+        rb.height = height;
+    }
+
+    @Override public void glBindFramebuffer (int target, int framebuffer) {
+        if (target != GL_FRAMEBUFFER) throw unsupported("glBindFramebuffer(target 0x" + Integer.toHexString(target) + ")");
+        if (framebuffer != 0 && framebuffers.get(framebuffer) == null) framebuffers.put(framebuffer, new GlFramebuffer(framebuffer));
+        boundFramebuffer = framebuffer;
+        emitTarget();
+    }
+
+    @Override public void glFramebufferTexture2D (int target, int attachment, int textarget, int texture, int level) {
+        GlFramebuffer fb = framebuffers.get(boundFramebuffer);
+        if (target != GL_FRAMEBUFFER || fb == null) throw new GdxRuntimeException("gdx-vulkan: glFramebufferTexture2D with no framebuffer bound");
+        if (attachment != GL_COLOR_ATTACHMENT0) {
+            throw unsupported("glFramebufferTexture2D(attachment 0x" + Integer.toHexString(attachment) + "): one colour attachment is supported; "
+                + "use VulkanMultiTargetFrameBuffer for more");
+        }
+        if (texture != 0 && (textarget != GL_TEXTURE_2D || level != 0)) throw unsupported("glFramebufferTexture2D(textarget/level other than 2D level 0)");
+        fb.colorTexture = texture;
+        if (texture != 0) makeRenderTarget(textures.get(texture));
+        if (boundFramebuffer == fb.handle) emitTarget();
+    }
+
+    @Override public void glFramebufferRenderbuffer (int target, int attachment, int renderbuffertarget, int renderbuffer) {
+        GlFramebuffer fb = framebuffers.get(boundFramebuffer);
+        if (target != GL_FRAMEBUFFER || fb == null) throw new GdxRuntimeException("gdx-vulkan: glFramebufferRenderbuffer with no framebuffer bound");
+        switch (attachment) {
+        case GL_DEPTH_ATTACHMENT: fb.depthRenderbuffer = renderbuffer; break;
+        case GL_STENCIL_ATTACHMENT: fb.stencilRenderbuffer = renderbuffer; break;
+        case GL_DEPTH_STENCIL_ATTACHMENT: fb.depthStencilRenderbuffer = renderbuffer; break;
+        default: throw unsupported("glFramebufferRenderbuffer(attachment 0x" + Integer.toHexString(attachment) + ")");
+        }
+        if (boundFramebuffer == fb.handle) emitTarget();
+    }
+
+    @Override public int glCheckFramebufferStatus (int target) {
+        GlFramebuffer fb = framebuffers.get(boundFramebuffer);
+        if (target != GL_FRAMEBUFFER) throw unsupported("glCheckFramebufferStatus(target 0x" + Integer.toHexString(target) + ")");
+        if (fb == null) return GL_FRAMEBUFFER_COMPLETE; // the default framebuffer
+        if (fb.colorTexture == 0) return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
+        GlTexture t = textures.get(fb.colorTexture);
+        if (t == null || t.format != GdxVkResources.FORMAT_RGBA8) return GL_FRAMEBUFFER_UNSUPPORTED; // only RGBA8 colour targets
+        return GL_FRAMEBUFFER_COMPLETE;
+    }
+
+    /** The texture will be rendered into: its native image gets colour-attachment usage and is never renamed. Recreated if it already exists. */
+    private void makeRenderTarget (GlTexture t) {
+        if (t == null || t.renderTarget) return;
+        t.renderTarget = true;
+        if (t.nativeId < 0) return;
+        // The image exists without attachment usage: replace it (nothing has been rendered into it, so zeroed storage is faithful).
+        resources.destroyTexture(t.nativeId);
+        t.nativeId = -1;
+        t.levelData[0] = new byte[t.width * t.height * 4];
+        t.levelW[0] = t.width;
+        t.levelH[0] = t.height;
+        rebound(t);
+    }
+
+    private static final int GL_DEPTH_COMPONENT16_ = 0x81A5, GL_DEPTH_COMPONENT24_ = 0x81A6, GL_DEPTH_COMPONENT32_ = 0x81A7;
+
+    /**
+     * The native depth image behind a framebuffer's depth and stencil renderbuffers, created now if it is needed and does not exist. A
+     * depth renderbuffer and a stencil renderbuffer on one framebuffer become one combined image, as do a packed one: dynamic rendering
+     * takes a single depth-stencil view (plan, Phase 3). -1 if the framebuffer has neither.
+     */
+    private int depthImageOf (GlFramebuffer fb) {
+        GlRenderbuffer depth = renderbuffers.get(fb.depthRenderbuffer), stencil = renderbuffers.get(fb.stencilRenderbuffer),
+            packed = renderbuffers.get(fb.depthStencilRenderbuffer);
+        if (depth == null && stencil == null && packed == null) {
+            if (fb.depthImage >= 0) {
+                resources.destroyDepthImage(fb.depthImage);
+                fb.depthImage = -1;
+                fb.depthSignature = 0;
+            }
+            return -1;
+        }
+        GlRenderbuffer sized = packed != null ? packed : depth != null ? depth : stencil;
+        boolean wantStencil = stencil != null || packed != null;
+        int bits = 16;
+        if (depth != null && (depth.format == GL_DEPTH_COMPONENT24_ || depth.format == GL_DEPTH_COMPONENT32_)) bits = 32;
+        if (packed != null) bits = 24;
+        if (sized.width <= 0 || sized.height <= 0) throw new GdxRuntimeException("gdx-vulkan: a framebuffer's renderbuffer has no storage (glRenderbufferStorage was not called)");
+        long signature = ((long)sized.width << 40) | ((long)sized.height << 16) | (wantStencil ? 1L << 8 : 0) | bits;
+        if (fb.depthImage < 0 || fb.depthSignature != signature) {
+            if (fb.depthImage >= 0) resources.destroyDepthImage(fb.depthImage);
+            fb.depthImage = resources.createDepthImage(sized.width, sized.height, wantStencil, bits);
+            fb.depthSignature = signature;
+        }
+        return fb.depthImage;
+    }
+
+    /** Puts the bound framebuffer's colour texture (or the swapchain) into the stream as the current target. */
+    private void emitTarget () {
+        if (stream == null) return;
+        if (boundFramebuffer == 0) {
+            stream.bindTarget(-1, -1);
+            return;
+        }
+        GlFramebuffer fb = framebuffers.get(boundFramebuffer);
+        if (fb == null || fb.colorTexture == 0) return; // still being assembled: the attachment call emits the target
+        int id = nativeTexture(fb.colorTexture);
+        if (id < 0) throw new GdxRuntimeException("gdx-vulkan: the framebuffer's colour texture has no storage (nothing was uploaded to it)");
+        stream.bindTarget(id, depthImageOf(fb));
+    }
+
     /**
      * The native texture id behind a GL texture handle, creating the image now if this is its first use. The batches call this when
      * a draw needs the texture. @return -1 if the handle is unknown or has no level 0 yet
@@ -520,7 +783,12 @@ public class VulkanGL20 extends VulkanGL20Base {
             at += t.levelData[l].length;
         }
         GdxVkSampler s = samplerOf(t);
-        if (t.format == GdxVkResources.FORMAT_COMPRESSED) {
+        if (t.renderTarget) {
+            if (t.format != GdxVkResources.FORMAT_RGBA8 || levels != 1) {
+                throw new GdxRuntimeException("gdx-vulkan: a framebuffer colour texture must be RGBA8 with one level");
+            }
+            t.nativeId = resources.createTexture(t.width, t.height, GdxVkResources.FORMAT_RENDER_TARGET, 1, false, data, s);
+        } else if (t.format == GdxVkResources.FORMAT_COMPRESSED) {
             t.nativeId = resources.createCompressedTexture(t.width, t.height, t.vkFormat, t.blockW, t.blockH, t.blockBytes, levels, data, s);
         } else {
             t.nativeId = resources.createTexture(t.width, t.height, t.format, levels, t.generateMips, data, s);

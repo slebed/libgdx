@@ -34,6 +34,8 @@ struct TextureDesc {
     uint32_t vkFormat = 0, blockW = 4, blockH = 4, blockBytes = 8;
     uint32_t uploadedLevels = 1; // levels present in the data, packed level 0 first, no padding
     bool generateMips = false;   // build the rest of the chain by blitting (then uploadedLevels must be 1)
+    // Rgba8 only, one level: the image can also be a colour attachment (a stock FrameBuffer's texture). It is never renamed.
+    bool renderTarget = false;
 };
 
 // What the rest of the code needs to know about a texture format: the Vulkan format, the image view swizzle, and the block geometry
@@ -73,6 +75,16 @@ public:
     // Tier A: *slot is the table index for u_indices.y. Tier B: *set is the descriptor set to bind as set 1.
     bool textureBinding(int id, int* slot, VkDescriptorSet* set);
     bool textureInfo(int id, uint32_t* width, uint32_t* height, uint32_t* levels);
+    // A render-target texture's image, view and size, for the presenter to draw into. False if it is not a render target.
+    bool renderTargetInfo(int id, VkImage* image, VkImageView* view, VkFormat* format, uint32_t* width, uint32_t* height);
+    // ---- depth/stencil images: the renderbuffers of a framebuffer (never sampled, never renamed) ----
+    // One combined image: stencil adds a stencil aspect (D24_UNORM_S8_UINT, else D32_SFLOAT_S8_UINT); depth only is D16_UNORM for
+    // 16 bits, else D32_SFLOAT. -1 on failure.
+    int createDepthImage(uint32_t width, uint32_t height, bool stencil, uint32_t depthBits);
+    void destroyDepthImage(int id);
+    bool depthImageInfo(int id, VkImage* image, VkImageView* view, VkFormat* format, bool* hasStencil, bool* initialized);
+    void markDepthInitialized(int id); // the image has been moved out of UNDEFINED into DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+
     // Can this device sample (and linearly filter) images in the given VkFormat? Compressed formats vary by GPU: BC on desktop, ETC2/ASTC on mobile.
     bool formatSupported(uint32_t vkFormat);
 
@@ -107,12 +119,14 @@ private:
         VkImageView view = VK_NULL_HANDLE;
         uint32_t width = 0, height = 0, levels = 1;
         TexFormatInfo info;
+        bool renderTarget = false;
         SamplerKey sampler;
         int slot = -1;                     // Tier A
         DescriptorLayouts::TextureSet set; // Tier B
     };
 
-    bool makeImage(uint32_t w, uint32_t h, const TexFormatInfo& f, uint32_t levels, VkImage& image, VmaAllocation& alloc, VkImageView& view);
+    bool makeImage(uint32_t w, uint32_t h, const TexFormatInfo& f, uint32_t levels, VkImage& image, VmaAllocation& alloc, VkImageView& view,
+                   bool renderTarget = false);
     bool bindSampler(VkImageView view, const SamplerKey& key, int* newSlot, DescriptorLayouts::TextureSet* newSet);
     void retireBinding(int slot, DescriptorLayouts::TextureSet set);
     void retireImage(VkImage image, VmaAllocation alloc, VkImageView view);
@@ -125,6 +139,15 @@ private:
     std::vector<int> freeBufferIds_;
     std::vector<TextureEntry> textures_;
     std::vector<int> freeTextureIds_;
+    struct DepthEntry {
+        bool live = false, stencil = false, initialized = false;
+        VkImage image = VK_NULL_HANDLE;
+        VmaAllocation alloc = nullptr;
+        VkImageView view = VK_NULL_HANDLE;
+        VkFormat format = VK_FORMAT_UNDEFINED;
+    };
+    std::vector<DepthEntry> depths_;
+    std::vector<int> freeDepthIds_;
     uint64_t bufferBytesLive_ = 0;
     uint32_t buffersLive_ = 0, texturesLive_ = 0;
 };

@@ -56,6 +56,11 @@ Resources::~Resources() {
         vkDestroyImageView(h_.device, t.view, nullptr);
         vmaDestroyImage(h_.allocator, t.image, t.alloc);
     }
+    for (DepthEntry& d : depths_) {
+        if (!d.live) continue;
+        vkDestroyImageView(h_.device, d.view, nullptr);
+        vmaDestroyImage(h_.allocator, d.image, d.alloc);
+    }
     for (Pool& p : pools_) {
         vmaDestroyVirtualBlock(p.block);
         vmaDestroyBuffer(h_.allocator, p.buffer, p.alloc);
@@ -159,7 +164,8 @@ void Resources::destroyBuffer(int id) {
 
 // --------------------------------------------------------------- textures
 
-bool Resources::makeImage(uint32_t w, uint32_t h, const TexFormatInfo& f, uint32_t levels, VkImage& image, VmaAllocation& alloc, VkImageView& view) {
+bool Resources::makeImage(uint32_t w, uint32_t h, const TexFormatInfo& f, uint32_t levels, VkImage& image, VmaAllocation& alloc, VkImageView& view,
+                        bool renderTarget) {
     VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     ii.imageType = VK_IMAGE_TYPE_2D;
     ii.format = f.vk;
@@ -170,6 +176,7 @@ bool Resources::makeImage(uint32_t w, uint32_t h, const TexFormatInfo& f, uint32
     ii.tiling = VK_IMAGE_TILING_OPTIMAL;
     // TRANSFER_SRC: blit chain for mips, and the source of a copy-on-write update.
     ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    if (renderTarget) ii.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VmaAllocationCreateInfo ai{};
     ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -246,6 +253,7 @@ void Resources::retireImage(VkImage image, VmaAllocation alloc, VkImageView view
 int Resources::createTexture(const TextureDesc& d, const void* data, uint64_t dataBytes, const SamplerKey& sampler) {
     if (d.width == 0 || d.height == 0 || data == nullptr || d.uploadedLevels == 0) return -1;
     if (d.generateMips && d.uploadedLevels != 1) return -1;
+    if (d.renderTarget && (d.format != TexFormat::Rgba8 || d.generateMips || d.uploadedLevels != 1)) return -1;
     const TexFormatInfo fi = formatInfo(d.format, d);
     if (fi.compressed && (d.generateMips || d.blockW == 0 || d.blockH == 0 || d.blockBytes == 0 || !formatSupported(d.vkFormat))) return -1;
     const uint32_t levels = d.generateMips ? fullChain(d.width, d.height) : d.uploadedLevels;
@@ -273,7 +281,8 @@ int Resources::createTexture(const TextureDesc& d, const void* data, uint64_t da
     t.info = fi;
     t.levels = levels;
     t.sampler = sampler;
-    if (!makeImage(d.width, d.height, fi, levels, t.image, t.alloc, t.view)) return -1;
+    t.renderTarget = d.renderTarget;
+    if (!makeImage(d.width, d.height, fi, levels, t.image, t.alloc, t.view, d.renderTarget)) return -1;
     if (!bindSampler(t.view, sampler, &t.slot, &t.set)) {
         retireImage(t.image, t.alloc, t.view);
         return -1;
@@ -305,6 +314,7 @@ bool Resources::updateTexture(int id, uint32_t level, uint32_t x, uint32_t y, ui
     std::lock_guard<std::mutex> lock(mutex_);
     if (id < 0 || static_cast<size_t>(id) >= textures_.size() || !textures_[id].live) return false;
     TextureEntry& t = textures_[id];
+    if (t.renderTarget) return false; // render targets are never renamed (plan, Core decision 4)
     if (level >= t.levels || w == 0 || h == 0) return false;
     if (x + w > levelExtent(t.width, level) || y + h > levelExtent(t.height, level)) return false;
     if (dataBytes != levelBytes(t.info, w, h)) return false;
@@ -345,6 +355,7 @@ bool Resources::regenerateMips(int id) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (id < 0 || static_cast<size_t>(id) >= textures_.size() || !textures_[id].live) return false;
     TextureEntry& t = textures_[id];
+    if (t.renderTarget) return false;
     VkFilter filter;
     if (!blitFilter(t.info, &filter)) return false;
     const uint32_t levels = fullChain(t.width, t.height);
@@ -409,6 +420,18 @@ bool Resources::textureBinding(int id, int* slot, VkDescriptorSet* set) {
     return true;
 }
 
+bool Resources::renderTargetInfo(int id, VkImage* image, VkImageView* view, VkFormat* format, uint32_t* width, uint32_t* height) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (id < 0 || static_cast<size_t>(id) >= textures_.size() || !textures_[id].live || !textures_[id].renderTarget) return false;
+    const TextureEntry& t = textures_[id];
+    *image = t.image;
+    *view = t.view;
+    *format = t.info.vk;
+    *width = t.width;
+    *height = t.height;
+    return true;
+}
+
 bool Resources::textureInfo(int id, uint32_t* width, uint32_t* height, uint32_t* levels) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (id < 0 || static_cast<size_t>(id) >= textures_.size() || !textures_[id].live) return false;
@@ -416,6 +439,90 @@ bool Resources::textureInfo(int id, uint32_t* width, uint32_t* height, uint32_t*
     *height = textures_[id].height;
     *levels = textures_[id].levels;
     return true;
+}
+
+// ---------------------------------------------------------------- depth/stencil images
+
+int Resources::createDepthImage(uint32_t w, uint32_t h, bool stencil, uint32_t depthBits) {
+    if (w == 0 || h == 0) return -1;
+    auto usable = [&](VkFormat f) {
+        VkFormatProperties p;
+        vkGetPhysicalDeviceFormatProperties(h_.physical, f, &p);
+        return (p.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0;
+    };
+    VkFormat fmt;
+    if (stencil) { // AMD desktop GPUs have no D24S8 (plan, Phase 3)
+        fmt = usable(VK_FORMAT_D24_UNORM_S8_UINT) ? VK_FORMAT_D24_UNORM_S8_UINT : VK_FORMAT_D32_SFLOAT_S8_UINT;
+    } else {
+        fmt = depthBits <= 16 ? VK_FORMAT_D16_UNORM : VK_FORMAT_D32_SFLOAT;
+    }
+    if (!usable(fmt)) return -1;
+
+    VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = fmt;
+    ii.extent = {w, h, 1};
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    // Not transient: a framebuffer's depth survives between its passes (GL keeps it), so the passes load and store it.
+    ii.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VmaAllocationCreateInfo ai{};
+    ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    DepthEntry e;
+    if (vmaCreateImage(h_.allocator, &ii, &ai, &e.image, &e.alloc, nullptr) != VK_SUCCESS) return -1;
+    VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vi.image = e.image;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = fmt;
+    vi.subresourceRange = {static_cast<VkImageAspectFlags>(VK_IMAGE_ASPECT_DEPTH_BIT | (stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0)), 0, 1, 0, 1};
+    if (vkCreateImageView(h_.device, &vi, nullptr, &e.view) != VK_SUCCESS) {
+        vmaDestroyImage(h_.allocator, e.image, e.alloc);
+        return -1;
+    }
+    e.live = true;
+    e.stencil = stencil;
+    e.format = fmt;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!freeDepthIds_.empty()) {
+        const int id = freeDepthIds_.back();
+        freeDepthIds_.pop_back();
+        depths_[id] = e;
+        return id;
+    }
+    depths_.push_back(e);
+    return static_cast<int>(depths_.size() - 1);
+}
+
+void Resources::destroyDepthImage(int id) {
+    DepthEntry e;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (id < 0 || static_cast<size_t>(id) >= depths_.size() || !depths_[id].live) return;
+        e = depths_[id];
+        depths_[id] = DepthEntry();
+        freeDepthIds_.push_back(id);
+    }
+    retireImage(e.image, e.alloc, e.view);
+}
+
+bool Resources::depthImageInfo(int id, VkImage* image, VkImageView* view, VkFormat* format, bool* hasStencil, bool* initialized) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (id < 0 || static_cast<size_t>(id) >= depths_.size() || !depths_[id].live) return false;
+    const DepthEntry& e = depths_[id];
+    *image = e.image;
+    *view = e.view;
+    *format = e.format;
+    *hasStencil = e.stencil;
+    *initialized = e.initialized;
+    return true;
+}
+
+void Resources::markDepthInitialized(int id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (id >= 0 && static_cast<size_t>(id) < depths_.size() && depths_[id].live) depths_[id].initialized = true;
 }
 
 // ---------------------------------------------------------------- uploads

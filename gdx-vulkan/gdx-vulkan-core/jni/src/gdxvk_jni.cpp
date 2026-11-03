@@ -299,11 +299,13 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateT
                                                                                         jboolean generateMips, jbyteArray data,
                                                                                         jint minFilter, jint magFilter, jint mipFilter,
                                                                                         jint wrapU, jint wrapV, jint anisotropy) {
-    if (data == nullptr || format < 0 || format > 2) return -1;
+    // format 0..2 are the TexFormat values; 4 = an RGBA8 render target (a colour attachment as well as sampled)
+    if (data == nullptr || format < 0 || format > 4 || format == 3) return -1;
     gdxvk::TextureDesc desc;
     desc.width = static_cast<uint32_t>(width);
     desc.height = static_cast<uint32_t>(height);
-    desc.format = static_cast<gdxvk::TexFormat>(format);
+    desc.renderTarget = format == 4;
+    desc.format = static_cast<gdxvk::TexFormat>(format == 4 ? 0 : format);
     desc.uploadedLevels = static_cast<uint32_t>(uploadedLevels);
     desc.generateMips = generateMips == JNI_TRUE;
     const jsize bytes = env->GetArrayLength(data);
@@ -375,6 +377,15 @@ JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeSet
                                                                                                 jint mipFilter, jint wrapU, jint wrapV,
                                                                                                 jint anisotropy) {
     return res(ctx).setTextureSampler(id, samplerKey(minFilter, magFilter, mipFilter, wrapU, wrapV, anisotropy)) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateDepthImage(JNIEnv*, jclass, jlong ctx, jint width, jint height,
+                                                                                          jboolean stencil, jint depthBits) {
+    return res(ctx).createDepthImage(static_cast<uint32_t>(width), static_cast<uint32_t>(height), stencil == JNI_TRUE, static_cast<uint32_t>(depthBits));
+}
+
+JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDestroyDepthImage(JNIEnv*, jclass, jlong ctx, jint id) {
+    res(ctx).destroyDepthImage(id);
 }
 
 JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDestroyTexture(JNIEnv*, jclass, jlong ctx, jint id) {
