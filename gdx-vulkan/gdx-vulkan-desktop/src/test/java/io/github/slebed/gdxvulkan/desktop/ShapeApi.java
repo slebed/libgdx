@@ -10,7 +10,7 @@ import io.github.slebed.gdxvulkan.g2d.VulkanShapeRenderer;
  * The slice of ShapeRenderer the shape scene uses, so one scene can drive stock {@code ShapeRenderer} (the OpenGL reference) and
  * {@code VulkanShapeRenderer}, whose nested ShapeType enum is a different type.
  */
-interface ShapeApi {
+public interface ShapeApi {
     enum Kind { Point, Line, Filled }
 
     void setColor(Color color);

@@ -39,14 +39,14 @@ import io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch;
  * {@code FrameBuffer}s (bright pass, horizontal blur, vertical blur, CRT composite with additive bloom).</li>
  * </ul>
  */
-final class Gate3Scenes {
-    static final int SIZE = 256;
-    static final float[] BACKGROUND = {0.04f, 0.04f, 0.07f, 1f};
+public final class Gate3Scenes {
+    public static final int SIZE = 256;
+    public static final float[] BACKGROUND = {0.04f, 0.04f, 0.07f, 1f};
 
-    enum Effect { BRIGHT, BLUR, CRT }
+    public enum Effect { BRIGHT, BLUR, CRT }
 
     /** Post-processing shaders on the current backend. Used between {@code batch.begin()} and {@code end()}; {@link #none} restores the default. */
-    interface Fx {
+    public interface Fx {
         void use(Batch batch, Effect effect, float p0, float p1, float p2, float p3);
 
         void none(Batch batch);
@@ -54,7 +54,7 @@ final class Gate3Scenes {
         void dispose();
     }
 
-    interface Env {
+    public interface Env {
         Batch batch();
 
         Fx fx();
@@ -63,7 +63,7 @@ final class Gate3Scenes {
         ShapeApi shapes();
     }
 
-    interface Scene {
+    public interface Scene {
         String name();
 
         void prepare(FileHandle data, int width, int height) throws Exception;
@@ -75,7 +75,7 @@ final class Gate3Scenes {
 
     private Gate3Scenes() {}
 
-    static Scene[] all() {
+    public static Scene[] all() {
         return new Scene[] {new TwoDThreeD(), new PostFx()};
     }
 
@@ -296,7 +296,7 @@ final class Gate3Scenes {
     // -------------------------------------------------------------------------------------------------------------------------- Fx
 
     /** The post-processing shaders as GLSL programs on stock libGDX: the reference. */
-    static Fx glFx() {
+    public static Fx glFx() {
         final String vert = "attribute vec4 a_position;\nattribute vec4 a_color;\nattribute vec2 a_texCoord0;\nuniform mat4 u_projTrans;\n"
             + "varying vec4 v_color;\nvarying vec2 v_texCoords;\n"
             + "void main() {\n  v_color = a_color;\n  v_color.a = v_color.a * (255.0 / 254.0);\n  v_texCoords = a_texCoord0;\n"
@@ -344,7 +344,7 @@ final class Gate3Scenes {
     }
 
     /** The same shaders as SPIR-V bundles on gdx-vulkan. */
-    static Fx vulkanFx() {
+    public static Fx vulkanFx() {
         final VulkanShaderPipelineBundle[] bundles = {VulkanShaderPipelineBundle.fromResources("fx_bright", "sprite.vert", "fx_bright.frag"),
             VulkanShaderPipelineBundle.fromResources("fx_blur", "sprite.vert", "fx_blur.frag"),
             VulkanShaderPipelineBundle.fromResources("fx_crt", "sprite.vert", "fx_crt.frag")};

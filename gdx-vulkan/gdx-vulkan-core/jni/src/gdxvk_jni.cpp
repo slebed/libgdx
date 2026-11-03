@@ -203,6 +203,13 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDispatc
     return static_cast<jint>(reinterpret_cast<gdxvk::Presenter*>(handle)->dispatch(pipeline, block, static_cast<uint32_t>(groupsX), buffer));
 }
 
+JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeBenchmarkRecord(JNIEnv* env, jclass, jlong handle, jint pipeline, jint indexBuffer,
+                                                                                              jint draws, jfloatArray push) {
+    float block[32];
+    env->GetFloatArrayRegion(push, 0, 32, block);
+    return static_cast<jlong>(reinterpret_cast<gdxvk::Presenter*>(handle)->benchmarkRecord(pipeline, indexBuffer, static_cast<uint32_t>(draws), block));
+}
+
 JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDraw(JNIEnv* env, jclass, jlong handle, jint pipeline,
                                                                                jint vertexCount, jfloatArray push) {
     float block[32];

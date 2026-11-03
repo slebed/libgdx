@@ -116,6 +116,15 @@ public final class GdxVkPresenter implements AutoCloseable {
         translate(status);
     }
 
+    /** Stress test 3 floor: see {@code Presenter::benchmarkRecord}. Inside an open frame; returns nanoseconds. */
+    public long benchmarkRecord(int pipeline, int indexBuffer, int draws, float[] push) {
+        check();
+        if (!frameOpen) throw new IllegalStateException("benchmarkRecord called outside beginFrame/endFrame");
+        long ns = GdxVkNative.nativeBenchmarkRecord(handle, pipeline, indexBuffer, draws, push);
+        if (ns < 0) throw new GdxVkException(GdxVkNative.nativeLastError(handle));
+        return ns;
+    }
+
     /** A compute pipeline from SPIR-V (compiled for this device's tier), validated against the shared layout. */
     public int createComputePipeline(String name, byte[] spv) {
         check();

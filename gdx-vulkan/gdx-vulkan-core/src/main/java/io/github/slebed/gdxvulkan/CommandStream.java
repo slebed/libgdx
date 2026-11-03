@@ -2,6 +2,7 @@ package io.github.slebed.gdxvulkan;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.IntBuffer;
 
 /**
  * The command stream (plan, Phase 2): packets of int32 words in a direct buffer, replayed natively by one call per flush. Layout and
@@ -12,28 +13,57 @@ import java.nio.ByteOrder;
  */
 public final class CommandStream {
     public static final int BIND_PIPELINE = 1, PUSH_CONSTANTS = 2, VIEWPORT = 3, SCISSOR = 4, SCISSOR_ENABLE = 5, CLEAR = 6, BIND_VERTEX = 7,
-        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13, BIND_TARGET = 14, DEPTH_STATE = 15, STENCIL_STATE = 16;
+        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13, BIND_TARGET = 14, DEPTH_STATE = 15, STENCIL_STATE = 16, CULL_MODE = 17, PUSH_RANGE = 18;
     public static final int INDEX_U16 = 0, INDEX_U32 = 1;
 
-    private ByteBuffer buffer = ByteBuffer.allocateDirect(64 * 1024).order(ByteOrder.LITTLE_ENDIAN);
-    private int words;
+    private ByteBuffer buffer;   // the stream as the native side reads it
+    private IntBuffer ints;      // a view of `buffer`, used only to copy whole blocks in
+    private int words;           // words already copied into `buffer`
+    // Words are written into a plain int[] first and copied into the direct buffer in bulk. Array stores are what every JIT handles best;
+    // single puts through a direct buffer's view cost ~13 ns on HotSpot but ~80 ns on Android's ART.
+    private int[] a = new int[16 * 1024];
+    private int n;               // words in `a`, not yet in `buffer`
 
+    public CommandStream() {
+        use(ByteBuffer.allocateDirect(64 * 1024).order(ByteOrder.LITTLE_ENDIAN));
+    }
+
+    private void use(ByteBuffer b) {
+        buffer = b;
+        ints = b.asIntBuffer();
+    }
+
+    /** Room for `more` words in the scratch array. */
     private void ensure(int more) {
-        if ((words + more) * 4 <= buffer.capacity()) return;
-        ByteBuffer bigger = ByteBuffer.allocateDirect(Math.max(buffer.capacity() * 2, (words + more) * 4)).order(ByteOrder.LITTLE_ENDIAN);
-        buffer.limit(words * 4);
-        buffer.position(0);
-        bigger.put(buffer);
-        buffer = bigger;
+        if (n + more <= a.length) return;
+        spill();
+        if (more > a.length) a = new int[Math.max(more, a.length * 2)];
+    }
+
+    /** Copies the words written so far into the direct buffer, growing it if needed. */
+    private void spill() {
+        if (n == 0) return;
+        if ((words + n) * 4 > buffer.capacity()) {
+            ByteBuffer bigger = ByteBuffer.allocateDirect(Math.max(buffer.capacity() * 2, (words + n) * 4)).order(ByteOrder.LITTLE_ENDIAN);
+            buffer.limit(words * 4);
+            buffer.position(0);
+            bigger.put(buffer);
+            buffer.limit(buffer.capacity());
+            bigger.clear(); // the view below starts at the buffer's position, which the copy moved
+            use(bigger);
+        }
+        ints.position(words);
+        ints.put(a, 0, n);
+        words += n;
+        n = 0;
     }
 
     private void put(int v) {
-        buffer.putInt(words * 4, v);
-        words++;
+        a[n++] = v;
     }
 
     private void putF(float v) {
-        put(Float.floatToRawIntBits(v));
+        a[n++] = Float.floatToRawIntBits(v);
     }
 
     public void bindPipeline(int id) {
@@ -45,8 +75,28 @@ public final class CommandStream {
     /** @param block32 the whole 128-byte push-constant block, as 32 floats */
     public void pushConstants(float[] block32) {
         ensure(33);
-        put(PUSH_CONSTANTS);
-        for (int i = 0; i < 32; i++) putF(block32[i]);
+        final int[] w = a;
+        int p = n;
+        w[p++] = PUSH_CONSTANTS;
+        for (int i = 0; i < 32; i++) w[p++] = Float.floatToRawIntBits(block32[i]);
+        n = p;
+    }
+
+    /**
+     * Changes {@code count} words of the push-constant block, from word {@code firstWord} (0-31), leaving the rest as it was: a draw loop that
+     * changes one colour or one matrix per draw sends a few words, not 33. The native side keeps the block and pushes it, in full, once
+     * before each draw that follows a change, so the GPU-facing calls are the same as with {@link #pushConstants}. The block is empty at the
+     * start of every frame: send the whole of it with {@code pushConstants} first.
+     */
+    public void pushRange(int firstWord, float[] values, int offset, int count) {
+        ensure(3 + count);
+        final int[] w = a;
+        int p = n;
+        w[p++] = PUSH_RANGE;
+        w[p++] = firstWord;
+        w[p++] = count;
+        for (int i = 0; i < count; i++) w[p++] = Float.floatToRawIntBits(values[offset + i]);
+        n = p;
     }
 
     public void viewport(int x, int y, int w, int h) {
@@ -112,6 +162,19 @@ public final class CommandStream {
         put(glPass);
     }
 
+    /**
+     * Replaces the cull mode of every pipeline from here on with a VkCullModeFlags value (0 none, 1 front, 2 back, 3 both); -1 goes back to
+     * the cull mode each pipeline was created with. Dynamic state on Tier A, a pipeline switch on Tier B.
+     */
+    public void cullMode(int vkCullMode) {
+        ensure(2);
+        final int[] w = a; // locals: ART's JIT keeps these in registers where it would reload the fields after every store
+        int p = n;
+        w[p++] = CULL_MODE;
+        w[p++] = vkCullMode;
+        n = p;
+    }
+
     public void bindVertex(int block, long offset) {
         ensure(4);
         put(BIND_VERTEX);
@@ -166,10 +229,13 @@ public final class CommandStream {
 
     public void drawIndexed(int indexCount, int firstIndex, int vertexOffset) {
         ensure(4);
-        put(DRAW_INDEXED);
-        put(indexCount);
-        put(firstIndex);
-        put(vertexOffset);
+        final int[] w = a;
+        int p = n;
+        w[p++] = DRAW_INDEXED;
+        w[p++] = indexCount;
+        w[p++] = firstIndex;
+        w[p++] = vertexOffset;
+        n = p;
     }
 
     public void draw(int vertexCount, int firstVertex) {
@@ -179,11 +245,15 @@ public final class CommandStream {
         put(firstVertex);
     }
 
-    public boolean isEmpty() { return words == 0; }
+    public boolean isEmpty() { return words + n == 0; }
 
-    public int sizeInBytes() { return words * 4; }
+    public int sizeInBytes() { return (words + n) * 4; }
 
-    public void clear() { words = 0; }
+    public void clear() { words = 0; n = 0; }
 
-    ByteBuffer buffer() { return buffer; }
+    /** The stream as the native side reads it: everything written so far is in the buffer when this returns. */
+    ByteBuffer buffer() {
+        spill();
+        return buffer;
+    }
 }

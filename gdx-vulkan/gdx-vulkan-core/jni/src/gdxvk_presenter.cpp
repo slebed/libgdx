@@ -11,6 +11,7 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
 #include <utility>
 #include <vector>
 
@@ -120,6 +121,7 @@ struct Presenter::Impl {
             VkFormat depthFormat;
             bool offscreen;  // Tier B only: the front face is baked in
             uint32_t ds;     // Tier B only: the packed depth/stencil state (see DsState::pack)
+            uint32_t cull;   // Tier B only: the cull mode (VkCullModeFlags) baked into the pipeline
             VkPipeline pipeline;
         };
         std::vector<Variant> variants;
@@ -200,20 +202,26 @@ struct Presenter::Impl {
         }
     }
 
+    // The application's cull state, when it set any (glEnable(GL_CULL_FACE), glCullFace): a VkCullModeFlags that replaces what each
+    // pipeline was created with. -1 = the pipelines' own.
+    int cullOverride = -1;
+    uint32_t effectiveCull(int id) const { return cullOverride >= 0 ? static_cast<uint32_t>(cullOverride) : pipelines[id].desc.cullMode; }
+
     VkPipeline pipelineFor(int id, VkFormat fmt, VkFormat depthFmt, bool offscreen) {
         PipelineRec& rec = pipelines[id];
         const bool bakedKind = !h.tierA && offscreen;
         // Without a depth attachment the depth and stencil state does nothing: one variant serves every state.
         const uint32_t bakedDs = (!h.tierA && depthFmt != VK_FORMAT_UNDEFINED) ? dsState.pack() : 0u;
+        const uint32_t bakedCull = h.tierA ? 0u : effectiveCull(id); // Tier A sets the cull mode dynamically
         for (const PipelineRec::Variant& v : rec.variants) {
-            if (v.format == fmt && v.depthFormat == depthFmt && v.offscreen == bakedKind && v.ds == bakedDs) return v.pipeline;
+            if (v.format == fmt && v.depthFormat == depthFmt && v.offscreen == bakedKind && v.ds == bakedDs && v.cull == bakedCull) return v.pipeline;
         }
-        VkPipeline p = buildPipeline(rec, fmt, depthFmt, offscreen, bakedDs);
-        if (p != VK_NULL_HANDLE) rec.variants.push_back({fmt, depthFmt, bakedKind, bakedDs, p});
+        VkPipeline p = buildPipeline(rec, fmt, depthFmt, offscreen, bakedDs, bakedCull);
+        if (p != VK_NULL_HANDLE) rec.variants.push_back({fmt, depthFmt, bakedKind, bakedDs, bakedCull, p});
         return p;
     }
 
-    VkPipeline buildPipeline(const PipelineRec& rec, VkFormat fmt, VkFormat depthFmt, bool offscreen, uint32_t bakedDs) {
+    VkPipeline buildPipeline(const PipelineRec& rec, VkFormat fmt, VkFormat depthFmt, bool offscreen, uint32_t bakedDs, uint32_t bakedCull) {
         const PipelineDesc& desc = rec.desc;
         VkPipelineShaderStageCreateInfo stages[2]{{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO},
                                                   {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
@@ -241,7 +249,7 @@ struct Presenter::Impl {
         vp.scissorCount = 1;
         VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
         rs.polygonMode = VK_POLYGON_MODE_FILL;
-        rs.cullMode = static_cast<VkCullModeFlags>(desc.cullMode); // baked on Tier B, set dynamically on Tier A
+        rs.cullMode = static_cast<VkCullModeFlags>(h.tierA ? desc.cullMode : bakedCull); // baked on Tier B, set dynamically on Tier A
         // The swapchain uses a negative-height viewport and counter-clockwise front faces. An offscreen target keeps GL's memory
         // layout (row 0 at the bottom) with a positive height, which turns GL's counter-clockwise faces clockwise (plan decision 6).
         rs.frontFace = offscreen ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
@@ -374,6 +382,13 @@ struct Presenter::Impl {
     bool offOpen = false;      // a pass on the offscreen image is recording
     VkFramebuffer offFb = VK_NULL_HANDLE; // Tier B, for the open offscreen pass
     int curPipeline = -1;      // last pipeline bound by the stream
+    int32_t pushShadow[32] = {}; // the push-constant block as the stream built it (raw words); pushed in full before a draw when it changed
+    bool pushDirty = false;
+    void flushPush(VkCommandBuffer cmd) {
+        if (!pushDirty) return;
+        vkCmdPushConstants(cmd, h.layouts->pipelineLayout(), DescriptorLayouts::kPushStages, 0, DescriptorLayouts::kPushConstantBytes, pushShadow);
+        pushDirty = false;
+    }
     // GL-convention state from the stream (pixels, origin bottom-left); converted for whichever target is current.
     int32_t glViewport[4] = {0, 0, 0, 0};
     int32_t glScissor[4] = {0, 0, 0, 0};
@@ -551,7 +566,7 @@ struct Presenter::Impl {
         curPipeline = id;
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk);
         if (h.tierA) {
-            vkCmdSetCullMode(cmd, static_cast<VkCullModeFlags>(pipelines[id].desc.cullMode));
+            vkCmdSetCullMode(cmd, static_cast<VkCullModeFlags>(effectiveCull(id)));
             vkCmdSetFrontFace(cmd, frontFace());
         }
         return true;
@@ -1064,6 +1079,9 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
     s.applyViewport(f.cmd);
     s.applyScissor(f.cmd);
     s.dsState = Impl::DsState(); // GL's defaults; the application's state is replayed by the stream
+    s.cullOverride = -1;
+    s.pushDirty = false; // a new command buffer: the stream pushes the whole block again before its first draw
+    std::memset(s.pushShadow, 0, sizeof(s.pushShadow));
     s.applyDepthStencil(f.cmd);
     s.frameOpen = true;
     return FrameStatus::Ok;
@@ -1242,6 +1260,46 @@ int Presenter::createComputePipeline(const char* name, const uint32_t* spv, size
     return static_cast<int>(s.computePipelines.size() - 1);
 }
 
+int64_t Presenter::benchmarkRecord(int pipeline, int indexBuffer, uint32_t draws, const float push[32]) {
+    Impl& s = *impl_;
+    if (!s.frameOpen) {
+        s.fail("benchmarkRecord called outside beginFrame/endFrame");
+        return -1;
+    }
+    if (pipeline < 0 || static_cast<size_t>(pipeline) >= s.pipelines.size()) {
+        s.fail("benchmarkRecord: unknown pipeline id");
+        return -1;
+    }
+    VkBuffer buf;
+    uint64_t base, size;
+    if (!s.h.resources->bufferInfo(indexBuffer, buf, base, size) || size < 6) {
+        s.fail("benchmarkRecord: unknown or too small index buffer");
+        return -1;
+    }
+    VkCommandBuffer cmd = s.frames[s.frameIndex].cmd;
+    // Setup, outside the timed loop: the stream's own replay does the same once per frame.
+    if (!s.passOpen() && !s.beginPass(cmd, nullptr)) return -1;
+    s.cullOverride = -1;
+    if (!s.bindPipelineVariant(cmd, pipeline)) return -1;
+    vkCmdBindIndexBuffer(cmd, buf, base, VK_INDEX_TYPE_UINT16);
+    float block[32];
+    std::memcpy(block, push, sizeof(block));
+
+    const auto t0 = std::chrono::steady_clock::now();
+    for (uint32_t i = 0; i < draws; ++i) {
+        s.cullOverride = (i & 1u) ? 1 : 2; // the state change: front, back, front, ...
+        if (s.h.tierA) vkCmdSetCullMode(cmd, static_cast<VkCullModeFlags>(s.cullOverride));
+        else if (!s.bindPipelineVariant(cmd, pipeline)) return -1; // Tier B bakes the cull mode, so a change is a pipeline switch
+        block[16] = static_cast<float>(i) * 0.001f; // one word changes per draw, as in a real draw loop
+        vkCmdPushConstants(cmd, s.h.layouts->pipelineLayout(), DescriptorLayouts::kPushStages, 0, DescriptorLayouts::kPushConstantBytes, block);
+        vkCmdDrawIndexed(cmd, 3, 1, 0, 0, 0);
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    s.cullOverride = -1;
+    if (s.h.tierA) vkCmdSetCullMode(cmd, static_cast<VkCullModeFlags>(s.effectiveCull(pipeline)));
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+}
+
 FrameStatus Presenter::dispatch(int computePipeline, const float push[32], uint32_t groupsX, int buffer) {
     Impl& s = *impl_;
     if (!s.frameOpen) return s.fail("dispatch called outside beginFrame/endFrame");
@@ -1376,6 +1434,15 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 if (s.curPipeline >= 0 && !s.bindPipelineVariant(cmd, s.curPipeline)) return s.fail(s.error);
                 break;
             }
+            case cmd::CullMode: {
+                if (!need(1)) return s.fail("command stream truncated (CullMode)");
+                s.cullOverride = w[i++];
+                if (s.curPipeline >= 0) {
+                    if (s.h.tierA) vkCmdSetCullMode(cmd, static_cast<VkCullModeFlags>(s.effectiveCull(s.curPipeline)));
+                    else if (!s.bindPipelineVariant(cmd, s.curPipeline)) return s.fail(s.error); // Tier B bakes the cull mode into the variant
+                }
+                break;
+            }
             case cmd::DepthState: {
                 if (!need(3)) return s.fail("command stream truncated (DepthState)");
                 s.dsState.depthTest = w[i] != 0;
@@ -1403,9 +1470,20 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
             }
             case cmd::PushConstants:
                 if (!need(32)) return s.fail("command stream truncated (PushConstants)");
-                vkCmdPushConstants(cmd, s.h.layouts->pipelineLayout(), DescriptorLayouts::kPushStages, 0, DescriptorLayouts::kPushConstantBytes, w + i);
+                std::memcpy(s.pushShadow, w + i, sizeof(s.pushShadow)); // pushed in full before the next draw
+                s.pushDirty = true;
                 i += 32;
                 break;
+            case cmd::PushRange: {
+                if (!need(2)) return s.fail("command stream truncated (PushRange)");
+                const int32_t first = w[i], count = w[i + 1];
+                i += 2;
+                if (first < 0 || count < 0 || first + count > 32 || !need(static_cast<size_t>(count))) return s.fail("command stream: bad PushRange");
+                for (int32_t k = 0; k < count; ++k) s.pushShadow[first + k] = w[i + k]; // a few words: cheaper than a library call
+                s.pushDirty = true;
+                i += static_cast<size_t>(count);
+                break;
+            }
             case cmd::Viewport: {
                 if (!need(4)) return s.fail("command stream truncated (Viewport)");
                 std::memcpy(s.glViewport, w + i, sizeof(s.glViewport));
@@ -1503,6 +1581,7 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
             case cmd::DrawIndexed:
                 if (!need(3)) return s.fail("command stream truncated (DrawIndexed)");
                 if (!s.passOpen() && !s.beginPass(cmd, nullptr)) return s.fail(s.error);
+                s.flushPush(cmd);
                 vkCmdDrawIndexed(cmd, static_cast<uint32_t>(w[i]), 1, static_cast<uint32_t>(w[i + 1]), w[i + 2], 0);
                 i += 3;
                 break;
@@ -1520,6 +1599,7 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
             case cmd::Draw:
                 if (!need(2)) return s.fail("command stream truncated (Draw)");
                 if (!s.passOpen() && !s.beginPass(cmd, nullptr)) return s.fail(s.error);
+                s.flushPush(cmd);
                 vkCmdDraw(cmd, static_cast<uint32_t>(w[i]), 1, static_cast<uint32_t>(w[i + 1]), 0);
                 i += 2;
                 break;

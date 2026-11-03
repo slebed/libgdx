@@ -28,6 +28,8 @@ enum Op : int32_t {
     BindTarget = 14,    // render-target texture id (or -1 for the swapchain), depth image id (or -1). Ends the open pass; the next starts at the first draw/clear
     DepthState = 15,    // test enable, write enable, compare func (GL enum)
     StencilState = 16,  // test enable, func (GL), ref, compare mask, write mask, sfail, dpfail, dppass (GL enums)
+    PushRange = 18,     // first word, count, then count words: changes part of the push-constant block (pushed in full before the next draw)
+    CullMode = 17,      // VkCullModeFlags (0 none, 1 front, 2 back, 3 both) replacing every pipeline's own cull mode, or -1 to go back to the pipelines' own
 };
 
 constexpr int32_t kGlColorBufferBit = 0x00004000, kGlDepthBufferBit = 0x00000100, kGlStencilBufferBit = 0x00000400;

@@ -23,6 +23,8 @@ import io.github.slebed.gdxvulkan.VulkanCaps;
 import io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle;
 import io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch;
 import io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatchInstanced;
+import io.github.slebed.gdxvulkan.desktop.Gate3Scenes;
+import io.github.slebed.gdxvulkan.desktop.ShapeApi;
 import io.github.slebed.gdxvulkan.gl.VulkanGL20;
 
 import java.lang.reflect.InvocationHandler;
@@ -47,18 +49,24 @@ final class DeviceSuite {
     private final boolean tierA;
     private int passed, failed, skipped;
 
-    private DeviceSuite(GdxVkContext ctx, GdxVkPresenter presenter) {
+    private final android.content.Context app;
+    private static volatile int gfxW, gfxH; // what the stock classes see as the back buffer
+
+    private DeviceSuite(android.content.Context app, GdxVkContext ctx, GdxVkPresenter presenter) {
+        this.app = app;
         this.ctx = ctx;
         tierA = ctx.caps().tier == VulkanCaps.Tier.A;
         System.loadLibrary("gdx"); // gdx2d, for Pixmap
-        gl = installGdx(ctx, presenter.width(), presenter.height());
+        gfxW = presenter.width();
+        gfxH = presenter.height();
+        gl = installGdx(app, ctx);
         W = presenter.width();
         H = presenter.height();
         frame = new GdxVkFrame(ctx, presenter, gl);
     }
 
-    static void run(GdxVkContext ctx, GdxVkPresenter presenter, int soakSeconds, int stressSeconds) {
-        DeviceSuite s = new DeviceSuite(ctx, presenter);
+    static void run(android.content.Context app, GdxVkContext ctx, GdxVkPresenter presenter, int soakSeconds, int stressSeconds) {
+        DeviceSuite s = new DeviceSuite(app, ctx, presenter);
         TestLog.i(TAG, "DEVICESUITE tier " + ctx.caps().tier + " on " + ctx.caps().deviceName);
         s.check("texturedQuadIsUprightAndExact", s::texturedQuad);
         s.check("tintAndBlending", s::tintAndBlending);
@@ -74,6 +82,8 @@ final class DeviceSuite {
         s.check("instancedSpritesComputeAndDraw", s::instanced);
         s.check("frameBufferColor", s::frameBufferColor);
         s.check("frameBufferDepthAndStencil", s::frameBufferDepthAndStencil);
+        s.check("gate3Scenes", s::gate3);
+        s.check("stress3Recording", s::stress3);
         s.check("soakTextureChurn", () -> s.soak(soakSeconds));
         s.check("stress2Single", () -> s.stress(1, stressSeconds));
         s.check("stress2Textures128", () -> s.stress(128, stressSeconds));
@@ -576,6 +586,129 @@ final class DeviceSuite {
         white.dispose();
     }
 
+    // ---------------------------------------------------------------------------------------------------------------------- Gate 3
+
+    /**
+     * The Gate 3 scenes of the desktop tests, unchanged, on the device: stock FrameBuffer, Scene2D with a skin from the APK, depth-tested boxes
+     * and the four post-processing passes. The scenes believe the back buffer is 256x256 and draw into the swapchain's bottom-left 256x256
+     * (a GL viewport is anchored there); that corner of the captured frame is compared with the lavapipe golden, with the desktop's GPU tolerance.
+     */
+    private void gate3() throws Exception {
+        final int size = Gate3Scenes.SIZE;
+        final Gate3Scenes.Fx fx = Gate3Scenes.vulkanFx();
+        com.badlogic.gdx.files.FileHandle data = Gdx.files.internal("data");
+        try {
+            for (final Gate3Scenes.Scene scene : Gate3Scenes.all()) {
+                scene.prepare(data, size, size);
+                gfxW = gfxH = size;
+                try {
+                    float[] bg = Gate3Scenes.BACKGROUND;
+                    beginFrame(bg[0], bg[1], bg[2]);
+                    Gdx.gl.glViewport(0, 0, size, size);
+                    final VulkanSpriteBatch batch = new VulkanSpriteBatch(frame);
+                    batch.getProjectionMatrix().setToOrtho2D(0, 0, size, size);
+                    scene.draw(new Gate3Scenes.Env() {
+                        public com.badlogic.gdx.graphics.g2d.Batch batch() { return batch; }
+
+                        public Gate3Scenes.Fx fx() { return fx; }
+
+                        public ShapeApi shapes() { return ShapeApi.vulkan(frame); }
+                    }, size, size);
+                    batch.dispose();
+                    byte[] px = frame.endAndCapture();
+                    compareWithGolden(scene.name(), px, size);
+                } finally {
+                    gfxW = W;
+                    gfxH = H;
+                    Gdx.gl.glViewport(0, 0, W, H);
+                    scene.dispose();
+                }
+            }
+        } finally {
+            fx.dispose();
+        }
+    }
+
+    /** The captured frame's bottom-left size x size pixels against {@code goldens/<name>.png} (a lavapipe render). */
+    private void compareWithGolden(String name, byte[] px, int size) throws java.io.IOException {
+        android.graphics.Bitmap golden;
+        try (java.io.InputStream in = app.getAssets().open("goldens/" + name + ".png")) {
+            golden = android.graphics.BitmapFactory.decodeStream(in);
+        }
+        require(golden != null && golden.getWidth() == size && golden.getHeight() == size, name + ": golden missing or the wrong size");
+        int[] g = new int[size * size];
+        golden.getPixels(g, 0, size, 0, 0, size, size);
+        int differing = 0, maxDelta = 0, drawn = 0;
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                int i = ((H - size + y) * W + x) * 4; // GL's bottom-left corner: the last `size` rows of the capture
+                int e = g[y * size + x];
+                int d = Math.max(Math.max(Math.abs((px[i] & 0xFF) - ((e >> 16) & 0xFF)), Math.abs((px[i + 1] & 0xFF) - ((e >> 8) & 0xFF))),
+                    Math.abs((px[i + 2] & 0xFF) - (e & 0xFF)));
+                maxDelta = Math.max(maxDelta, d);
+                if (d > 12) differing++; // the desktop's GPU-vs-lavapipe tolerance
+                if ((px[i] & 0xFF) != 10 || (px[i + 1] & 0xFF) != 10 || (px[i + 2] & 0xFF) != 18) drawn++;
+            }
+        }
+        double share = differing / (double)(size * size);
+        TestLog.i(TAG, String.format("%s vs lavapipe golden: differing=%d (%.3f%%) maxDelta=%d, %d of %d pixels drawn", name, differing, share * 100,
+            maxDelta, drawn, size * size));
+        require(drawn > size * size / 4, name + " is nearly blank");
+        require(share <= 0.01, name + " differs from the golden: " + differing + " pixels (" + share * 100 + "%), max delta " + maxDelta);
+    }
+
+    // ------------------------------------------------------------------------------------------------------------ stress test 3
+
+    /** Stress test 3 on the device: 100,000 draws recorded as a plain native loop (the floor) and through the Java command stream. */
+    private void stress3() {
+        final int draws = 100_000, frames = 15, warmup = 4;
+        io.github.slebed.gdxvulkan.GdxVkPipelineDesc desc = new io.github.slebed.gdxvulkan.GdxVkPipelineDesc();
+        desc.stride = 0;
+        desc.cullMode = io.github.slebed.gdxvulkan.GdxVkPipelineDesc.CULL_BACK;
+        final int pipeline = frame.pipeline("stress3", "triangle", "triangle.vert", "triangle.frag", desc);
+        final int indexBuffer = frame.quadIndexBuffer();
+        final float[] push = new float[32];
+        push[0] = push[5] = push[10] = push[15] = 1f;
+        final io.github.slebed.gdxvulkan.CommandStream cs = frame.stream();
+        long[] floor = new long[frames], stream = new long[frames], encode = new long[frames];
+        int fi = 0, si = 0;
+        for (int n = 0; fi < frames || si < frames; n++) {
+            if (!frame.begin(0, 0, 0, 1)) continue;
+            if ((n & 1) == 0) {
+                long ns = frame.presenter().benchmarkRecord(pipeline, indexBuffer, draws, push);
+                if (n >= warmup * 2 && fi < frames) floor[fi++] = ns;
+            } else {
+                long t0 = System.nanoTime();
+                cs.bindPipeline(pipeline);
+                cs.bindIndexBuffer(indexBuffer, 0, io.github.slebed.gdxvulkan.CommandStream.INDEX_U16);
+                cs.pushConstants(push);
+                for (int i = 0; i < draws; i++) {
+                    cs.cullMode((i & 1) != 0 ? 1 : 2);
+                    push[16] = (float)i * 0.001f;
+                    cs.pushRange(16, push, 16, 1);
+                    cs.drawIndexed(3, 0, 0);
+                }
+                long t1 = System.nanoTime();
+                frame.flush();
+                long ns = System.nanoTime() - t0;
+                if (n >= warmup * 2 && si < frames) {
+                    encode[si] = t1 - t0;
+                    stream[si++] = ns;
+                }
+            }
+            frame.end();
+        }
+        java.util.Arrays.sort(floor);
+        java.util.Arrays.sort(stream);
+        java.util.Arrays.sort(encode);
+        double ratio = stream[frames / 2] / (double)floor[frames / 2];
+        TestLog.i(TAG, String.format("stress3 (Tier %s): C++ floor %.2f ms, Java + replay %.2f ms for %d draws: ratio %.2f (target <= 1.3)",
+            ctx.caps().tier, floor[frames / 2] / 1e6, stream[frames / 2] / 1e6, draws, ratio));
+        TestLog.i(TAG, String.format("stress3: Java encoding %.2f ms (%.0f ns per draw), native replay %.2f ms (%.0f ns per draw); floor %.0f ns per draw", encode[frames / 2] / 1e6,
+            encode[frames / 2] / (double)draws, (stream[frames / 2] - encode[frames / 2]) / 1e6, (stream[frames / 2] - encode[frames / 2]) / (double)draws, floor[frames / 2] / (double)draws));
+        require(ratio < 2.0, "recording through the command stream is far above the floor: " + ratio);
+    }
+
     // -------------------------------------------------------------------------------------------------------------- soak / perf
 
     private void soak(int seconds) {
@@ -669,7 +802,7 @@ final class DeviceSuite {
 
     // ------------------------------------------------------------------------------------------------------------------- Gdx
 
-    private static VulkanGL20 installGdx(GdxVkContext ctx, final int width, final int height) {
+    private static VulkanGL20 installGdx(android.content.Context app, GdxVkContext ctx) {
         final VulkanGL20 gl = new VulkanGL20(ctx);
         Gdx.app = proxy(Application.class, (p, m, a) -> m.getName().equals("getType") ? ApplicationType.Android : defaultFor(m.getReturnType()));
         Gdx.graphics = proxy(Graphics.class, (p, m, a) -> {
@@ -677,15 +810,16 @@ final class DeviceSuite {
             case "supportsExtension": return gl.supportsExtension((String)a[0]);
             case "getGL20": return gl;
             case "getWidth":
-            case "getBackBufferWidth": return width;
+            case "getBackBufferWidth": return gfxW;
             case "getHeight":
-            case "getBackBufferHeight": return height;
+            case "getBackBufferHeight": return gfxH;
             case "getDensity": return 1f;
             case "getDeltaTime": return 1f / 60f;
             default: return defaultFor(m.getReturnType());
             }
         });
         Gdx.input = proxy(Input.class, (p, m, a) -> defaultFor(m.getReturnType()));
+        Gdx.files = new com.badlogic.gdx.backends.android.DefaultAndroidFiles(app.getAssets(), (android.content.ContextWrapper)app, false);
         Gdx.gl = gl;
         Gdx.gl20 = gl;
         Gdx.gl30 = null;

@@ -128,3 +128,16 @@ tasks.register('runClearDemo', JavaExec) {
     systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'true')
     systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
 }
+
+// Stress test 3 (plan, Phase 3): recording 100,000 draws as a plain C++ loop (the floor) against replaying them from Java through the
+// command stream. Pass: <= 1.3x the floor. -Dgdxvulkan.device=N, -Dgdxvulkan.forceTierB=true, -Dgdxvulkan.stress3.report=true.
+tasks.register('stress3', JavaExec) {
+    description = 'Stress test 3: command stream recording time against a C++ floor.'
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.github.slebed.gdxvulkan.desktop.Stress3Main'
+    dependsOn 'testClasses', ':gdx-vulkan-core:buildNatives'
+    systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
+    systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'false')
+    System.properties.each { k, v -> if (k.toString().startsWith('gdxvulkan.')) systemProperty k.toString(), v.toString() }
+}

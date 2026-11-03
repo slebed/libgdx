@@ -158,6 +158,7 @@ public class VulkanGL20 extends VulkanGL20Base {
         if (boundFramebuffer != 0) emitTarget(); // a frame starts on the swapchain; GL state says otherwise
         emitDepth();
         emitStencil();
+        emitCull();
         if (viewportSet) stream.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
         if (scissorEnabled) {
             stream.scissor(scissor[0], scissor[1], scissor[2], scissor[3]);
@@ -225,6 +226,24 @@ public class VulkanGL20 extends VulkanGL20Base {
     private boolean depthTest, depthMask = true, stencilTest;
     private int depthFunc = GL_LESS_, stencilFunc = GL_ALWAYS_, stencilRef, stencilCompareMask = -1, stencilWriteMask = -1;
     private int stencilFail = GL_KEEP_, stencilDepthFail = GL_KEEP_, stencilPass = GL_KEEP_;
+    // Cull state: the pipelines carry their own cull mode until the application touches GL's, after which GL's state wins.
+    private static final int GL_CULL_FACE_ = 0x0B44, GL_FRONT_ = 0x0404, GL_BACK_ = 0x0405, GL_FRONT_AND_BACK_ = 0x0408;
+    private boolean cullTouched, cullEnabled;
+    private int cullFace = GL_BACK_;
+
+    private void emitCull () {
+        if (stream == null || !cullTouched) return;
+        int mode = 0;
+        if (cullEnabled) mode = cullFace == GL_FRONT_ ? 1 : cullFace == GL_BACK_ ? 2 : 3;
+        stream.cullMode(mode);
+    }
+
+    @Override public void glCullFace (int mode) {
+        cullTouched = true;
+        cullFace = mode;
+        emitCull();
+    }
+
     private float clearDepth = 1f;
     private int clearStencil;
 
@@ -244,6 +263,11 @@ public class VulkanGL20 extends VulkanGL20Base {
             scissorEnabled = true;
             if (stream != null) stream.scissorEnable(true);
         }
+        if (cap == GL_CULL_FACE_) {
+            cullTouched = true;
+            cullEnabled = true;
+            emitCull();
+        }
         if (cap == GL_DEPTH_TEST_) {
             depthTest = true;
             emitDepth();
@@ -259,6 +283,11 @@ public class VulkanGL20 extends VulkanGL20Base {
         if (cap == GL_SCISSOR_TEST) {
             scissorEnabled = false;
             if (stream != null) stream.scissorEnable(false);
+        }
+        if (cap == GL_CULL_FACE_) {
+            cullTouched = true;
+            cullEnabled = false;
+            emitCull();
         }
         if (cap == GL_DEPTH_TEST_) {
             depthTest = false;

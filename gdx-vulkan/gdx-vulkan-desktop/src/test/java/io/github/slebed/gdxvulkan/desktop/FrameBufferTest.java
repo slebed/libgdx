@@ -478,6 +478,64 @@ class FrameBufferTest {
         fb.dispose();
     }
 
+    /**
+     * GL cull state replaces the pipelines' own. A stock SpriteBatch quad (bottom-left, top-left, top-right, bottom-right) is clockwise in GL's
+     * y-up space, so with GL's default counter-clockwise front faces GL_BACK culls it and GL_FRONT keeps it, on the swapchain and in a
+     * framebuffer alike (a framebuffer is drawn without the flip, with the opposite Vulkan winding).
+     */
+    @Test void glCullStateAppliesToTheSwapchainAndToFrameBuffers() {
+        VulkanSpriteBatch b = batch();
+        FrameBuffer fb = new FrameBuffer(Pixmap.Format.RGBA8888, S, S, false);
+        for (int target = 0; target < 2; target++) {
+            boolean inFb = target == 1;
+            int[] modes = {GL20.GL_BACK, GL20.GL_FRONT, GL20.GL_FRONT_AND_BACK};
+            boolean[] visible = {false, true, false};
+            for (int m = 0; m < modes.length; m++) {
+                assertTrue(begin(0, 0, 0));
+                if (inFb) {
+                    fb.begin();
+                    Gdx.gl.glClearColor(0, 0, 0, 1);
+                    Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+                }
+                Gdx.gl.glEnable(GL20.GL_CULL_FACE);
+                Gdx.gl.glCullFace(modes[m]);
+                b.begin();
+                rect(b, 8, 8, 48, 48, 1, 0, 0);
+                b.end();
+                Gdx.gl.glDisable(GL20.GL_CULL_FACE);
+                byte[] f;
+                if (inFb) {
+                    fb.end();
+                    f = show(b, fb);
+                } else {
+                    f = frame.endAndCapture();
+                }
+                String what = (inFb ? "framebuffer" : "swapchain") + ", glCullFace 0x" + Integer.toHexString(modes[m]);
+                assertPx(f, 32, 32, visible[m] ? 255 : 0, 0, 0, what + (visible[m] ? ": the quad is front-facing for GL" : ": the quad is culled"));
+            }
+            // culling off again: back to normal drawing
+            assertTrue(begin(0, 0, 0));
+            if (inFb) {
+                fb.begin();
+                Gdx.gl.glClearColor(0, 0, 0, 1);
+                Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+            }
+            b.begin();
+            rect(b, 8, 8, 48, 48, 0, 1, 0);
+            b.end();
+            byte[] f;
+            if (inFb) {
+                fb.end();
+                f = show(b, fb);
+            } else {
+                f = frame.endAndCapture();
+            }
+            assertPx(f, 32, 32, 0, 255, 0, (inFb ? "framebuffer" : "swapchain") + " with culling disabled draws as before");
+        }
+        b.dispose();
+        fb.dispose();
+    }
+
     @Test void frameBuffersCanBeCreatedAndDisposedRepeatedly() {
         for (int i = 0; i < 20; i++) {
             FrameBuffer fb = new FrameBuffer(Pixmap.Format.RGBA8888, 16 + i, 16 + i, false);

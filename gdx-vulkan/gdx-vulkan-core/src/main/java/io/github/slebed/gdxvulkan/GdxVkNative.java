@@ -57,6 +57,9 @@ final class GdxVkNative {
     /** @return pipeline id, or -1 (see nativeLastError) */
     static native int nativeCreatePipeline(long handle, String name, byte[] vertSpv, byte[] fragSpv);
 
+    /** Stress test 3: nanoseconds to record `draws` state-change + push-constants + indexed-draw triples as a plain C++ loop; -1 on error. */
+    static native long nativeBenchmarkRecord(long handle, int pipeline, int indexBuffer, int draws, float[] push);
+
     /** @return compute pipeline id, or -1 (see nativeLastError) */
     static native int nativeCreateComputePipeline(long handle, String name, byte[] spv);
 

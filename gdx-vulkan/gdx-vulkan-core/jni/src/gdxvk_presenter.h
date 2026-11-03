@@ -95,6 +95,12 @@ public:
     // Replays a command stream (gdxvk_commands.h) into the open frame. Many streams may be replayed per frame.
     FrameStatus submitCommandStream(const uint8_t* data, size_t bytes);
 
+    // Stress test 3 (plan, Phase 3): the cost of recording `draws` indexed draws, each with a state change (the cull mode, alternating) and
+    // a full 128-byte push-constant block, as one plain C++ loop straight into the frame's command buffer. This is the floor the command
+    // stream is compared with. Needs an open frame and a bound index buffer (`indexBuffer` is a resource buffer id of u16 indices, at
+    // least 3 of them). Returns the recording time in nanoseconds, or -1 on error (see lastError()).
+    int64_t benchmarkRecord(int pipeline, int indexBuffer, uint32_t draws, const float push[32]);
+
     // Records a non-indexed draw inside an open frame. `push` is the full 128-byte block (32 floats). Sets the
     // swapchain viewport (negative height, plan decision 6) and scissor, so it needs no other state.
     FrameStatus draw(int pipeline, uint32_t vertexCount, const float push[32]);

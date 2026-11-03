@@ -16,12 +16,12 @@ the plan names.
 | Phase 1a: Extraction, window surfaces and CI | 13 | 7 | 2 | 22 |
 | Phase 1b: Memory, layout and caches | 15 | 2 | 3 | 20 |
 | Phase 2: Unmodified 2D | 20 | 4 | 1 | 25 |
-| Phase 3: Stock FrameBuffer | 6 | 2 | 5 | 13 |
+| Phase 3: Stock FrameBuffer | 9 | 1 | 3 | 13 |
 | Phase 4: Android lifecycle | 0 | 2 | 10 | 12 |
 | Phase 5: 3D with stock models | 0 | 0 | 12 | 12 |
 | Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 1 | 0 | 4 | 5 |
-| **All** | **85** | **24** | **60** | **169** |
+| **All** | **88** | **23** | **58** | **169** |
 ---
 
 ## Core decisions
@@ -232,9 +232,9 @@ the plan names.
 
 ### Gate 3 and stress test 3
 - [x] `gate3_2d3d`: a 2D scene (opaque, translucent and rotated sprites, text) and a 3D scene (perspective camera, two interpenetrating filled boxes and a floor under the depth test) each in a stock `FrameBuffer`, drawn with `region.flip(false, true)`. Matches stock GL exactly (0 differing pixels) on lavapipe vs llvmpipe in both tiers, and on the RTX 5080 and RTX 2080 vs GL on the RTX 5080 (`Gate3GoldenTest`, `Gate3Scenes`, `GlReferenceMain`)
-- [~] `gate3_postfx`: a clipped Scene2D UI (ScrollPane through ScissorStack) into a `FrameBuffer`, then four passes through ping-pong framebuffers (bright pass, horizontal blur, vertical blur, CRT scanlines and vignette with additive bloom). The post shaders are GLSL on stock GL and SPIR-V bundles (`fx_*.frag`) on gdx-vulkan. Exact match with stock GL on lavapipe CI (both tiers) and on the RTX 2080 (and 5080). Not done: the Galaxy S20 (the Adreno 840 phone passes the framebuffer, depth and stencil device checks, but does not run this scene yet)
-- [ ] Stress: 100,000 draws recorded as a pure C++ loop (floor) vs replayed from Java through the command stream
-- [ ] Pass: Java + JNI + C++ recording time <= 1.3x the C++ floor
+- [x] `gate3_postfx`: a clipped Scene2D UI (ScrollPane through ScissorStack) into a `FrameBuffer`, then four passes through ping-pong framebuffers (bright pass, horizontal blur, vertical blur, CRT scanlines and vignette with additive bloom). The post shaders are GLSL on stock GL and SPIR-V bundles (`fx_*.frag`) on gdx-vulkan. Exact match with stock GL on lavapipe CI (both tiers) and on the RTX 2080 (and 5080). On the Adreno 840 phone (the REDMAGIC, not the Galaxy S20) both Gate 3 scenes run in the device suite, with the skin loaded from the APK and the scene source shared with the desktop tests: within 5/255 of the lavapipe golden, no pixel beyond the tolerance, both tiers
+- [x] Stress test 3: 100,000 draws (a cull-mode change, a full 128-byte push-constant block, an indexed draw) recorded as a plain C++ loop straight into the command buffer (`Presenter::benchmarkRecord`, the floor) against the same draws encoded by Java and replayed through the command stream (`gradlew :gdx-vulkan-desktop:stress3`, `Stress3Main`)
+- [x] Pass: Java + JNI + C++ recording time <= 1.3x the C++ floor. Desktop, medians over 100-200 frames: RTX 5080 Tier A 1.22-1.26x, Tier B 1.04-1.07x; RTX 2080 Tier A 1.24-1.25x, Tier B 1.01-1.10x. The Java encoder costs ~15 ns per draw on HotSpot. Adreno 840 (informational, the floor swings 385-554 ns between runs): Tier B 1.21-1.26x, Tier A 1.24-1.80x, so Tier A on the phone is not reliably under 1.3x. Java encoding there is ~105 ns per draw on ART (it was 730 ns with buffer views: the stream now encodes into an int[] and copies in bulk)
 
 ---
 

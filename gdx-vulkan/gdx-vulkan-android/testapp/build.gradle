@@ -34,3 +34,30 @@ def copyNatives = tasks.register('copyGdxNatives', Copy) {
 }
 android.sourceSets.main.jniLibs.srcDir nativesDir
 tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn copyNatives }
+
+// Gate 3 on the device: the scenes' source (shared with the desktop tests), the skin and fonts they load, and the lavapipe goldens they are
+// compared with, all packaged into the app. Gdx.files is libGDX's own DefaultAndroidFiles over these assets.
+dependencies {
+    implementation "com.badlogicgames.gdx:gdx-backend-android:${gdxVersion}"
+}
+
+def sharedJava = layout.buildDirectory.dir('generated/shared-java')
+def copySharedScenes = tasks.register('copySharedScenes', Copy) {
+    from('../../gdx-vulkan-desktop/src/test/java/io/github/slebed/gdxvulkan/desktop') {
+        include 'Gate3Scenes.java', 'ShapeApi.java'
+        into 'io/github/slebed/gdxvulkan/desktop'
+    }
+    into sharedJava
+}
+def deviceAssets = layout.buildDirectory.dir('generated/assets')
+def copyDeviceAssets = tasks.register('copyDeviceAssets', Copy) {
+    from('../../../tests/gdx-tests-android/assets') { include 'data/uiskin.*', 'data/default.*' }
+    from('../../gdx-vulkan-desktop/src/test/resources/goldens') {
+        include 'gate3_*.png'
+        into 'goldens'
+    }
+    into deviceAssets
+}
+android.sourceSets.main.java.srcDir sharedJava
+android.sourceSets.main.assets.srcDir deviceAssets
+tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn copySharedScenes, copyDeviceAssets }
