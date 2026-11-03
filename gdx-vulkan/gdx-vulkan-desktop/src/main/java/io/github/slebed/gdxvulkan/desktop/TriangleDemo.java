@@ -18,7 +18,7 @@ public final class TriangleDemo {
             window = GLFW.glfwCreateWindow(960, 540, "gdx-vulkan triangle", 0, 0);
             if (window == 0) throw new IllegalStateException("glfwCreateWindow failed");
             try (GdxVkPresenter presenter = GlfwSurfaces.createPresenter(ctx, window, true)) {
-                int pipeline = presenter.createPipeline(GdxVkShaders.load("triangle.vert"), GdxVkShaders.load("triangle.frag"));
+                int pipeline = presenter.createPipeline("triangle", GdxVkShaders.load("triangle.vert"), GdxVkShaders.load("triangle.frag"));
                 float[] push = new float[32];
                 int[] w = new int[1], h = new int[1];
                 while (!GLFW.glfwWindowShouldClose(window)) {

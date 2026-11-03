@@ -31,7 +31,7 @@ chmod +x gradlew
 
 ICD=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)
 export VK_DRIVER_FILES="$ICD" VK_ICD_FILENAMES="$ICD"   # lavapipe only, whatever else is installed
-export VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT
+# Synchronization validation is switched on per Gradle test task (see gdx-vulkan-desktop/build.gradle), not globally here.
 export GRADLE_OPTS="-Dorg.gradle.daemon=false"
 echo "Vulkan ICD: $ICD"
 xvfb-run -a -s "-screen 0 1280x1024x24" vulkaninfo --summary | grep -E "deviceName|apiVersion|driverInfo" || true

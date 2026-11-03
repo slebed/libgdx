@@ -16,6 +16,15 @@
 
 #include "gdxvk_internal.h"
 
+#include "gdxvk_caches.h"
+#include "gdxvk_deletion.h"
+#include "gdxvk_layout.h"
+#include "gdxvk_resources.h"
+#include "gdxvk_reflect.h"
+#include "gdxvk_rings.h"
+#include "gdxvk_staging.h"
+#include "gdxvk_timeline.h"
+
 namespace gdxvk {
 
 namespace {
@@ -37,7 +46,7 @@ struct Frame {
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkSemaphore acquired = VK_NULL_HANDLE;
-    VkFence inFlight = VK_NULL_HANDLE;
+    uint64_t serial = 0; // submit serial of the last frame recorded in this slot; 0 = never submitted
 };
 
 void imageBarrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from, VkImageLayout to, VkPipelineStageFlags srcStage,
@@ -75,7 +84,6 @@ struct Presenter::Impl {
     VkRenderPass renderPass = VK_NULL_HANDLE;       // Tier B only
     std::vector<VkFramebuffer> framebuffers;        // Tier B only
 
-    VkPipelineLayout pipelineLayout = VK_NULL_HANDLE; // push constants only until Phase 1b adds the descriptor sets
     std::vector<VkPipeline> pipelines;
 
     bool canCapture = false; // swapchain images support TRANSFER_SRC
@@ -85,6 +93,8 @@ struct Presenter::Impl {
     std::vector<uint8_t> captured;
 
     Frame frames[kFramesInFlight];
+    std::unique_ptr<FrameRing> rings[kFramesInFlight]; // Set 0 dynamic buffers, one per frame in flight
+    bool stagingRecorded = false;
     uint32_t frameIndex = 0;
     uint32_t imageIndex = 0;
     bool frameOpen = false;
@@ -113,8 +123,6 @@ struct Presenter::Impl {
         destroySwapchainViews();
         for (VkPipeline pl : pipelines) vkDestroyPipeline(h.device, pl, nullptr);
         pipelines.clear();
-        if (pipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(h.device, pipelineLayout, nullptr);
-        pipelineLayout = VK_NULL_HANDLE;
         if (captureBuf != VK_NULL_HANDLE) vmaDestroyBuffer(h.allocator, captureBuf, captureAlloc);
         captureBuf = VK_NULL_HANDLE;
         if (renderPass != VK_NULL_HANDLE) vkDestroyRenderPass(h.device, renderPass, nullptr);
@@ -122,7 +130,6 @@ struct Presenter::Impl {
         if (swapchain != VK_NULL_HANDLE) vkDestroySwapchainKHR(h.device, swapchain, nullptr);
         swapchain = VK_NULL_HANDLE;
         for (Frame& f : frames) {
-            if (f.inFlight != VK_NULL_HANDLE) vkDestroyFence(h.device, f.inFlight, nullptr);
             if (f.acquired != VK_NULL_HANDLE) vkDestroySemaphore(h.device, f.acquired, nullptr);
             if (f.pool != VK_NULL_HANDLE) vkDestroyCommandPool(h.device, f.pool, nullptr);
             f = Frame();
@@ -134,6 +141,7 @@ struct Presenter::Impl {
     }
 
     bool createFrames() {
+        for (auto& r : rings) r.reset(new FrameRing(h));
         for (Frame& f : frames) {
             VkCommandPoolCreateInfo pi{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
             pi.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
@@ -146,9 +154,6 @@ struct Presenter::Impl {
             if (vkAllocateCommandBuffers(h.device, &ai, &f.cmd) != VK_SUCCESS) return false;
             VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
             if (vkCreateSemaphore(h.device, &si, nullptr, &f.acquired) != VK_SUCCESS) return false;
-            VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-            fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-            if (vkCreateFence(h.device, &fi, nullptr, &f.inFlight) != VK_SUCCESS) return false;
         }
         return true;
     }
@@ -399,15 +404,6 @@ std::unique_ptr<Presenter> Presenter::create(Context& ctx, const SurfaceHandles&
         error = "Creating per-frame command buffers and sync objects failed";
         return nullptr;
     }
-    VkPushConstantRange pcr{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 128};
-    VkPipelineLayoutCreateInfo pli{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    pli.pushConstantRangeCount = 1;
-    pli.pPushConstantRanges = &pcr;
-    if (vkCreatePipelineLayout(h.device, &pli, nullptr, &s.pipelineLayout) != VK_SUCCESS) {
-        errorKind = "init";
-        error = "vkCreatePipelineLayout failed";
-        return nullptr;
-    }
     FrameStatus st = s.recreateSwapchain();
     if (st == FrameStatus::Error || st == FrameStatus::DeviceLost || st == FrameStatus::OutOfMemory || st == FrameStatus::SurfaceLost) {
         errorKind = "init";
@@ -433,8 +429,11 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
     }
 
     Frame& f = s.frames[s.frameIndex];
-    VkResult r = vkWaitForFences(h.device, 1, &f.inFlight, VK_TRUE, UINT64_MAX);
+    VkResult r = h.timeline->waitSerial(f.serial);
     if (r != VK_SUCCESS) return mapResult(r);
+    h.deletion->collect(); // the GPU has finished with everything retired before the frames that are now complete
+    h.staging->collect(h.timeline->completed());
+    s.rings[s.frameIndex]->reset(); // this slot's previous frame has completed
 
     r = vkAcquireNextImageKHR(h.device, s.swapchain, UINT64_MAX, f.acquired, VK_NULL_HANDLE, &s.imageIndex);
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -444,11 +443,18 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
     if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) return mapResult(r) == FrameStatus::Error ? s.fail("vkAcquireNextImageKHR failed (VkResult " + std::to_string(r) + ")") : mapResult(r);
     if (r == VK_SUBOPTIMAL_KHR) s.dirty = true; // image is still usable this frame; rebuild before the next one
 
-    vkResetFences(h.device, 1, &f.inFlight);
     vkResetCommandPool(h.device, f.pool, 0);
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(f.cmd, &bi);
+
+    // Uploads queued by any thread since the last frame: recorded ahead of everything this frame draws.
+    s.stagingRecorded = h.staging->recordPending(f.cmd);
+
+    if (h.tierA) { // Tier A: one global update-after-bind table, bound once per command buffer
+        VkDescriptorSet table = h.layouts->globalTextureSet();
+        vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, h.layouts->pipelineLayout(), 1, 1, &table, 0, nullptr);
+    }
 
     VkClearValue clear;
     for (int i = 0; i < 4; ++i) clear.color.float32[i] = rgba[i];
@@ -510,6 +516,17 @@ FrameStatus Presenter::endFrame(bool capture) {
         VkBufferImageCopy region{};
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {s.extent.width, s.extent.height, 1};
+        // The capture buffer is rewritten every capture. The host waited for the previous one, but say so on the queue as well: an
+        // explicit dependency on the earlier submit's copy (older validation layers do not infer it from the host wait).
+        VkBufferMemoryBarrier reuse{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+        reuse.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_READ_BIT;
+        reuse.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        reuse.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        reuse.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        reuse.buffer = s.captureBuf;
+        reuse.size = VK_WHOLE_SIZE;
+        vkCmdPipelineBarrier(f.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
+                             nullptr, 1, &reuse, 0, nullptr);
         vkCmdCopyImageToBuffer(f.cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s.captureBuf, 1, &region);
         imageBarrier(f.cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0);
@@ -536,7 +553,9 @@ FrameStatus Presenter::endFrame(bool capture) {
     si.pCommandBuffers = &f.cmd;
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = &s.renderDone[s.imageIndex];
-    VkResult r = vkQueueSubmit(h.graphicsQueue, 1, &si, f.inFlight);
+    VkResult r = h.timeline->submit(si, &f.serial);
+    if (r == VK_SUCCESS && s.stagingRecorded) h.staging->markSubmitted(f.serial);
+    s.stagingRecorded = false;
     if (r != VK_SUCCESS) return mapResult(r) == FrameStatus::Error ? s.fail("vkQueueSubmit failed (VkResult " + std::to_string(r) + ")") : mapResult(r);
 
     VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
@@ -545,7 +564,10 @@ FrameStatus Presenter::endFrame(bool capture) {
     pi.swapchainCount = 1;
     pi.pSwapchains = &s.swapchain;
     pi.pImageIndices = &s.imageIndex;
-    r = vkQueuePresentKHR(h.graphicsQueue, &pi);
+    {
+        std::lock_guard<std::mutex> queueLock(h.queueMutex);
+        r = vkQueuePresentKHR(h.graphicsQueue, &pi);
+    }
     s.frameIndex = (s.frameIndex + 1) % kFramesInFlight;
     FrameStatus result = FrameStatus::Ok;
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
@@ -555,7 +577,7 @@ FrameStatus Presenter::endFrame(bool capture) {
     }
 
     if (capture && result == FrameStatus::Ok) {
-        r = vkWaitForFences(h.device, 1, &f.inFlight, VK_TRUE, UINT64_MAX);
+        r = h.timeline->waitSerial(f.serial);
         if (r != VK_SUCCESS) return mapResult(r);
         vmaInvalidateAllocation(h.allocator, s.captureAlloc, 0, VK_WHOLE_SIZE);
         s.readCapture();
@@ -563,9 +585,14 @@ FrameStatus Presenter::endFrame(bool capture) {
     return result;
 }
 
-int Presenter::createPipeline(const uint32_t* vertSpv, size_t vertWords, const uint32_t* fragSpv, size_t fragWords) {
+int Presenter::createPipeline(const char* name, const uint32_t* vertSpv, size_t vertWords, const uint32_t* fragSpv, size_t fragWords) {
     Impl& s = *impl_;
     const ContextHandles& h = s.h;
+    const std::string base = name ? name : "(unnamed)";
+    const uint32_t table = h.layouts->tableSize();
+    s.error = validateShader(base + ".vert", vertSpv, vertWords, VK_SHADER_STAGE_VERTEX_BIT, h.tierA, table);
+    if (s.error.empty()) s.error = validateShader(base + ".frag", fragSpv, fragWords, VK_SHADER_STAGE_FRAGMENT_BIT, h.tierA, table);
+    if (!s.error.empty()) return -1;
     auto module = [&](const uint32_t* code, size_t words, VkShaderModule& out) {
         VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
         mi.codeSize = words * sizeof(uint32_t);
@@ -627,12 +654,12 @@ int Presenter::createPipeline(const uint32_t* vertSpv, size_t vertWords, const u
     gi.pMultisampleState = &ms;
     gi.pColorBlendState = &cb;
     gi.pDynamicState = &ds;
-    gi.layout = s.pipelineLayout;
+    gi.layout = h.layouts->pipelineLayout();
     gi.renderPass = h.tierA ? VK_NULL_HANDLE : s.renderPass;
     gi.subpass = 0;
 
     VkPipeline pipeline = VK_NULL_HANDLE;
-    const VkResult r = vkCreateGraphicsPipelines(h.device, VK_NULL_HANDLE, 1, &gi, nullptr, &pipeline);
+    const VkResult r = vkCreateGraphicsPipelines(h.device, h.pipelineCache->handle(), 1, &gi, nullptr, &pipeline);
     vkDestroyShaderModule(h.device, vs, nullptr);
     vkDestroyShaderModule(h.device, fs, nullptr);
     if (r != VK_SUCCESS) {
@@ -659,9 +686,36 @@ FrameStatus Presenter::draw(int pipeline, uint32_t vertexCount, const float push
         vkCmdSetCullMode(cmd, VK_CULL_MODE_BACK_BIT);
         vkCmdSetFrontFace(cmd, VK_FRONT_FACE_COUNTER_CLOCKWISE);
     }
-    vkCmdPushConstants(cmd, s.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 128, push);
+    vkCmdPushConstants(cmd, s.h.layouts->pipelineLayout(), DescriptorLayouts::kPushStages, 0, DescriptorLayouts::kPushConstantBytes, push);
     vkCmdDraw(cmd, vertexCount, 1, 0, 0);
     return FrameStatus::Ok;
+}
+
+bool Presenter::bindFrameData(const void* uniform, uint32_t uniformBytes, const void* storage, uint64_t storageBytes) {
+    Impl& s = *impl_;
+    if (!s.frameOpen) {
+        s.fail("bindFrameData called outside beginFrame/endFrame");
+        return false;
+    }
+    FrameRing::Binding b;
+    if (!s.rings[s.frameIndex]->allocate(uniform, uniformBytes, storage, storageBytes, b)) {
+        s.fail("bindFrameData: allocation failed (uniform data over 16 KB, or out of memory)");
+        return false;
+    }
+    vkCmdBindDescriptorSets(s.frames[s.frameIndex].cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.h.layouts->pipelineLayout(), 0, 1, &b.set, 2,
+                            b.offsets);
+    return true;
+}
+
+int Presenter::bindTexture(int texture) {
+    Impl& s = *impl_;
+    int slot = -1;
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    if (!s.frameOpen || !s.h.resources->textureBinding(texture, &slot, &set)) return -1;
+    if (s.h.tierA) return slot; // the table is already bound; the slot travels in the push constants
+    vkCmdBindDescriptorSets(s.frames[s.frameIndex].cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.h.layouts->pipelineLayout(), 1, 1, &set, 0,
+                            nullptr);
+    return 0;
 }
 
 const std::vector<uint8_t>& Presenter::capturedPixels() const { return impl_->captured; }

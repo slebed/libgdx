@@ -44,6 +44,7 @@ test {
     systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'true')
     systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
     systemProperty 'gdxvulkan.requireDriver', System.getProperty('gdxvulkan.requireDriver', 'false')
+    System.getProperty('gdxvulkan.device')?.with { v -> systemProperty('gdxvulkan.device', v) }
     // Synchronization validation on every test run (plan, Core decision 8); any message fails the test.
     environment 'VK_LAYER_ENABLES', 'VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT'
     testLogging { events 'passed', 'skipped', 'failed'; showStandardStreams = true }

@@ -56,11 +56,20 @@ public:
     // gl_VertexIndex). Triangle list, back-face culling with CCW front faces, no blending, no depth. Phase 1a only:
     // Phase 1b replaces this with the shared two-set layout, the pipeline cache and VulkanShaderPipelineBundle.
     // Returns the pipeline id, or -1 with lastError() set.
-    int createPipeline(const uint32_t* vertSpv, size_t vertWords, const uint32_t* fragSpv, size_t fragWords);
+    // Both shaders are reflected first and must fit the device's pipeline layout (gdxvk_reflect.h); `name` appears in the error.
+    int createPipeline(const char* name, const uint32_t* vertSpv, size_t vertWords, const uint32_t* fragSpv, size_t fragWords);
 
     // Records a non-indexed draw inside an open frame. `push` is the full 128-byte block (32 floats). Sets the
     // swapchain viewport (negative height, plan decision 6) and scissor, so it needs no other state.
     FrameStatus draw(int pipeline, uint32_t vertexCount, const float push[32]);
+
+    // Set 0: copies the bytes into this frame's dynamic ring and binds them (uniform = camera/frame globals, at most 16 KB;
+    // storage = transforms, materials, ...). Applies to the draws that follow. Inside an open frame.
+    bool bindFrameData(const void* uniform, uint32_t uniformBytes, const void* storage, uint64_t storageBytes);
+
+    // Set 1: makes the texture current. Tier A returns its slot in the bindless table, to be passed in u_indices.y; Tier B binds
+    // the texture's descriptor set and returns 0. -1 if the texture does not exist. Inside an open frame.
+    int bindTexture(int texture);
 
     // RGBA8, row 0 at the top of the screen, width() * height() * 4 bytes, from the last endFrame(capture = true).
     const std::vector<uint8_t>& capturedPixels() const;

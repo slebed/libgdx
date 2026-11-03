@@ -106,7 +106,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 + " forced=" + context.caps().tierForced + " validation=" + context.caps().validationEnabled);
         }
         presenter = context.createPresenterAndroid(holder.getSurface(), width, height, true);
-        pipeline = presenter.createPipeline(GdxVkShaders.load("triangle.vert"), GdxVkShaders.load("triangle.frag"));
+        pipeline = presenter.createPipeline("triangle", GdxVkShaders.load("triangle.vert"), GdxVkShaders.load("triangle.frag"));
         TestLog.i(TAG, "swapchain " + presenter.width() + "x" + presenter.height() + " vkFormat=" + presenter.vkFormat() + " images="
             + presenter.imageCount());
         SelfTest.run(presenter, pipeline);

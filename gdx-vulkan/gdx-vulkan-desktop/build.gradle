@@ -11,21 +11,51 @@ dependencies {
 
 def coreNative = project(':gdx-vulkan-core').layout.buildDirectory.dir('native')
 
-test {
-    useJUnitPlatform()
-    dependsOn ':gdx-vulkan-core:buildNatives'
-    systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
-    systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'true')
-    systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
-    systemProperty 'gdxvulkan.requireDriver', System.getProperty('gdxvulkan.requireDriver', 'false')
+// Shared by `test` and `soakTest`.
+def configureGpuTest = { Test t ->
+    t.useJUnitPlatform()
+    t.dependsOn ':gdx-vulkan-core:buildNatives'
+    t.systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
+    t.systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'true')
+    t.systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
+    t.systemProperty 'gdxvulkan.requireDriver', System.getProperty('gdxvulkan.requireDriver', 'false')
+    // -Dgdxvulkan.device=N picks a physical device by index; the soak and golden output print the device name actually used.
+    System.getProperty('gdxvulkan.device')?.with { v -> t.systemProperty('gdxvulkan.device', v) }
     // Golden images (src/test/resources/goldens). Write them with -Dgdxvulkan.updateGoldens=true on lavapipe only.
-    systemProperty 'gdxvulkan.goldenDir', file('src/test/resources/goldens').absolutePath
-    systemProperty 'gdxvulkan.diffDir', layout.buildDirectory.dir('golden-diff').get().asFile.absolutePath
-    systemProperty 'gdxvulkan.updateGoldens', System.getProperty('gdxvulkan.updateGoldens', 'false')
+    t.systemProperty 'gdxvulkan.goldenDir', file('src/test/resources/goldens').absolutePath
+    t.systemProperty 'gdxvulkan.diffDir', layout.buildDirectory.dir('golden-diff').get().asFile.absolutePath
+    t.systemProperty 'gdxvulkan.updateGoldens', System.getProperty('gdxvulkan.updateGoldens', 'false')
+    // Soak test knobs (see SoakTest): -Dgdxvulkan.soakSeconds=600 for the full 10-minute run.
+    ['soakSeconds', 'soakBufferRate', 'soakTextureRate', 'soakStrict'].each { k ->
+        System.getProperty('gdxvulkan.' + k)?.with { v -> t.systemProperty('gdxvulkan.' + k, v) }
+    }
+    t.testLogging { events 'passed', 'skipped', 'failed'; showStandardStreams = true }
+}
+
+test {
+    configureGpuTest(it)
+    exclude '**/SoakTest*'
     // Synchronization validation on every test run (plan, Core decision 8); any message fails the test.
     environment 'VK_LAYER_ENABLES', 'VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT'
-    testLogging { events 'passed', 'skipped', 'failed'; showStandardStreams = true }
 }
+
+// Stress test 1b. Runs 15 s by default; -Dgdxvulkan.soakSeconds=600 for the full run.
+// Synchronization validation stays on, except with -Dgdxvulkan.forceTierB=true: that selects fence-based completion tracking, and the
+// layer's synchronization validation then slows super-linearly under this load (measured on RTX 5080: 60 fps without it, under 5 fps
+// with it, while the same run with the timeline semaphore stays at 60 fps). Core validation still runs. The fence path is covered
+// with sync validation by every other test.
+tasks.register('soakTest', Test) {
+    description = 'Stress/soak test: 50k buffer sub-allocations/s and 2k textures/s at 60 fps.'
+    group = 'verification'
+    configureGpuTest(it)
+    include '**/SoakTest*'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    if (!Boolean.parseBoolean(System.getProperty('gdxvulkan.forceTierB', 'false'))) {
+        environment 'VK_LAYER_ENABLES', 'VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT'
+    }
+}
+check.dependsOn 'soakTest'
 
 tasks.register('runTriangleDemo', JavaExec) {
     description = 'Opens a window with a spinning triangle. -Dgdxvulkan.forceTierB=true for Tier B.'

@@ -39,7 +39,7 @@ class TriangleTest {
             window = GLFW.glfwCreateWindow(320, 240, "gdx-vulkan triangle test", 0, 0);
             assumeTrue(window != 0, "Could not create a window");
             try (GdxVkPresenter p = GlfwSurfaces.createPresenter(ctx, window, false)) {
-                int pipeline = p.createPipeline(GdxVkShaders.load("triangle.vert"), GdxVkShaders.load("triangle.frag"));
+                int pipeline = p.createPipeline("triangle", GdxVkShaders.load("triangle.vert"), GdxVkShaders.load("triangle.frag"));
                 int w = p.width(), h = p.height();
 
                 byte[] front = renderCapture(p, pipeline, false);

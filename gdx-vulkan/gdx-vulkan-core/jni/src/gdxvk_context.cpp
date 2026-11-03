@@ -3,11 +3,19 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 
 #include "gdxvk_internal.h"
+
+#include "gdxvk_caches.h"
+#include "gdxvk_deletion.h"
+#include "gdxvk_layout.h"
+#include "gdxvk_resources.h"
+#include "gdxvk_staging.h"
+#include "gdxvk_timeline.h"
 
 namespace gdxvk {
 
@@ -55,6 +63,14 @@ Context::Context() : impl_(new Impl) {}
 Context::~Context() {
     if (!impl_) return;
     if (impl_->device != VK_NULL_HANDLE) vkDeviceWaitIdle(impl_->device);
+    // Services go in reverse dependency order. The deletion queue runs every pending destroy before the allocator and device go.
+    delete impl_->resources;
+    delete impl_->staging;
+    delete impl_->deletion;
+    delete impl_->layouts;
+    delete impl_->samplers;
+    delete impl_->pipelineCache; // saves the cache file
+    delete impl_->timeline;
     if (impl_->allocator != VK_NULL_HANDLE) vmaDestroyAllocator(impl_->allocator);
     if (impl_->device != VK_NULL_HANDLE) vkDestroyDevice(impl_->device, nullptr);
     if (impl_->messenger != VK_NULL_HANDLE) vkDestroyDebugUtilsMessengerEXT(impl_->instance, impl_->messenger, nullptr);
@@ -255,6 +271,18 @@ std::unique_ptr<Context> Context::create(const ContextConfig& cfg, std::string& 
     vkGetPhysicalDeviceFeatures(s.physical, &supported);
     enFeats.features.samplerAnisotropy = supported.samplerAnisotropy;
     enFeats.features.fillModeNonSolid = supported.fillModeNonSolid; // wireframe in debug tools
+    // GPU completion tracking: a timeline semaphore on Vulkan 1.2+, one fence per submit otherwise. forceTierB also takes the
+    // fence path so CI exercises the Vulkan 1.1 behaviour on any device.
+    const bool timelineSupported = effective >= VK_API_VERSION_1_2 && f12.timelineSemaphore;
+    bool useTimeline = timelineSupported && !cfg.forceTierB;
+    if (const char* mode = std::getenv("GDXVK_COMPLETION")) { // diagnostics: "fence" or "timeline" overrides the choice above
+        if (std::strcmp(mode, "fence") == 0) useTimeline = false;
+        else if (std::strcmp(mode, "timeline") == 0) useTimeline = timelineSupported;
+    }
+    if (effective >= VK_API_VERSION_1_2) {
+        en12.timelineSemaphore = useTimeline ? VK_TRUE : VK_FALSE;
+        enFeats.pNext = &en12;
+    }
     if (tier.tier == Tier::A) {
         en12.descriptorIndexing = VK_TRUE;
         en12.descriptorBindingPartiallyBound = VK_TRUE;
@@ -264,7 +292,6 @@ std::unique_ptr<Context> Context::create(const ContextConfig& cfg, std::string& 
         en12.runtimeDescriptorArray = VK_TRUE;
         en13.dynamicRendering = VK_TRUE;
         en12.pNext = &en13;
-        enFeats.pNext = &en12;
     }
 
     const float prio = 1.0f;
@@ -316,6 +343,24 @@ std::unique_ptr<Context> Context::create(const ContextConfig& cfg, std::string& 
         return nullptr;
     }
 
+    // ---- Device-level services (Phase 1b) ---------------------------------------------------------------
+    s.limits = props.limits;
+    s.effectiveApi = effective;
+    s.timeline = new Timeline(s, useTimeline);
+    s.deletion = new DeletionQueue(*s.timeline);
+    s.samplers = new SamplerCache(s, supported.samplerAnisotropy == VK_TRUE);
+    s.pipelineCache = new PipelineCacheStore(s, cfg.pipelineCachePath);
+    std::string layoutError;
+    s.layouts = DescriptorLayouts::create(s, tier.textureTableSize, layoutError);
+    if (!s.layouts) {
+        errorKind = "init";
+        error = layoutError;
+        return nullptr;
+    }
+
+    s.staging = new StagingRing(s, 16u << 20);
+    s.resources = new Resources(s);
+
     // ---- Report ------------------------------------------------------------------------------
     DeviceInfo& di = s.info;
     di.deviceName = props.deviceName;
@@ -333,6 +378,9 @@ std::unique_ptr<Context> Context::create(const ContextConfig& cfg, std::string& 
     di.minUniformBufferOffsetAlignment = static_cast<uint32_t>(props.limits.minUniformBufferOffsetAlignment);
     di.minStorageBufferOffsetAlignment = static_cast<uint32_t>(props.limits.minStorageBufferOffsetAlignment);
     di.graphicsQueueFamily = static_cast<uint32_t>(gfx);
+    di.maxUniformBufferRange = props.limits.maxUniformBufferRange;
+    di.timelineSemaphores = s.timeline->usesSemaphore();
+    di.pipelineCacheLoadedBytes = static_cast<uint32_t>(s.pipelineCache->loadedBytes());
 
     // The plan fixes the push-constant block at 128 bytes (Vulkan guarantees >= 128).
     if (di.maxPushConstantsSize < 128) {

@@ -16,6 +16,7 @@ struct ContextConfig {
     uint32_t requestedApiVersion = kApi13; // instance apiVersion; effective = min(device, requested)
     int preferredDeviceIndex = -1;         // -1 = pick best (discrete > integrated > virtual > cpu)
     std::string appName = "gdx-vulkan";
+    std::string pipelineCachePath; // empty = in-memory only; otherwise loaded at startup and saved at shutdown
 };
 
 struct DeviceInfo {
@@ -34,6 +35,9 @@ struct DeviceInfo {
     uint32_t minUniformBufferOffsetAlignment = 0;
     uint32_t minStorageBufferOffsetAlignment = 0;
     uint32_t graphicsQueueFamily = 0;
+    uint32_t maxUniformBufferRange = 0;
+    bool timelineSemaphores = false; // GPU completion tracked by a timeline semaphore (else one fence per submit)
+    uint32_t pipelineCacheLoadedBytes = 0;
 };
 
 struct ContextHandles;

@@ -14,7 +14,7 @@ class VulkanCapsTest {
             "deviceType", "2", "validationEnabled", "true", "tier", tier, "tierForced", "false", "tierReason", reason,
             "textureTableSize", "4096", "maxImageDimension2D", "16384", "maxSamplerAnisotropy", "16.0",
             "maxPushConstantsSize", "256", "minUniformBufferOffsetAlignment", "64", "minStorageBufferOffsetAlignment", "16",
-            "graphicsQueueFamily", "0"
+            "graphicsQueueFamily", "0", "maxUniformBufferRange", "65536", "timelineSemaphores", "true", "pipelineCacheLoadedBytes", "0"
         };
     }
 

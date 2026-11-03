@@ -23,16 +23,25 @@ option(GDXVK_BUILD_TESTS "Build native tests" ON)
 add_library(gdxvk_core STATIC
     src/gdxvk_context.cpp
     src/gdxvk_presenter.cpp
+    src/gdxvk_timeline.cpp
+    src/gdxvk_deletion.cpp
+    src/gdxvk_caches.cpp
+    src/gdxvk_layout.cpp
+    src/gdxvk_staging.cpp
+    src/gdxvk_rings.cpp
+    src/gdxvk_resources.cpp
     src/vma_impl.cpp
-    src/volk_impl.c)
-target_include_directories(gdxvk_core PUBLIC src PRIVATE vendor)
+    src/gdxvk_reflect.cpp
+    src/volk_impl.c
+    vendor/spirv-reflect/spirv_reflect.c)
+target_include_directories(gdxvk_core PUBLIC src vendor)
 target_compile_features(gdxvk_core PUBLIC cxx_std_17)
 if(WIN32)
-    target_compile_definitions(gdxvk_core PRIVATE VK_USE_PLATFORM_WIN32_KHR NOMINMAX)
+    target_compile_definitions(gdxvk_core PUBLIC VK_USE_PLATFORM_WIN32_KHR NOMINMAX)
 elseif(ANDROID)
-    target_compile_definitions(gdxvk_core PRIVATE VK_USE_PLATFORM_ANDROID_KHR)
+    target_compile_definitions(gdxvk_core PUBLIC VK_USE_PLATFORM_ANDROID_KHR)
 elseif(UNIX AND NOT APPLE)
-    target_compile_definitions(gdxvk_core PRIVATE VK_USE_PLATFORM_XLIB_KHR)
+    target_compile_definitions(gdxvk_core PUBLIC VK_USE_PLATFORM_XLIB_KHR)
 endif()
 if(NOT MSVC)
     target_compile_options(gdxvk_core PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)

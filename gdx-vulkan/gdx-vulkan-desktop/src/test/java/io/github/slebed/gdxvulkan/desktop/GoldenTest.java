@@ -42,7 +42,7 @@ class GoldenTest {
             window = GLFW.glfwCreateWindow(SIZE, SIZE, "gdx-vulkan golden", 0, 0);
             assumeTrue(window != 0, "Could not create a window");
             try (GdxVkPresenter p = GlfwSurfaces.createPresenter(ctx, window, false)) {
-                int pipeline = p.createPipeline(GdxVkShaders.load("triangle.vert"), GdxVkShaders.load("triangle.frag"));
+                int pipeline = p.createPipeline("triangle", GdxVkShaders.load("triangle.vert"), GdxVkShaders.load("triangle.frag"));
                 String device = ctx.caps().deviceName;
 
                 check(p, pipeline, device, "clear", 0.2f, 0.4f, 0.6f, (q, pl) -> {});

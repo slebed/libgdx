@@ -8,9 +8,14 @@ import java.io.InputStream;
 public final class GdxVkShaders {
     private GdxVkShaders() {}
 
-    /** @param name file name without the .spv suffix, e.g. {@code "triangle.vert"} */
+    /** The Tier B build of a shader. @param name file name without the .spv suffix, e.g. {@code "triangle.vert"} */
     public static byte[] load(String name) {
-        String res = "/shaders/" + name + ".spv";
+        return load(name, false);
+    }
+
+    /** @param tierA the build compiled with GDX_TIER_A (bindless texture table) instead of the single-sampler Tier B build */
+    public static byte[] load(String name, boolean tierA) {
+        String res = "/shaders/" + name + (tierA ? ".a" : "") + ".spv";
         try (InputStream in = GdxVkShaders.class.getResourceAsStream(res)) {
             if (in == null) throw new GdxVkException("Shader resource not found: " + res);
             ByteArrayOutputStream out = new ByteArrayOutputStream();

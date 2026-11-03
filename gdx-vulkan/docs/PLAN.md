@@ -14,7 +14,7 @@ Tier B = render-pass cache + per-texture descriptors; `forceTierB` runs it anywh
 | Phase | Scope | Status |
 |---|---|---|
 | 1a | Standalone build, volk/VMA, device + tier selection, Win32/X11/Android surface, clear + triangle, lavapipe CI + validation | **Done except**: CI unrun on GitHub, device is a REDMAGIC NX809J not the S20, Android arm64 only |
-| 1b | Deletion queue, rings, Set 0/Set 1 layout, pipeline cache, reflection validation, soak test | |
+| 1b | Deletion queue, rings, Set 0/Set 1 layout, pipeline cache, reflection validation, soak test | **Implemented**; verified on RTX 5080/2080 and lavapipe (15-60 s soaks). Pending: 10-minute soak, Android device run |
 | 2 | Unmodified 2D (SpriteBatch path, BitmapFont, Scene2D) | |
 | 3 | Stock `FrameBuffer` via the FBO shim | |
 | 4 | Android lifecycle, pre-rotation, async streamer | |

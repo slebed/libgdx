@@ -5,8 +5,9 @@ package io.github.slebed.gdxvulkan;
  * the GL20 shim follows in later milestones. Not thread-safe except {@link #caps()}.
  */
 public final class GdxVkContext implements AutoCloseable {
-    private long handle;
+    private volatile long handle;
     private final VulkanCaps caps;
+    private final GdxVkResources resources = new GdxVkResources(this);
     private final java.util.List<GdxVkPresenter> presenters = new java.util.ArrayList<GdxVkPresenter>();
 
     private GdxVkContext(long handle, VulkanCaps caps) {
@@ -21,7 +22,7 @@ public final class GdxVkContext implements AutoCloseable {
         }
         GdxVk.loadNatives();
         long h = GdxVkNative.nativeCreate(config.enableValidation, config.forceTierB, config.preferredDeviceIndex,
-            config.maxApiMinor, config.applicationName);
+            config.maxApiMinor, config.applicationName, config.pipelineCachePath);
         if (h == 0) throw new VulkanInitException("Native context creation returned null without an exception");
         try {
             return new GdxVkContext(h, VulkanCaps.fromNative(GdxVkNative.nativeInfo(h)));
@@ -32,6 +33,16 @@ public final class GdxVkContext implements AutoCloseable {
     }
 
     public VulkanCaps caps() { return caps; }
+
+    /** Buffers and textures. Thread-safe; usable from loader threads. Valid until the context is closed. */
+    public GdxVkResources resources() { return resources; }
+
+    /** Read without the lock: resources are used from worker threads while the render thread may hold it. */
+    long nativeHandle() {
+        long h = handle;
+        if (h == 0) throw new IllegalStateException("Context is closed");
+        return h;
+    }
 
     /**
      * Creates a surface and swapchain for a native window.

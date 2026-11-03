@@ -54,11 +54,15 @@ public final class GdxVkPresenter implements AutoCloseable {
      * Phase 1a: builds a pipeline from SPIR-V for the swapchain's format. Triangle list, no vertex inputs (vertices come from
      * {@code gl_VertexIndex}), back-face culling with CCW front faces. Phase 1b replaces this with shader bundles.
      *
+     * Both shaders are reflected against the device's pipeline layout first; a mismatch (a Tier A shader on Tier B, an unknown
+     * binding, oversized push constants, a swapped stage) throws a {@link GdxVkException} that names {@code name + ".vert"}.
+     *
+     * @param name label used in error messages, normally the shader's base name
      * @return a pipeline id for {@link #draw}; freed with the presenter
      */
-    public int createPipeline(byte[] vertSpv, byte[] fragSpv) {
+    public int createPipeline(String name, byte[] vertSpv, byte[] fragSpv) {
         check();
-        int id = GdxVkNative.nativeCreatePipeline(handle, vertSpv, fragSpv);
+        int id = GdxVkNative.nativeCreatePipeline(handle, name, vertSpv, fragSpv);
         if (id < 0) throw new GdxVkException(GdxVkNative.nativeLastError(handle));
         return id;
     }
@@ -73,6 +77,32 @@ public final class GdxVkPresenter implements AutoCloseable {
         if (!frameOpen) throw new IllegalStateException("draw called outside beginFrame/endFrame");
         if (push.length != 32) throw new IllegalArgumentException("push must hold 32 floats, was " + push.length);
         translate(GdxVkNative.nativeDraw(handle, pipeline, vertexCount, push));
+    }
+
+    /**
+     * Set 0: copies the bytes into this frame's dynamic ring and binds them for the draws that follow.
+     *
+     * @param uniform camera and frame globals, at most 16 KB (std140 layout); may be null with 0 bytes
+     * @param storage transforms, materials, lights (std430 layout); may be null with 0 bytes
+     */
+    public void bindFrameData(byte[] uniform, int uniformBytes, byte[] storage, int storageBytes) {
+        check();
+        if (!frameOpen) throw new IllegalStateException("bindFrameData called outside beginFrame/endFrame");
+        if (!GdxVkNative.nativeBindFrameData(handle, uniform, uniformBytes, storage, storageBytes)) {
+            throw new GdxVkException(GdxVkNative.nativeLastError(handle));
+        }
+    }
+
+    /**
+     * Set 1: makes a texture current. On Tier A returns its slot in the bindless table, to put in {@code u_indices.y} of the push
+     * constants; on Tier B binds the texture's descriptor set and returns 0.
+     */
+    public int bindTexture(int texture) {
+        check();
+        if (!frameOpen) throw new IllegalStateException("bindTexture called outside beginFrame/endFrame");
+        int slot = GdxVkNative.nativeBindTexture(handle, texture);
+        if (slot < 0) throw new IllegalArgumentException("No such texture: " + texture);
+        return slot;
     }
 
     /** Tells the presenter the window size changed. The swapchain is rebuilt on the next {@link #beginFrame}. */

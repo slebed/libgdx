@@ -28,6 +28,11 @@ public final class VulkanCaps {
     public final int minUniformBufferOffsetAlignment;
     public final int minStorageBufferOffsetAlignment;
     public final int graphicsQueueFamily;
+    public final int maxUniformBufferRange;
+    /** GPU completion is tracked by a timeline semaphore (Vulkan 1.2+); otherwise one fence per submit. forceTierB selects fences. */
+    public final boolean timelineSemaphores;
+    /** Bytes of a saved pipeline cache accepted at startup (0 = none, or it belonged to another device/driver). */
+    public final int pipelineCacheLoadedBytes;
 
     private VulkanCaps(Map<String, String> m) {
         deviceName = m.get("deviceName");
@@ -48,6 +53,9 @@ public final class VulkanCaps {
         minUniformBufferOffsetAlignment = Integer.parseInt(m.get("minUniformBufferOffsetAlignment"));
         minStorageBufferOffsetAlignment = Integer.parseInt(m.get("minStorageBufferOffsetAlignment"));
         graphicsQueueFamily = Integer.parseInt(m.get("graphicsQueueFamily"));
+        maxUniformBufferRange = (int) Long.parseLong(m.get("maxUniformBufferRange"));
+        timelineSemaphores = Boolean.parseBoolean(m.get("timelineSemaphores"));
+        pipelineCacheLoadedBytes = Integer.parseInt(m.get("pipelineCacheLoadedBytes"));
     }
 
     /** Parses the flat [key, value, ...] array returned by the native layer. */

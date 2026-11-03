@@ -11,7 +11,12 @@
 #include <vector>
 
 #include "gdxvk_context.h"
+#include "gdxvk_internal.h"
 #include "gdxvk_presenter.h"
+#include "gdxvk_deletion.h"
+#include "gdxvk_resources.h"
+#include "gdxvk_staging.h"
+#include "gdxvk_timeline.h"
 
 namespace {
 
@@ -30,13 +35,33 @@ void throwKind(JNIEnv* env, const std::string& kind, const std::string& msg) {
 
 jstring utf(JNIEnv* env, const std::string& s) { return env->NewStringUTF(s.c_str()); }
 
+gdxvk::Resources& res(jlong ctx) { return *reinterpret_cast<gdxvk::Context*>(ctx)->handles().resources; }
+
+// Java passes small ints: filters 0 nearest / 1 linear, wrap 0 repeat / 1 clamp / 2 mirror.
+gdxvk::SamplerKey samplerKey(jint minF, jint magF, jint mipF, jint wrapU, jint wrapV, jint aniso) {
+    auto filter = [](jint v) { return v == 0 ? VK_FILTER_NEAREST : VK_FILTER_LINEAR; };
+    auto wrap = [](jint v) {
+        return v == 0 ? VK_SAMPLER_ADDRESS_MODE_REPEAT
+                      : v == 2 ? VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    };
+    gdxvk::SamplerKey k;
+    k.minFilter = filter(minF);
+    k.magFilter = filter(magF);
+    k.mipmapMode = mipF == 0 ? VK_SAMPLER_MIPMAP_MODE_NEAREST : VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    k.wrapU = wrap(wrapU);
+    k.wrapV = wrap(wrapV);
+    k.anisotropy = static_cast<uint32_t>(aniso < 1 ? 1 : aniso);
+    return k;
+}
+
 } // namespace
 
 extern "C" {
 
 JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreate(JNIEnv* env, jclass, jboolean validation,
                                                                                   jboolean forceTierB, jint deviceIndex,
-                                                                                  jint requestedMinor, jstring appName) {
+                                                                                  jint requestedMinor, jstring appName,
+                                                                                  jstring pipelineCachePath) {
     gdxvk::ContextConfig cfg;
     cfg.enableValidation = validation == JNI_TRUE;
     cfg.forceTierB = forceTierB == JNI_TRUE;
@@ -47,6 +72,13 @@ JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreate
         if (chars != nullptr) {
             cfg.appName = chars;
             env->ReleaseStringUTFChars(appName, chars);
+        }
+    }
+    if (pipelineCachePath != nullptr) {
+        const char* chars = env->GetStringUTFChars(pipelineCachePath, nullptr);
+        if (chars != nullptr) {
+            cfg.pipelineCachePath = chars;
+            env->ReleaseStringUTFChars(pipelineCachePath, chars);
         }
     }
     std::string error, kind;
@@ -126,14 +158,23 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeEndFram
 }
 
 // SPIR-V arrives as byte[] (little-endian words); returns the pipeline id or -1.
-JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreatePipeline(JNIEnv* env, jclass, jlong handle, jbyteArray vert,
-                                                                                         jbyteArray frag) {
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreatePipeline(JNIEnv* env, jclass, jlong handle, jstring name,
+                                                                                         jbyteArray vert, jbyteArray frag) {
     const jsize vn = env->GetArrayLength(vert), fn = env->GetArrayLength(frag);
     if (vn % 4 != 0 || fn % 4 != 0) return -1;
     std::vector<uint32_t> v(static_cast<size_t>(vn) / 4), f(static_cast<size_t>(fn) / 4);
     env->GetByteArrayRegion(vert, 0, vn, reinterpret_cast<jbyte*>(v.data()));
     env->GetByteArrayRegion(frag, 0, fn, reinterpret_cast<jbyte*>(f.data()));
-    return static_cast<jint>(reinterpret_cast<gdxvk::Presenter*>(handle)->createPipeline(v.data(), v.size(), f.data(), f.size()));
+    std::string label = "(unnamed)";
+    if (name != nullptr) {
+        const char* chars = env->GetStringUTFChars(name, nullptr);
+        if (chars != nullptr) {
+            label = chars;
+            env->ReleaseStringUTFChars(name, chars);
+        }
+    }
+    return static_cast<jint>(
+        reinterpret_cast<gdxvk::Presenter*>(handle)->createPipeline(label.c_str(), v.data(), v.size(), f.data(), f.size()));
 }
 
 JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDraw(JNIEnv* env, jclass, jlong handle, jint pipeline,
@@ -191,6 +232,9 @@ JNIEXPORT jobjectArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativ
         "minUniformBufferOffsetAlignment", std::to_string(i.minUniformBufferOffsetAlignment),
         "minStorageBufferOffsetAlignment", std::to_string(i.minStorageBufferOffsetAlignment),
         "graphicsQueueFamily", std::to_string(i.graphicsQueueFamily),
+        "maxUniformBufferRange", std::to_string(i.maxUniformBufferRange),
+        "timelineSemaphores", i.timelineSemaphores ? "true" : "false",
+        "pipelineCacheLoadedBytes", std::to_string(i.pipelineCacheLoadedBytes),
     };
     jclass strCls = env->FindClass("java/lang/String");
     jobjectArray out = env->NewObjectArray(static_cast<jsize>(kv.size()), strCls, nullptr);
@@ -201,6 +245,100 @@ JNIEXPORT jobjectArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativ
     }
     env->DeleteLocalRef(strCls);
     return out;
+}
+
+// ---- Resources (buffers and textures) --------------------------------------------------------------------------------------
+
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateBuffer(JNIEnv*, jclass, jlong ctx, jlong size) {
+    return static_cast<jint>(res(ctx).createBuffer(static_cast<uint64_t>(size)));
+}
+
+JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeWriteBuffer(JNIEnv* env, jclass, jlong ctx, jint id,
+                                                                                          jlong offset, jbyteArray data, jint start,
+                                                                                          jint length) {
+    jbyte* p = static_cast<jbyte*>(env->GetPrimitiveArrayCritical(data, nullptr));
+    if (p == nullptr) return JNI_FALSE;
+    const bool ok = res(ctx).writeBuffer(id, static_cast<uint64_t>(offset), p + start, static_cast<uint64_t>(length));
+    env->ReleasePrimitiveArrayCritical(data, p, JNI_ABORT);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDestroyBuffer(JNIEnv*, jclass, jlong ctx, jint id) {
+    res(ctx).destroyBuffer(id);
+}
+
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateTexture(JNIEnv* env, jclass, jlong ctx, jint width,
+                                                                                        jint height, jbyteArray rgba, jint minFilter,
+                                                                                        jint magFilter, jint mipFilter, jint wrapU,
+                                                                                        jint wrapV, jint anisotropy) {
+    if (rgba == nullptr || env->GetArrayLength(rgba) < width * height * 4) return -1;
+    jbyte* p = static_cast<jbyte*>(env->GetPrimitiveArrayCritical(rgba, nullptr));
+    if (p == nullptr) return -1;
+    const int id = res(ctx).createTexture(static_cast<uint32_t>(width), static_cast<uint32_t>(height), p,
+                                          samplerKey(minFilter, magFilter, mipFilter, wrapU, wrapV, anisotropy));
+    env->ReleasePrimitiveArrayCritical(rgba, p, JNI_ABORT);
+    return id;
+}
+
+JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeSetTextureSampler(JNIEnv*, jclass, jlong ctx, jint id,
+                                                                                                jint minFilter, jint magFilter,
+                                                                                                jint mipFilter, jint wrapU, jint wrapV,
+                                                                                                jint anisotropy) {
+    return res(ctx).setTextureSampler(id, samplerKey(minFilter, magFilter, mipFilter, wrapU, wrapV, anisotropy)) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDestroyTexture(JNIEnv*, jclass, jlong ctx, jint id) {
+    res(ctx).destroyTexture(id);
+}
+
+// Tier A: the slot in the bindless table. Tier B: 0 (the texture is bound by descriptor set). -1: no such texture.
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeTextureSlot(JNIEnv*, jclass, jlong ctx, jint id) {
+    int slot = -1;
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    if (!res(ctx).textureBinding(id, &slot, &set)) return -1;
+    return reinterpret_cast<gdxvk::Context*>(ctx)->handles().tierA ? slot : 0;
+}
+
+JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeFlushUploads(JNIEnv*, jclass, jlong ctx) {
+    return res(ctx).flushUploads() ? JNI_TRUE : JNI_FALSE;
+}
+
+// Runs the deletions the GPU has finished with; returns how many ran.
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCollectGarbage(JNIEnv*, jclass, jlong ctx) {
+    const gdxvk::ContextHandles& h = reinterpret_cast<gdxvk::Context*>(ctx)->handles();
+    h.staging->collect(h.timeline->completed());
+    return static_cast<jint>(h.deletion->collect());
+}
+
+// [buffersLive, texturesLive, slotsInUse, samplers, stagingBlocks, bufferBytesLive, poolBytes, retiredPending, totalRetired,
+//  vmaBlockBytes, vmaAllocationBytes, completedSerial]
+JNIEXPORT jlongArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeResourceStats(JNIEnv* env, jclass, jlong ctx) {
+    const gdxvk::Resources::Stats s = res(ctx).stats();
+    const jlong v[12] = {s.buffersLive, s.texturesLive, s.slotsInUse, s.samplers, s.stagingBlocks,
+                         static_cast<jlong>(s.bufferBytesLive), static_cast<jlong>(s.poolBytes), static_cast<jlong>(s.retiredPending),
+                         static_cast<jlong>(s.totalRetired), static_cast<jlong>(s.vmaBlockBytes),
+                         static_cast<jlong>(s.vmaAllocationBytes), static_cast<jlong>(s.completedSerial)};
+    jlongArray out = env->NewLongArray(12);
+    env->SetLongArrayRegion(out, 0, 12, v);
+    return out;
+}
+
+// ---- Presenter: Set 0 and Set 1 -------------------------------------------------------------------------------------------
+
+JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeBindFrameData(JNIEnv* env, jclass, jlong handle,
+                                                                                            jbyteArray uniform, jint uniformBytes,
+                                                                                            jbyteArray storage, jint storageBytes) {
+    std::vector<jbyte> u(static_cast<size_t>(uniformBytes)), s(static_cast<size_t>(storageBytes));
+    if (uniformBytes > 0) env->GetByteArrayRegion(uniform, 0, uniformBytes, u.data());
+    if (storageBytes > 0) env->GetByteArrayRegion(storage, 0, storageBytes, s.data());
+    return reinterpret_cast<gdxvk::Presenter*>(handle)->bindFrameData(u.data(), static_cast<uint32_t>(uniformBytes), s.data(),
+                                                                       static_cast<uint64_t>(storageBytes))
+               ? JNI_TRUE
+               : JNI_FALSE;
+}
+
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeBindTexture(JNIEnv*, jclass, jlong handle, jint texture) {
+    return static_cast<jint>(reinterpret_cast<gdxvk::Presenter*>(handle)->bindTexture(texture));
 }
 
 } // extern "C"

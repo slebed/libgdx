@@ -11,6 +11,8 @@ public class GdxVkConfig {
     /** Highest Vulkan 1.x minor version to request (1..4). The effective version is min(device, this). */
     public int maxApiMinor = 3;
     public String applicationName = "gdx-vulkan";
+    /** File for the VkPipelineCache: loaded at startup when it matches this device and driver, saved at shutdown. Null = memory only. */
+    public String pipelineCachePath = null;
 
     public GdxVkConfig() {}
 
@@ -20,6 +22,7 @@ public class GdxVkConfig {
         c.enableValidation = Boolean.getBoolean("gdxvulkan.validation");
         c.forceTierB = Boolean.getBoolean("gdxvulkan.forceTierB");
         c.preferredDeviceIndex = Integer.getInteger("gdxvulkan.device", -1);
+        c.pipelineCachePath = System.getProperty("gdxvulkan.pipelineCache");
         return c;
     }
 }

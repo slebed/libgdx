@@ -5,7 +5,8 @@ final class GdxVkNative {
     private GdxVkNative() {}
 
     /** @throws VulkanLoaderException / VulkanDeviceException / VulkanInitException thrown from native code */
-    static native long nativeCreate(boolean validation, boolean forceTierB, int deviceIndex, int requestedMinor, String appName);
+    static native long nativeCreate(boolean validation, boolean forceTierB, int deviceIndex, int requestedMinor, String appName,
+        String pipelineCachePath);
 
     static native void nativeDestroy(long handle);
 
@@ -19,6 +20,22 @@ final class GdxVkNative {
     /** Android only (the symbol is absent from desktop builds). {@code surface} is an android.view.Surface. */
     static native long nativeCreatePresenterAndroid(long ctx, Object surface, int width, int height, boolean vsync);
 
+    static native int nativeCreateBuffer(long ctx, long size);
+    static native boolean nativeWriteBuffer(long ctx, int id, long offset, byte[] data, int start, int length);
+    static native void nativeDestroyBuffer(long ctx, int id);
+    static native int nativeCreateTexture(long ctx, int width, int height, byte[] rgba, int minFilter, int magFilter, int mipFilter,
+        int wrapU, int wrapV, int anisotropy);
+    static native boolean nativeSetTextureSampler(long ctx, int id, int minFilter, int magFilter, int mipFilter, int wrapU, int wrapV,
+        int anisotropy);
+    static native void nativeDestroyTexture(long ctx, int id);
+    static native int nativeTextureSlot(long ctx, int id);
+    static native boolean nativeFlushUploads(long ctx);
+    static native int nativeCollectGarbage(long ctx);
+    static native long[] nativeResourceStats(long ctx);
+
+    static native boolean nativeBindFrameData(long presenter, byte[] uniform, int uniformBytes, byte[] storage, int storageBytes);
+    static native int nativeBindTexture(long presenter, int texture);
+
     static native void nativeDestroyPresenter(long handle);
 
     static native void nativeResize(long handle, int width, int height);
@@ -29,7 +46,7 @@ final class GdxVkNative {
     static native int nativeEndFrame(long handle, boolean capture);
 
     /** @return pipeline id, or -1 (see nativeLastError) */
-    static native int nativeCreatePipeline(long handle, byte[] vertSpv, byte[] fragSpv);
+    static native int nativeCreatePipeline(long handle, String name, byte[] vertSpv, byte[] fragSpv);
 
     /** @param push exactly 32 floats (the 128-byte push-constant block). Returns a native FrameStatus code. */
     static native int nativeDraw(long handle, int pipeline, int vertexCount, float[] push);
