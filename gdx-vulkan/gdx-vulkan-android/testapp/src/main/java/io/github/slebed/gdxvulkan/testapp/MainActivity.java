@@ -105,12 +105,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             TestLog.i(TAG, "device=" + context.caps().deviceName + " driver=" + context.caps().driverInfo + " tier=" + context.caps().tier
                 + " forced=" + context.caps().tierForced + " validation=" + context.caps().validationEnabled);
         }
-        presenter = context.createPresenterAndroid(holder.getSurface(), width, height, true);
+        presenter = context.createPresenterAndroid(holder.getSurface(), width, height, getIntent().getBooleanExtra("vsync", true));
         pipeline = presenter.createPipeline("triangle", GdxVkShaders.load("triangle.vert"), GdxVkShaders.load("triangle.frag"));
         TestLog.i(TAG, "swapchain " + presenter.width() + "x" + presenter.height() + " vkFormat=" + presenter.vkFormat() + " images="
             + presenter.imageCount());
         SelfTest.run(presenter, pipeline);
         TestLog.i(TAG, "validationMessages=" + context.validationMessageCount());
+        if (getIntent().getBooleanExtra("suite", false)) {
+            // Phase 1b / Phase 2 device run; the triangle loop stays off so the suite owns the swapchain.
+            try {
+                DeviceSuite.run(context, presenter, getIntent().getIntExtra("soakSeconds", 20), getIntent().getIntExtra("stressSeconds", 5));
+            } catch (Throwable t) {
+                TestLog.e(TAG, "DEVICESUITE FAIL (setup)", t);
+            }
+            return;
+        }
         startNanos = System.nanoTime();
         render.post(frame);
     }

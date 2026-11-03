@@ -20,6 +20,17 @@ android {
     }
 }
 
+configurations { natives }
+
 dependencies {
     implementation project(':library')
+    natives "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-arm64-v8a" // libgdx.so: Pixmap's gdx2d, for the device suite
 }
+
+def nativesDir = layout.buildDirectory.dir('generated/jniLibs')
+def copyNatives = tasks.register('copyGdxNatives', Copy) {
+    from({ configurations.natives.collect { zipTree(it) } }) { include '*.so' }
+    into nativesDir.map { it.dir('arm64-v8a') }
+}
+android.sourceSets.main.jniLibs.srcDir nativesDir
+tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn copyNatives }

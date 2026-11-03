@@ -20,7 +20,11 @@ size_t DeletionQueue::collect() {
         size_t keep = 0;
         for (size_t i = 0; i < items_.size(); ++i) {
             if (items_[i].serial <= done) ready.push_back(std::move(items_[i]));
-            else items_[keep++] = std::move(items_[i]);
+            else {
+                // keep == i until the first item is removed, and a self-move-assigned std::function is empty on libc++ (found on Android).
+                if (keep != i) items_[keep] = std::move(items_[i]);
+                ++keep;
+            }
         }
         items_.resize(keep);
     }
