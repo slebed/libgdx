@@ -52,6 +52,18 @@ final class GdxVkNative {
     static native int nativeCreatePipeline(long handle, String name, byte[] vertSpv, byte[] fragSpv);
 
     /** @param push exactly 32 floats (the 128-byte push-constant block). Returns a native FrameStatus code. */
+    static native int nativeCreatePipelineEx(long handle, String name, byte[] vertSpv, byte[] fragSpv, int[] desc);
+
+    /** (block << 48) | offset, or -1 */
+    static native long nativeAllocVertex(long handle, long bytes);
+
+    static native java.nio.ByteBuffer nativeVertexBlock(long handle, int block);
+
+    static native void nativeFlushVertices(long handle, int block, long offset, long bytes);
+
+    /** Replays a command stream held in a direct ByteBuffer. Returns a native FrameStatus code. */
+    static native int nativeSubmitCommands(long handle, java.nio.ByteBuffer stream, int bytes);
+
     static native int nativeDraw(long handle, int pipeline, int vertexCount, float[] push);
 
     /** RGBA8 pixels of the last captured frame. */

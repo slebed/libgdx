@@ -16,6 +16,10 @@
 
 #include "gdxvk_internal.h"
 
+#include <cstring>
+
+#include "gdxvk_commands.h"
+
 #include "gdxvk_caches.h"
 #include "gdxvk_deletion.h"
 #include "gdxvk_layout.h"
@@ -39,6 +43,27 @@ FrameStatus mapResult(VkResult r) {
         case VK_ERROR_OUT_OF_HOST_MEMORY:
         case VK_ERROR_OUT_OF_DEVICE_MEMORY: return FrameStatus::OutOfMemory;
         default: return FrameStatus::Error;
+    }
+}
+
+VkBlendFactor blendFactor(uint32_t gl) {
+    switch (gl) {
+        case 0: return VK_BLEND_FACTOR_ZERO;
+        case 1: return VK_BLEND_FACTOR_ONE;
+        case 0x0300: return VK_BLEND_FACTOR_SRC_COLOR;
+        case 0x0301: return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+        case 0x0302: return VK_BLEND_FACTOR_SRC_ALPHA;
+        case 0x0303: return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        case 0x0304: return VK_BLEND_FACTOR_DST_ALPHA;
+        case 0x0305: return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+        case 0x0306: return VK_BLEND_FACTOR_DST_COLOR;
+        case 0x0307: return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+        case 0x0308: return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
+        case 0x8001: return VK_BLEND_FACTOR_CONSTANT_COLOR; // blend constants are not set by the stream yet (zero)
+        case 0x8002: return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
+        case 0x8003: return VK_BLEND_FACTOR_CONSTANT_ALPHA;
+        case 0x8004: return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+        default: return VK_BLEND_FACTOR_ONE;
     }
 }
 
@@ -85,7 +110,13 @@ struct Presenter::Impl {
     VkRenderPass renderPass = VK_NULL_HANDLE;       // Tier B only
     std::vector<VkFramebuffer> framebuffers;        // Tier B only
 
-    std::vector<VkPipeline> pipelines;
+    struct PipelineRec {
+        VkPipeline pipeline;
+        VkCullModeFlags cull;
+    };
+    std::vector<PipelineRec> pipelines;
+    VkRect2D scissor{};      // command stream state, reset every frame
+    bool scissorOn = false;
 
     bool canCapture = false; // swapchain images support TRANSFER_SRC
     VkBuffer captureBuf = VK_NULL_HANDLE;
@@ -122,7 +153,7 @@ struct Presenter::Impl {
         if (h.device == VK_NULL_HANDLE) return;
         vkDeviceWaitIdle(h.device);
         destroySwapchainViews();
-        for (VkPipeline pl : pipelines) vkDestroyPipeline(h.device, pl, nullptr);
+        for (const PipelineRec& pl : pipelines) vkDestroyPipeline(h.device, pl.pipeline, nullptr);
         pipelines.clear();
         if (captureBuf != VK_NULL_HANDLE) vmaDestroyBuffer(h.allocator, captureBuf, captureAlloc);
         captureBuf = VK_NULL_HANDLE;
@@ -484,6 +515,12 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
         rp.pClearValues = &clear;
         vkCmdBeginRenderPass(f.cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
     }
+    // Defaults for the command stream: the whole target, GL-style (Y up) through the negative-height viewport.
+    const VkViewport vpDefault{0.0f, static_cast<float>(s.extent.height), static_cast<float>(s.extent.width), -static_cast<float>(s.extent.height), 0.0f, 1.0f};
+    s.scissor = {{0, 0}, s.extent};
+    s.scissorOn = false;
+    vkCmdSetViewport(f.cmd, 0, 1, &vpDefault);
+    vkCmdSetScissor(f.cmd, 0, 1, &s.scissor);
     s.frameOpen = true;
     return FrameStatus::Ok;
 }
@@ -594,6 +631,11 @@ FrameStatus Presenter::endFrame(bool capture) {
 }
 
 int Presenter::createPipeline(const char* name, const uint32_t* vertSpv, size_t vertWords, const uint32_t* fragSpv, size_t fragWords) {
+    return createPipelineEx(name, vertSpv, vertWords, fragSpv, fragWords, PipelineDesc());
+}
+
+int Presenter::createPipelineEx(const char* name, const uint32_t* vertSpv, size_t vertWords, const uint32_t* fragSpv, size_t fragWords,
+                                const PipelineDesc& desc) {
     Impl& s = *impl_;
     const ContextHandles& h = s.h;
     const std::string base = name ? name : "(unnamed)";
@@ -622,21 +664,39 @@ int Presenter::createPipeline(const char* name, const uint32_t* vertSpv, size_t 
     stages[1].module = fs;
     stages[1].pName = "main";
 
+    VkVertexInputBindingDescription binding{0, desc.stride, VK_VERTEX_INPUT_RATE_VERTEX};
+    std::vector<VkVertexInputAttributeDescription> attrs;
+    for (const VertexAttribute& a : desc.attributes) attrs.push_back({a.location, 0, static_cast<VkFormat>(a.format), a.offset});
     VkPipelineVertexInputStateCreateInfo vin{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    if (desc.stride > 0) {
+        vin.vertexBindingDescriptionCount = 1;
+        vin.pVertexBindingDescriptions = &binding;
+        vin.vertexAttributeDescriptionCount = static_cast<uint32_t>(attrs.size());
+        vin.pVertexAttributeDescriptions = attrs.data();
+    }
     VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    ia.topology = static_cast<VkPrimitiveTopology>(desc.topology);
     VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
     vp.viewportCount = 1;
     vp.scissorCount = 1;
     VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
     rs.polygonMode = VK_POLYGON_MODE_FILL;
-    rs.cullMode = VK_CULL_MODE_BACK_BIT;            // baked on Tier B, overridden dynamically on Tier A
+    rs.cullMode = static_cast<VkCullModeFlags>(desc.cullMode); // baked on Tier B, set dynamically on Tier A
     rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // swapchain convention (plan decision 6)
     rs.lineWidth = 1.0f;
     VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
     VkPipelineColorBlendAttachmentState cba{};
     cba.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    if (desc.blend) {
+        cba.blendEnable = VK_TRUE;
+        cba.srcColorBlendFactor = blendFactor(desc.srcColor);
+        cba.dstColorBlendFactor = blendFactor(desc.dstColor);
+        cba.colorBlendOp = VK_BLEND_OP_ADD;
+        cba.srcAlphaBlendFactor = blendFactor(desc.srcAlpha);
+        cba.dstAlphaBlendFactor = blendFactor(desc.dstAlpha);
+        cba.alphaBlendOp = VK_BLEND_OP_ADD;
+    }
     VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
     cb.attachmentCount = 1;
     cb.pAttachments = &cba;
@@ -674,7 +734,7 @@ int Presenter::createPipeline(const char* name, const uint32_t* vertSpv, size_t 
         s.error = "vkCreateGraphicsPipelines failed (VkResult " + std::to_string(r) + ")";
         return -1;
     }
-    s.pipelines.push_back(pipeline);
+    s.pipelines.push_back({pipeline, static_cast<VkCullModeFlags>(desc.cullMode)});
     return static_cast<int>(s.pipelines.size() - 1);
 }
 
@@ -683,7 +743,7 @@ FrameStatus Presenter::draw(int pipeline, uint32_t vertexCount, const float push
     if (!s.frameOpen) return s.fail("draw called outside beginFrame/endFrame");
     if (pipeline < 0 || static_cast<size_t>(pipeline) >= s.pipelines.size()) return s.fail("draw: unknown pipeline id");
     VkCommandBuffer cmd = s.frames[s.frameIndex].cmd;
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelines[pipeline]);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelines[pipeline].pipeline);
     // Negative height flips Y so GL clip space (+Y up) lands the right way up (VK_KHR_maintenance1, core in 1.1).
     const float w = static_cast<float>(s.extent.width), hgt = static_cast<float>(s.extent.height);
     const VkViewport viewport{0.0f, hgt, w, -hgt, 0.0f, 1.0f};
@@ -724,6 +784,153 @@ int Presenter::bindTexture(int texture) {
     vkCmdBindDescriptorSets(s.frames[s.frameIndex].cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.h.layouts->pipelineLayout(), 1, 1, &set, 0,
                             nullptr);
     return 0;
+}
+
+bool Presenter::allocVertex(uint64_t bytes, uint32_t* block, uint64_t* offset) {
+    Impl& s = *impl_;
+    return s.frameOpen && s.rings[s.frameIndex]->allocVertex(bytes, block, offset);
+}
+
+uint8_t* Presenter::vertexBlock(uint32_t block, uint64_t* size) { return impl_->rings[impl_->frameIndex]->vertexBlockPtr(block, size); }
+
+void Presenter::flushVertices(uint32_t block, uint64_t offset, uint64_t bytes) { impl_->rings[impl_->frameIndex]->flushVertices(block, offset, bytes); }
+
+FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
+    Impl& s = *impl_;
+    if (!s.frameOpen) return s.fail("submitCommandStream called outside beginFrame/endFrame");
+    VkCommandBuffer cmd = s.frames[s.frameIndex].cmd;
+    FrameRing& ring = *s.rings[s.frameIndex];
+    const int32_t* w = reinterpret_cast<const int32_t*>(data);
+    const size_t n = bytes / 4;
+    const int32_t targetW = static_cast<int32_t>(s.extent.width), targetH = static_cast<int32_t>(s.extent.height);
+
+    auto applyScissor = [&]() {
+        const VkRect2D full{{0, 0}, s.extent};
+        const VkRect2D r = s.scissorOn ? s.scissor : full;
+        vkCmdSetScissor(cmd, 0, 1, &r);
+    };
+    // GL rectangle (origin bottom-left) -> Vulkan (origin top-left), clamped into the target.
+    auto toVk = [&](int32_t x, int32_t y, int32_t rw, int32_t rh) {
+        int32_t x0 = std::max(0, x), x1 = std::min(targetW, x + std::max(0, rw));
+        int32_t top = targetH - (y + std::max(0, rh)), bottom = targetH - y;
+        int32_t y0 = std::max(0, top), y1 = std::min(targetH, bottom);
+        return VkRect2D{{x0, y0}, {static_cast<uint32_t>(std::max(0, x1 - x0)), static_cast<uint32_t>(std::max(0, y1 - y0))}};
+    };
+    auto bits = [](int32_t v) {
+        float f;
+        std::memcpy(&f, &v, sizeof(f));
+        return f;
+    };
+    auto offset64 = [](int32_t lo, int32_t hi) { return (static_cast<uint64_t>(static_cast<uint32_t>(hi)) << 32) | static_cast<uint32_t>(lo); };
+
+    size_t i = 0;
+    while (i < n) {
+        const int32_t op = w[i++];
+        auto need = [&](size_t count) { return i + count <= n; };
+        switch (op) {
+            case cmd::BindPipeline: {
+                if (!need(1)) return s.fail("command stream truncated (BindPipeline)");
+                const int id = w[i++];
+                if (id < 0 || static_cast<size_t>(id) >= s.pipelines.size()) return s.fail("command stream: unknown pipeline id");
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelines[id].pipeline);
+                if (s.h.tierA) {
+                    vkCmdSetCullMode(cmd, s.pipelines[id].cull);
+                    vkCmdSetFrontFace(cmd, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+                }
+                break;
+            }
+            case cmd::PushConstants:
+                if (!need(32)) return s.fail("command stream truncated (PushConstants)");
+                vkCmdPushConstants(cmd, s.h.layouts->pipelineLayout(), DescriptorLayouts::kPushStages, 0, DescriptorLayouts::kPushConstantBytes, w + i);
+                i += 32;
+                break;
+            case cmd::Viewport: {
+                if (!need(4)) return s.fail("command stream truncated (Viewport)");
+                // Negative height: y is the bottom edge in Vulkan's top-left coordinates.
+                const VkViewport v{static_cast<float>(w[i]), static_cast<float>(targetH - w[i + 1]), static_cast<float>(w[i + 2]),
+                                   -static_cast<float>(w[i + 3]), 0.0f, 1.0f};
+                vkCmdSetViewport(cmd, 0, 1, &v);
+                i += 4;
+                break;
+            }
+            case cmd::Scissor:
+                if (!need(4)) return s.fail("command stream truncated (Scissor)");
+                s.scissor = toVk(w[i], w[i + 1], w[i + 2], w[i + 3]);
+                i += 4;
+                applyScissor();
+                break;
+            case cmd::ScissorEnable:
+                if (!need(1)) return s.fail("command stream truncated (ScissorEnable)");
+                s.scissorOn = w[i++] != 0;
+                applyScissor();
+                break;
+            case cmd::Clear: {
+                if (!need(5)) return s.fail("command stream truncated (Clear)");
+                const int32_t mask = w[i];
+                VkClearAttachment att{};
+                att.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                att.colorAttachment = 0;
+                for (int c = 0; c < 4; ++c) att.clearValue.color.float32[c] = bits(w[i + 1 + c]);
+                i += 5;
+                if (mask & cmd::kGlColorBufferBit) {
+                    VkClearRect rect{};
+                    rect.rect = s.scissorOn ? s.scissor : VkRect2D{{0, 0}, s.extent};
+                    rect.layerCount = 1;
+                    if (rect.rect.extent.width > 0 && rect.rect.extent.height > 0) vkCmdClearAttachments(cmd, 1, &att, 1, &rect);
+                }
+                break;
+            }
+            case cmd::BindVertex: {
+                if (!need(3)) return s.fail("command stream truncated (BindVertex)");
+                VkBuffer buf = ring.vertexBlockBuffer(static_cast<uint32_t>(w[i]));
+                const VkDeviceSize off = offset64(w[i + 1], w[i + 2]);
+                i += 3;
+                if (buf == VK_NULL_HANDLE) return s.fail("command stream: unknown vertex block");
+                vkCmdBindVertexBuffers(cmd, 0, 1, &buf, &off);
+                break;
+            }
+            case cmd::BindIndexBuffer: {
+                if (!need(4)) return s.fail("command stream truncated (BindIndexBuffer)");
+                VkBuffer buf;
+                uint64_t base, size;
+                if (!s.h.resources->bufferInfo(w[i], buf, base, size)) return s.fail("command stream: unknown index buffer");
+                vkCmdBindIndexBuffer(cmd, buf, base + offset64(w[i + 1], w[i + 2]), w[i + 3] == 0 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+                i += 4;
+                break;
+            }
+            case cmd::BindIndexRing: {
+                if (!need(4)) return s.fail("command stream truncated (BindIndexRing)");
+                VkBuffer buf = ring.vertexBlockBuffer(static_cast<uint32_t>(w[i]));
+                if (buf == VK_NULL_HANDLE) return s.fail("command stream: unknown index block");
+                vkCmdBindIndexBuffer(cmd, buf, offset64(w[i + 1], w[i + 2]), w[i + 3] == 0 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+                i += 4;
+                break;
+            }
+            case cmd::BindTexture: {
+                if (!need(1)) return s.fail("command stream truncated (BindTexture)");
+                const int tex = w[i++];
+                if (!s.h.tierA) { // Tier A: the table is bound for the whole frame and the slot is in the vertices
+                    int slot;
+                    VkDescriptorSet set;
+                    if (!s.h.resources->textureBinding(tex, &slot, &set)) return s.fail("command stream: unknown texture");
+                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.h.layouts->pipelineLayout(), 1, 1, &set, 0, nullptr);
+                }
+                break;
+            }
+            case cmd::DrawIndexed:
+                if (!need(3)) return s.fail("command stream truncated (DrawIndexed)");
+                vkCmdDrawIndexed(cmd, static_cast<uint32_t>(w[i]), 1, static_cast<uint32_t>(w[i + 1]), w[i + 2], 0);
+                i += 3;
+                break;
+            case cmd::Draw:
+                if (!need(2)) return s.fail("command stream truncated (Draw)");
+                vkCmdDraw(cmd, static_cast<uint32_t>(w[i]), 1, static_cast<uint32_t>(w[i + 1]), 0);
+                i += 2;
+                break;
+            default: return s.fail("command stream: unknown opcode " + std::to_string(op));
+        }
+    }
+    return FrameStatus::Ok;
 }
 
 const std::vector<uint8_t>& Presenter::capturedPixels() const { return impl_->captured; }

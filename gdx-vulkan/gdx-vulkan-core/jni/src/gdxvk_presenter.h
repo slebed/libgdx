@@ -34,6 +34,20 @@ enum class FrameStatus : int {
     Error = 5, // see Presenter::lastError()
 };
 
+// What a pipeline draws with. Vertex input is described by hand (stride + attributes); blend factors are OpenGL enums. Depth is not
+// used yet. `topology` and `format` are raw Vulkan enum values (VK_PRIMITIVE_TOPOLOGY_*, VK_FORMAT_*).
+struct VertexAttribute {
+    uint32_t location = 0, format = 0, offset = 0;
+};
+struct PipelineDesc {
+    uint32_t stride = 0;
+    std::vector<VertexAttribute> attributes;
+    uint32_t topology = 3; // VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+    uint32_t cullMode = 2; // VK_CULL_MODE_BACK_BIT (0 = none, 1 = front, 2 = back)
+    bool blend = false;
+    uint32_t srcColor = 1, dstColor = 0, srcAlpha = 1, dstAlpha = 0; // GL_ONE, GL_ZERO
+};
+
 class Presenter {
 public:
     // Returns null and fills `error` / `errorKind` ("device" or "init") on failure.
@@ -58,6 +72,19 @@ public:
     // Returns the pipeline id, or -1 with lastError() set.
     // Both shaders are reflected first and must fit the device's pipeline layout (gdxvk_reflect.h); `name` appears in the error.
     int createPipeline(const char* name, const uint32_t* vertSpv, size_t vertWords, const uint32_t* fragSpv, size_t fragWords);
+
+    // The general form: vertex layout, topology, cull mode and blend come from `desc`. Used by the batches.
+    int createPipelineEx(const char* name, const uint32_t* vertSpv, size_t vertWords, const uint32_t* fragSpv, size_t fragWords,
+                         const PipelineDesc& desc);
+
+    // Vertex/index memory for the command stream: host-visible, mapped, valid for the frame being recorded. Returns false when
+    // out of memory. A block's address changes only when the ring grows; query it with vertexBlock().
+    bool allocVertex(uint64_t bytes, uint32_t* block, uint64_t* offset);
+    uint8_t* vertexBlock(uint32_t block, uint64_t* size);
+    void flushVertices(uint32_t block, uint64_t offset, uint64_t bytes);
+
+    // Replays a command stream (gdxvk_commands.h) into the open frame. Many streams may be replayed per frame.
+    FrameStatus submitCommandStream(const uint8_t* data, size_t bytes);
 
     // Records a non-indexed draw inside an open frame. `push` is the full 128-byte block (32 floats). Sets the
     // swapchain viewport (negative height, plan decision 6) and scissor, so it needs no other state.

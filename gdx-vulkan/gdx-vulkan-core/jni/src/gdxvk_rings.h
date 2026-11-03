@@ -27,6 +27,13 @@ public:
     // Fails (false) when the uniform data exceeds the 16 KB descriptor range or memory runs out.
     bool allocate(const void* uniform, uint32_t uniformBytes, const void* storage, uint64_t storageBytes, Binding& out);
 
+    // Vertex/index data for the command stream: host-visible blocks, persistently mapped, addressed as (block, offset). Java writes
+    // into the mapped memory directly. Growth appends a block, so earlier (block, offset) pairs stay valid for the frame.
+    bool allocVertex(uint64_t bytes, uint32_t* block, uint64_t* offset);
+    uint8_t* vertexBlockPtr(uint32_t block, uint64_t* size);
+    VkBuffer vertexBlockBuffer(uint32_t block) const;
+    void flushVertices(uint32_t block, uint64_t offset, uint64_t bytes);
+
     // The frame this ring belonged to has completed: rewind, keep only the largest block of each kind, reset the pool.
     void reset();
 
@@ -45,7 +52,7 @@ private:
 
     const ContextHandles& h_;
     VkDeviceSize uniformBlock_, storageBlock_;
-    std::vector<Block> uniform_, storage_; // the last element of each is current
+    std::vector<Block> uniform_, storage_, vertex_; // the last element of each is current
     VkDescriptorPool pool_ = VK_NULL_HANDLE;
     VkDescriptorSet set_ = VK_NULL_HANDLE; // describes (uniform_.back(), storage_.back()) at the time it was written
     VkBuffer setUniform_ = VK_NULL_HANDLE, setStorage_ = VK_NULL_HANDLE;

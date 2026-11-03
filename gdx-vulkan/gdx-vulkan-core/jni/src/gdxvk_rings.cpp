@@ -24,11 +24,13 @@ FrameRing::FrameRing(const ContextHandles& h, VkDeviceSize uniformBlock, VkDevic
     // The first block of each kind exists up front so a "size 0" binding always has something valid to point at.
     addBlock(uniform_, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, std::max<VkDeviceSize>(uniformBlock_, 2 * h_.layouts->uniformRange()));
     addBlock(storage_, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, storageBlock_);
+    addBlock(vertex_, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 4u << 20);
 }
 
 FrameRing::~FrameRing() {
     for (const Block& b : uniform_) destroyBlock(b);
     for (const Block& b : storage_) destroyBlock(b);
+    for (const Block& b : vertex_) destroyBlock(b);
     if (pool_ != VK_NULL_HANDLE) vkDestroyDescriptorPool(h_.device, pool_, nullptr);
 }
 
@@ -122,6 +124,34 @@ bool FrameRing::allocate(const void* uniform, uint32_t uniformBytes, const void*
     return true;
 }
 
+bool FrameRing::allocVertex(uint64_t bytes, uint32_t* block, uint64_t* offset) {
+    if (vertex_.empty() || bytes == 0) return false;
+    const VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    Block* b = &vertex_.back();
+    VkDeviceSize off = alignUp(b->offset, 16);
+    if (off + bytes > b->size) {
+        if (!addBlock(vertex_, usage, std::max<VkDeviceSize>(b->size * 2, alignUp(bytes, 4096)))) return false;
+        b = &vertex_.back();
+        off = 0;
+    }
+    b->offset = off + bytes;
+    *block = static_cast<uint32_t>(vertex_.size() - 1);
+    *offset = off;
+    return true;
+}
+
+uint8_t* FrameRing::vertexBlockPtr(uint32_t block, uint64_t* size) {
+    if (block >= vertex_.size()) return nullptr;
+    *size = vertex_[block].size;
+    return vertex_[block].ptr;
+}
+
+VkBuffer FrameRing::vertexBlockBuffer(uint32_t block) const { return block < vertex_.size() ? vertex_[block].buffer : VK_NULL_HANDLE; }
+
+void FrameRing::flushVertices(uint32_t block, uint64_t offset, uint64_t bytes) {
+    if (block < vertex_.size()) vmaFlushAllocation(h_.allocator, vertex_[block].alloc, offset, bytes);
+}
+
 void FrameRing::reset() {
     // Keep the largest (newest) block of each kind; smaller ones were outgrown.
     while (uniform_.size() > 1) {
@@ -132,6 +162,11 @@ void FrameRing::reset() {
         destroyBlock(storage_.front());
         storage_.erase(storage_.begin());
     }
+    while (vertex_.size() > 1) {
+        destroyBlock(vertex_.front());
+        vertex_.erase(vertex_.begin());
+    }
+    for (Block& b : vertex_) b.offset = 0;
     for (Block& b : uniform_) b.offset = 0;
     for (Block& b : storage_) b.offset = 0;
     if (pool_ != VK_NULL_HANDLE) vkResetDescriptorPool(h_.device, pool_, 0);

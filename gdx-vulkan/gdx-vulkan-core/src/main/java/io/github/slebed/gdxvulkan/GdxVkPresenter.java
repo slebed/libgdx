@@ -67,6 +67,55 @@ public final class GdxVkPresenter implements AutoCloseable {
         return id;
     }
 
+    /** The general form of {@link #createPipeline(String, byte[], byte[])}: vertex layout, topology, culling and blending from {@code desc}. */
+    public int createPipeline(String name, byte[] vertSpv, byte[] fragSpv, GdxVkPipelineDesc desc) {
+        check();
+        int id = GdxVkNative.nativeCreatePipelineEx(handle, name, vertSpv, fragSpv, desc.encode());
+        if (id < 0) throw new GdxVkException(GdxVkNative.nativeLastError(handle));
+        return id;
+    }
+
+    /**
+     * Reserves vertex/index memory for the frame being recorded.
+     *
+     * @return {@code (block << 48) | offset}, to split with {@link #blockOf} and {@link #offsetOf}
+     */
+    public long allocVertex(long bytes) {
+        check();
+        if (!frameOpen) throw new IllegalStateException("allocVertex called outside beginFrame/endFrame");
+        long r = GdxVkNative.nativeAllocVertex(handle, bytes);
+        if (r < 0) throw new VulkanOutOfMemoryException("Could not allocate " + bytes + " bytes of vertex memory");
+        return r;
+    }
+
+    public static int blockOf(long allocation) { return (int)(allocation >>> 48); }
+
+    public static long offsetOf(long allocation) { return allocation & 0xFFFFFFFFFFFFL; }
+
+    /** The mapped memory of a vertex block as a direct buffer (little-endian), valid for the frame. Write, then {@link #flushVertices}. */
+    public java.nio.ByteBuffer vertexBlock(int block) {
+        check();
+        java.nio.ByteBuffer b = GdxVkNative.nativeVertexBlock(handle, block);
+        if (b == null) throw new IllegalArgumentException("No such vertex block: " + block);
+        return b.order(java.nio.ByteOrder.LITTLE_ENDIAN);
+    }
+
+    /** Makes host writes visible to the GPU (a no-op on coherent memory). */
+    public void flushVertices(int block, long offset, long bytes) {
+        check();
+        GdxVkNative.nativeFlushVertices(handle, block, offset, bytes);
+    }
+
+    /** Replays the stream into the open frame and empties it. May be called several times per frame. */
+    public void submit(CommandStream stream) {
+        check();
+        if (!frameOpen) throw new IllegalStateException("submit called outside beginFrame/endFrame");
+        if (stream.isEmpty()) return;
+        int status = GdxVkNative.nativeSubmitCommands(handle, stream.buffer(), stream.sizeInBytes());
+        stream.clear();
+        translate(status);
+    }
+
     /**
      * Records a draw between {@link #beginFrame} and {@link #endFrame}. {@code push} is the whole 128-byte push-constant block
      * as 32 floats (u_transform 0-15, u_color 16-19, u_indices 20-23 as raw int bits, u_custom0/1 24-31).

@@ -4,6 +4,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.IntMap;
 
+import io.github.slebed.gdxvulkan.CommandStream;
 import io.github.slebed.gdxvulkan.GdxVkContext;
 import io.github.slebed.gdxvulkan.GdxVkResources;
 import io.github.slebed.gdxvulkan.GdxVkSampler;
@@ -11,7 +12,9 @@ import io.github.slebed.gdxvulkan.GdxVkSampler;
 import java.nio.Buffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -50,8 +53,22 @@ public class VulkanGL20 extends VulkanGL20Base {
         }
     }
 
+    /**
+     * Told when a texture's native image or sampler changed behind a GL handle (a region update renamed it, mips were rebuilt, a filter
+     * changed). A batch that has the texture in flight uses it to start a new slot, so quads after the change see the new contents and
+     * quads before it keep the old ones (plan, Core decision 4).
+     */
+    public interface TextureRebindListener {
+        void textureRebound(int glHandle);
+    }
+
     private final GdxVkContext context;
     private final GdxVkResources resources;
+    private final List<TextureRebindListener> listeners = new ArrayList<TextureRebindListener>();
+    private CommandStream stream; // ordered state goes here, so it interleaves correctly with the batches' draws
+    private float clearR, clearG, clearB, clearA;
+    private boolean viewportSet, scissorEnabled;
+    private final int[] scissor = new int[4];
     private final IntMap<GlTexture> textures = new IntMap<GlTexture>();
     private final int[] boundTexture = new int[32];
     private int nextHandle = 1;
@@ -125,11 +142,76 @@ public class VulkanGL20 extends VulkanGL20Base {
 
     // ------------------------------------------------------------------------------------------------------- ordered state (tracked)
 
+    /** Where ordered state (clear, viewport, scissor) is written. The frame sets this; without one the state is only tracked. */
+    public void setCommandStream(CommandStream stream) {
+        this.stream = stream;
+    }
+
+    /**
+     * GL state persists across frames but a Vulkan frame starts from defaults, so a new frame re-emits whatever the application set.
+     * Call after {@code setCommandStream} at the start of every frame.
+     */
+    public void replayState() {
+        if (stream == null) return;
+        if (viewportSet) stream.viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        if (scissorEnabled) {
+            stream.scissor(scissor[0], scissor[1], scissor[2], scissor[3]);
+            stream.scissorEnable(true);
+        }
+    }
+
+    public void addTextureRebindListener (TextureRebindListener l) {
+        listeners.add(l);
+    }
+
+    public void removeTextureRebindListener (TextureRebindListener l) {
+        listeners.remove(l);
+    }
+
+    private void rebound (GlTexture t) {
+        for (int i = 0; i < listeners.size(); i++) listeners.get(i).textureRebound(t.handle);
+    }
+
     @Override public void glViewport (int x, int y, int width, int height) {
         viewport[0] = x;
         viewport[1] = y;
         viewport[2] = width;
         viewport[3] = height;
+        viewportSet = true;
+        if (stream != null) stream.viewport(x, y, width, height);
+    }
+
+    @Override public void glScissor (int x, int y, int width, int height) {
+        scissor[0] = x;
+        scissor[1] = y;
+        scissor[2] = width;
+        scissor[3] = height;
+        if (stream != null) stream.scissor(x, y, width, height);
+    }
+
+    @Override public void glEnable (int cap) {
+        if (cap == GL_SCISSOR_TEST) {
+            scissorEnabled = true;
+            if (stream != null) stream.scissorEnable(true);
+        }
+    }
+
+    @Override public void glDisable (int cap) {
+        if (cap == GL_SCISSOR_TEST) {
+            scissorEnabled = false;
+            if (stream != null) stream.scissorEnable(false);
+        }
+    }
+
+    @Override public void glClearColor (float red, float green, float blue, float alpha) {
+        clearR = red;
+        clearG = green;
+        clearB = blue;
+        clearA = alpha;
+    }
+
+    @Override public void glClear (int mask) {
+        if (stream != null) stream.clear(mask, clearR, clearG, clearB, clearA);
     }
 
     // ----------------------------------------------------------------------------------------------------------------- textures
@@ -191,6 +273,7 @@ public class VulkanGL20 extends VulkanGL20Base {
             boolean sameShape = c.format == t.format && level < info[2] && width == levelExtent(info[0], level) && height == levelExtent(info[1], level);
             if (sameShape) { // a reload of the same storage: rewrite the level (the native side renames the image)
                 resources.updateTexture(t.nativeId, level, 0, 0, width, height, c.data);
+                rebound(t);
                 return;
             }
             if (level != 0) {
@@ -202,6 +285,7 @@ public class VulkanGL20 extends VulkanGL20Base {
             t.appliedSampler = null;
             java.util.Arrays.fill(t.levelData, null);
             t.generateMips = false;
+            rebound(t);
         }
         t.levelData[level] = c.data;
         t.levelW[level] = width;
@@ -219,6 +303,7 @@ public class VulkanGL20 extends VulkanGL20Base {
         if (c.format != t.format) throw new GdxRuntimeException("gdx-vulkan: glTexSubImage2D format differs from the texture's");
         if (t.nativeId >= 0) {
             resources.updateTexture(t.nativeId, level, xoffset, yoffset, width, height, c.data);
+            rebound(t);
             return;
         }
         byte[] dst = t.levelData[level];
@@ -231,7 +316,10 @@ public class VulkanGL20 extends VulkanGL20Base {
 
     @Override public void glGenerateMipmap (int target) {
         GlTexture t = bound(target);
-        if (t.nativeId >= 0) resources.regenerateMips(t.nativeId);
+        if (t.nativeId >= 0) {
+            resources.regenerateMips(t.nativeId);
+            rebound(t);
+        }
         else if (t.levelData[0] != null) t.generateMips = true;
     }
 
@@ -307,6 +395,7 @@ public class VulkanGL20 extends VulkanGL20Base {
         if (same(s, t.appliedSampler)) return;
         resources.setSampler(t.nativeId, s);
         t.appliedSampler = s;
+        rebound(t);
     }
 
     /**
@@ -343,6 +432,11 @@ public class VulkanGL20 extends VulkanGL20Base {
         t.appliedSampler = s;
         java.util.Arrays.fill(t.levelData, null); // the image owns the pixels now
         return t.nativeId;
+    }
+
+    /** The bindless-table slot (Tier A) or 0 (Tier B) of a native texture; it changes whenever the texture is rebound. */
+    public int slotOf (int nativeTexture) {
+        return resources.slotOf(nativeTexture);
     }
 
     /** Textures the shim currently knows (GL names, not native images). */

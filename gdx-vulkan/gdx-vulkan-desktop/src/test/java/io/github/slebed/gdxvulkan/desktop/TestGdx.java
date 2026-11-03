@@ -20,6 +20,9 @@ import java.lang.reflect.Proxy;
 final class TestGdx {
     private TestGdx() {}
 
+    /** What {@code Gdx.graphics.getWidth()} etc. answer; set to the window's framebuffer size. */
+    static volatile int width = 64, height = 64;
+
     static VulkanGL20 install(GdxVkContext ctx) {
         GdxNativesLoader.load(); // gdx2d, for Pixmap
         final VulkanGL20 gl = new VulkanGL20(ctx);
@@ -35,6 +38,14 @@ final class TestGdx {
                 switch (m.getName()) {
                 case "supportsExtension": return gl.supportsExtension((String)a[0]);
                 case "getGL20": return gl;
+                case "getWidth":
+                case "getBackBufferWidth": return width;
+                case "getHeight":
+                case "getBackBufferHeight": return height;
+                case "getDensity": return 1f;
+                case "getPpiX":
+                case "getPpiY": return 96f;
+                case "getDeltaTime": return 1f / 60f;
                 default: return defaultFor(m.getReturnType());
                 }
             }

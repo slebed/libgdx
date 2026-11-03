@@ -378,4 +378,74 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeBindTex
     return static_cast<jint>(reinterpret_cast<gdxvk::Presenter*>(handle)->bindTexture(texture));
 }
 
+// ---- Command stream, general pipelines, vertex ring -----------------------------------------------------------------------
+
+// desc: [stride, topology, cullMode, blend, srcColor, dstColor, srcAlpha, dstAlpha, attributeCount, (location, format, offset)...]
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreatePipelineEx(JNIEnv* env, jclass, jlong handle, jstring name,
+                                                                                           jbyteArray vert, jbyteArray frag,
+                                                                                           jintArray desc) {
+    const jsize vn = env->GetArrayLength(vert), fn = env->GetArrayLength(frag), dn = env->GetArrayLength(desc);
+    if (vn % 4 != 0 || fn % 4 != 0 || dn < 9) return -1;
+    std::vector<uint32_t> v(static_cast<size_t>(vn) / 4), f(static_cast<size_t>(fn) / 4);
+    env->GetByteArrayRegion(vert, 0, vn, reinterpret_cast<jbyte*>(v.data()));
+    env->GetByteArrayRegion(frag, 0, fn, reinterpret_cast<jbyte*>(f.data()));
+    std::vector<jint> d(static_cast<size_t>(dn));
+    env->GetIntArrayRegion(desc, 0, dn, d.data());
+    gdxvk::PipelineDesc pd;
+    pd.stride = static_cast<uint32_t>(d[0]);
+    pd.topology = static_cast<uint32_t>(d[1]);
+    pd.cullMode = static_cast<uint32_t>(d[2]);
+    pd.blend = d[3] != 0;
+    pd.srcColor = static_cast<uint32_t>(d[4]);
+    pd.dstColor = static_cast<uint32_t>(d[5]);
+    pd.srcAlpha = static_cast<uint32_t>(d[6]);
+    pd.dstAlpha = static_cast<uint32_t>(d[7]);
+    const int count = d[8];
+    if (dn < 9 + count * 3) return -1;
+    for (int a = 0; a < count; ++a) {
+        gdxvk::VertexAttribute attr;
+        attr.location = static_cast<uint32_t>(d[9 + a * 3]);
+        attr.format = static_cast<uint32_t>(d[10 + a * 3]);
+        attr.offset = static_cast<uint32_t>(d[11 + a * 3]);
+        pd.attributes.push_back(attr);
+    }
+    std::string label = "(unnamed)";
+    if (name != nullptr) {
+        const char* chars = env->GetStringUTFChars(name, nullptr);
+        if (chars != nullptr) {
+            label = chars;
+            env->ReleaseStringUTFChars(name, chars);
+        }
+    }
+    return static_cast<jint>(reinterpret_cast<gdxvk::Presenter*>(handle)->createPipelineEx(label.c_str(), v.data(), v.size(), f.data(), f.size(), pd));
+}
+
+// (block << 48) | offset, or -1
+JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeAllocVertex(JNIEnv*, jclass, jlong handle, jlong bytes) {
+    uint32_t block;
+    uint64_t offset;
+    if (!reinterpret_cast<gdxvk::Presenter*>(handle)->allocVertex(static_cast<uint64_t>(bytes), &block, &offset)) return -1;
+    return (static_cast<jlong>(block) << 48) | static_cast<jlong>(offset);
+}
+
+// The whole block as a direct ByteBuffer over the mapped memory (valid for the frame), or null.
+JNIEXPORT jobject JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeVertexBlock(JNIEnv* env, jclass, jlong handle, jint block) {
+    uint64_t size = 0;
+    uint8_t* p = reinterpret_cast<gdxvk::Presenter*>(handle)->vertexBlock(static_cast<uint32_t>(block), &size);
+    return p == nullptr ? nullptr : env->NewDirectByteBuffer(p, static_cast<jlong>(size));
+}
+
+JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeFlushVertices(JNIEnv*, jclass, jlong handle, jint block, jlong offset,
+                                                                                        jlong bytes) {
+    reinterpret_cast<gdxvk::Presenter*>(handle)->flushVertices(static_cast<uint32_t>(block), static_cast<uint64_t>(offset), static_cast<uint64_t>(bytes));
+}
+
+// `stream` is a direct ByteBuffer; returns a FrameStatus code.
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeSubmitCommands(JNIEnv* env, jclass, jlong handle, jobject stream,
+                                                                                         jint bytes) {
+    const uint8_t* p = static_cast<const uint8_t*>(env->GetDirectBufferAddress(stream));
+    if (p == nullptr) return static_cast<jint>(gdxvk::FrameStatus::Error);
+    return static_cast<jint>(reinterpret_cast<gdxvk::Presenter*>(handle)->submitCommandStream(p, static_cast<size_t>(bytes)));
+}
+
 } // extern "C"
