@@ -32,7 +32,7 @@ Native core (`gdx-vulkan-core/jni/src`), one file per subsystem, all owned by `C
   and recorded at `endFrame` in the upload command buffer (before the render pass); `CommandStream.bindStorage` binds a resource buffer as Set 0 storage.
   Phase 3 stage 1 (colour framebuffers): `CommandStream.bindTarget` + `BindTarget` op; `Presenter::Impl` owns the pass state machine (`beginPass`/`endPass`,
   lazy begin, viewport/scissor/front face re-derived per target), pipelines are built per (colour format, offscreen) variant from kept shader modules,
-  Tier B render pass variants must have identical subpass dependencies to stay compatible. Depth/stencil: `Resources::createDepthImage` (one combined image per framebuffer), `BindTarget` carries the depth id, `DepthState`/`StencilState` ops, `Impl::dsState` (Tier A dynamic, Tier B baked into pipeline variants; stencil reference and masks dynamic on both), render pass variants per clear flags. Not done: swapchain depth (Phase 5), Gate 3 oracle, Stress 3.
+  Tier B render pass variants must have identical subpass dependencies to stay compatible. Depth/stencil: `Resources::createDepthImage` (one combined image per framebuffer), `BindTarget` carries the depth id, `DepthState`/`StencilState` ops, `Impl::dsState` (Tier A dynamic, Tier B baked into pipeline variants; stencil reference and masks dynamic on both), render pass variants per clear flags. Gate 3: `Gate3Scenes` (2D+3D into framebuffers; Scene2D UI through four ping-pong post passes; GLSL `Fx` on stock GL, SPIR-V `fx_*.frag` bundles on gdx-vulkan), `Gate3GoldenTest`, `GlReferenceMain` renders the references; exact vs stock GL everywhere. Note: Docker runs need `-v <repo>/tests/gdx-tests-android/assets:/assets:ro` or Gate 2/3 are skipped. Not done: swapchain depth (Phase 5), Stress 3, pass scheduling, `VulkanMultiTargetFrameBuffer`, the Gate 3 scenes on the phone.
   Not done: Tier A 1-texture parity with stock GL (0.91x)
 
 Tests (`gdx-vulkan-desktop`): `TextureShimTest`, `SpriteBatchTest`, `InstancedBatchTest`, `FrameBufferTest`, `Gate2GoldenTest` (7 scenes: stock-GL oracle with tolerance, then exact lavapipe goldens),
@@ -42,7 +42,7 @@ via its own Gradle task `soakTest` (`-Dgdxvulkan.soakSeconds=600` for the full r
 `ci/Dockerfile` + `ci/run-checks.sh` (see `ci/README.md`). Android: `gdx-vulkan-android` (separate Gradle 8.14/AGP 8.13 build).
 
 Open items: 10-minute soak in Tier B (desktop and Android); Adreno Tier A throughput (see below); Wayland/macOS; debug-utils object names; armeabi-v7a/x86_64;
-CI has never run on GitHub itself; `VulkanSpriteBatchInstanced`; Phases 3-6.
+`VulkanSpriteBatchInstanced`; Phases 3-6.
 `./gradlew :gdx-vulkan-desktop:stressInstanced -Dgdxvulkan.device=1` is the instanced sprite stress test (1M sprites; not the plan's Stress test 3, which is Phase 3). `./gradlew :gdx-vulkan-desktop:stress2` is Stress test 2 (stock GL vs VulkanSpriteBatch, each in its own JVM). Note GL runs on the display GPU, so a
 second-GPU Vulkan comparison is capped by presentation and means nothing.
 

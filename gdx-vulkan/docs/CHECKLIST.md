@@ -16,12 +16,12 @@ the plan names.
 | Phase 1a: Extraction, window surfaces and CI | 13 | 7 | 2 | 22 |
 | Phase 1b: Memory, layout and caches | 15 | 2 | 3 | 20 |
 | Phase 2: Unmodified 2D | 20 | 4 | 1 | 25 |
-| Phase 3: Stock FrameBuffer | 4 | 1 | 8 | 13 |
+| Phase 3: Stock FrameBuffer | 6 | 2 | 5 | 13 |
 | Phase 4: Android lifecycle | 0 | 2 | 10 | 12 |
 | Phase 5: 3D with stock models | 0 | 0 | 12 | 12 |
 | Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 1 | 0 | 4 | 5 |
-| **All** | **83** | **23** | **63** | **169** |
+| **All** | **85** | **24** | **60** | **169** |
 ---
 
 ## Core decisions
@@ -88,7 +88,7 @@ the plan names.
 - [x] Tier A bindless table with no flush on texture switch (the batch side is Phase 2); Tier B per-texture sets
 - [ ] Tier B flush on texture switch (a batch concern, Phase 2)
 - [x] `forceTierB` runs Tier B anywhere (`GdxVkConfig.forceTierB`; the plan calls it `VulkanApplicationConfiguration.forceTierB`)
-- [x] CI runs every test in both tiers (`ci/run-checks.sh`; not yet executed on GitHub itself)
+- [x] CI runs every test in both tiers (`ci/run-checks.sh`; first executed on GitHub on 2026-11-03: workflow run 41735391607 for commit 61b156d58 passed in 2m24s)
 - [~] Device tests: RTX 5080 and RTX 2080 both tiers; Android phone (Adreno 840) both tiers, Phase 1a self-test and the Phase 1b/2 device suite; **no Galaxy S20**
 
 ### 8. Test oracle
@@ -228,11 +228,11 @@ the plan names.
 
 ### 4. Extras
 - [ ] `VulkanMultiTargetFrameBuffer` (multiple render targets, float attachments)
-- [ ] Tier B render-pass cache keyed by formats and samples
+- [x] Tier B render-pass cache keyed by colour and depth format and the clear flags (samples are always 1); pipelines are built per target variant and cached on their record
 
 ### Gate 3 and stress test 3
-- [ ] 2D and 3D scene into a stock `FrameBuffer`, `region.flip(false, true)`, matches stock GL on llvmpipe within tolerance, both tiers
-- [ ] Clipped Scene2D UI over four ping-pong bloom/CRT passes on stock `FrameBuffer`s: lavapipe CI, RTX 2080, Galaxy S20
+- [x] `gate3_2d3d`: a 2D scene (opaque, translucent and rotated sprites, text) and a 3D scene (perspective camera, two interpenetrating filled boxes and a floor under the depth test) each in a stock `FrameBuffer`, drawn with `region.flip(false, true)`. Matches stock GL exactly (0 differing pixels) on lavapipe vs llvmpipe in both tiers, and on the RTX 5080 and RTX 2080 vs GL on the RTX 5080 (`Gate3GoldenTest`, `Gate3Scenes`, `GlReferenceMain`)
+- [~] `gate3_postfx`: a clipped Scene2D UI (ScrollPane through ScissorStack) into a `FrameBuffer`, then four passes through ping-pong framebuffers (bright pass, horizontal blur, vertical blur, CRT scanlines and vignette with additive bloom). The post shaders are GLSL on stock GL and SPIR-V bundles (`fx_*.frag`) on gdx-vulkan. Exact match with stock GL on lavapipe CI (both tiers) and on the RTX 2080 (and 5080). Not done: the Galaxy S20 (the Adreno 840 phone passes the framebuffer, depth and stencil device checks, but does not run this scene yet)
 - [ ] Stress: 100,000 draws recorded as a pure C++ loop (floor) vs replayed from Java through the command stream
 - [ ] Pass: Java + JNI + C++ recording time <= 1.3x the C++ floor
 

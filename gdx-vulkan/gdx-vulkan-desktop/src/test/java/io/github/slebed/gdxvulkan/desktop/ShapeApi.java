@@ -35,6 +35,17 @@ interface ShapeApi {
 
     void curve(float x1, float y1, float cx1, float cy1, float cx2, float cy2, float x2, float y2, int segments);
 
+    /** 3D: used by the Gate 3 scene, which draws filled boxes under a perspective camera. */
+    void setProjectionMatrix(com.badlogic.gdx.math.Matrix4 matrix);
+
+    void identity();
+
+    void translate(float x, float y, float z);
+
+    void rotate(float axisX, float axisY, float axisZ, float degrees);
+
+    void box(float x, float y, float z, float width, float height, float depth);
+
     void dispose();
 
     static ShapeApi stock() {
@@ -50,6 +61,11 @@ interface ShapeApi {
             public void triangle(float a, float b, float c, float d, float e, float f) { r.triangle(a, b, c, d, e, f); }
             public void arc(float x, float y, float radius, float start, float degrees, int s) { r.arc(x, y, radius, start, degrees, s); }
             public void curve(float a, float b, float c, float d, float e, float f, float g, float h, int s) { r.curve(a, b, c, d, e, f, g, h, s); }
+            public void setProjectionMatrix(com.badlogic.gdx.math.Matrix4 m) { r.setProjectionMatrix(m); }
+            public void identity() { r.identity(); }
+            public void translate(float x, float y, float z) { r.translate(x, y, z); }
+            public void rotate(float ax, float ay, float az, float deg) { r.rotate(ax, ay, az, deg); }
+            public void box(float x, float y, float z, float w, float h, float d) { r.box(x, y, z, w, h, d); }
             public void dispose() { r.dispose(); }
         };
     }
@@ -67,6 +83,11 @@ interface ShapeApi {
             public void triangle(float a, float b, float c, float d, float e, float f) { r.triangle(a, b, c, d, e, f); }
             public void arc(float x, float y, float radius, float start, float degrees, int s) { r.arc(x, y, radius, start, degrees, s); }
             public void curve(float a, float b, float c, float d, float e, float f, float g, float h, int s) { r.curve(a, b, c, d, e, f, g, h, s); }
+            public void setProjectionMatrix(com.badlogic.gdx.math.Matrix4 m) { r.setProjectionMatrix(m); }
+            public void identity() { r.identity(); }
+            public void translate(float x, float y, float z) { r.translate(x, y, z); }
+            public void rotate(float ax, float ay, float az, float deg) { r.rotate(ax, ay, az, deg); }
+            public void box(float x, float y, float z, float w, float h, float d) { r.box(x, y, z, w, h, d); }
             public void dispose() { r.dispose(); }
         };
     }

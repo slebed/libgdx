@@ -25,7 +25,10 @@ public final class GlReferenceMain extends ApplicationAdapter {
     private final File outDir;
     private final FileHandle data;
     private final Gate2Scenes.Scene[] scenes = Gate2Scenes.all();
+    private final Gate3Scenes.Scene[] scenes3 = Gate3Scenes.all();
+    private Gate3Scenes.Fx fx;
     private int next;
+    private int next3;
     private int failures;
     private SpriteBatch batch;
 
@@ -50,7 +53,7 @@ public final class GlReferenceMain extends ApplicationAdapter {
             System.err.println("[gl-reference] could not run: " + t);
             System.exit(2);
         }
-        System.exit(app.failures == 0 && app.next >= app.scenes.length ? 0 : 1);
+        System.exit(app.failures == 0 && app.next >= app.scenes.length && app.next3 >= app.scenes3.length ? 0 : 1);
     }
 
     @Override public void create() {
@@ -60,7 +63,11 @@ public final class GlReferenceMain extends ApplicationAdapter {
 
     @Override public void render() {
         if (next >= scenes.length) {
-            Gdx.app.exit();
+            if (next3 >= scenes3.length) {
+                Gdx.app.exit();
+                return;
+            }
+            renderGate3();
             return;
         }
         Gate2Scenes.Scene scene = scenes[next++];
@@ -97,7 +104,42 @@ public final class GlReferenceMain extends ApplicationAdapter {
         }
     }
 
+    /** The Gate 3 scenes: framebuffers, depth and GLSL post-processing, all on stock libGDX. */
+    private void renderGate3() {
+        Gate3Scenes.Scene scene = scenes3[next3++];
+        final int w = Gdx.graphics.getBackBufferWidth(), h = Gdx.graphics.getBackBufferHeight();
+        try {
+            if (fx == null) fx = Gate3Scenes.glFx();
+            scene.prepare(data, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            float[] bg = Gate3Scenes.BACKGROUND;
+            ScreenUtils.clear(bg[0], bg[1], bg[2], bg[3]);
+            Gdx.gl.glViewport(0, 0, w, h);
+            batch.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
+            scene.draw(new Gate3Scenes.Env() {
+                public com.badlogic.gdx.graphics.g2d.Batch batch() { return batch; }
+
+                public Gate3Scenes.Fx fx() { return fx; }
+
+                public ShapeApi shapes() { return ShapeApi.stock(); }
+            }, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            byte[] rgba = ScreenUtils.getFrameBufferPixels(0, 0, w, h, true); // row 0 at the top
+            BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+            for (int i = 0, p = 0; p < w * h; p++, i += 4) {
+                img.setRGB(p % w, p / w, ((rgba[i + 3] & 0xFF) << 24) | ((rgba[i] & 0xFF) << 16) | ((rgba[i + 1] & 0xFF) << 8) | (rgba[i + 2] & 0xFF));
+            }
+            ImageIO.write(img, "png", new File(outDir, scene.name() + ".png"));
+            System.out.println("[gl-reference] wrote " + scene.name() + " (" + w + "x" + h + ")");
+        } catch (Throwable t) {
+            failures++;
+            System.err.println("[gl-reference] scene " + scene.name() + " failed: " + t);
+            t.printStackTrace();
+        } finally {
+            scene.dispose();
+        }
+    }
+
     @Override public void dispose() {
+        if (fx != null) fx.dispose();
         if (batch != null) batch.dispose();
     }
 }
