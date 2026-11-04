@@ -142,14 +142,12 @@ public class MyGame extends ApplicationAdapter {
 }
 
 public static void main(String[] args) {
-    VulkanDesktopConfiguration config = new VulkanDesktopConfiguration();
-    config.title = "My game";
-    new VulkanDesktopApplication(new MyGame(), config);            // was Lwjgl3Application
+    new VulkanDesktopApplication(new MyGame(), new VulkanDesktopConfiguration());   // was Lwjgl3Application
 }
 ```
 
 `VulkanSpriteBatch` implements the stock `Batch` interface, so anything that takes a `Batch` takes it: `Stage`, `BitmapFont.draw`, `ParticleEffect.draw`,
-`Image`, and so on. (`new Stage(viewport)` makes a stock `SpriteBatch` for itself, so write `new Stage(viewport, new VulkanSpriteBatch())`.)
+`Image`, and so on. `VulkanDesktopConfiguration` takes the settings you would give `Lwjgl3ApplicationConfiguration` (`title`, `width`, `height`, `vsync`, `resizable`, ...), all optional. (`new Stage(viewport)` makes a stock `SpriteBatch` for itself, so write `new Stage(viewport, new VulkanSpriteBatch())`.)
 
 The batches find the running application's frame through `Gdx.graphics`, so create them in `create()` or later, as you would stock ones. If you build the
 Vulkan context yourself (a test, a tool), pass the frame explicitly: `new VulkanSpriteBatch(frame)`.
