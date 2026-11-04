@@ -15,7 +15,7 @@
 //   41..52  cascades 1..3 of a cascaded shadow map: projViewTrans (columns), 4 vec4s each
 //   53      {split 0, split 1, split 2 (view-space distances), -}
 //   54      {texture slot of cascade 1, 2, 3 (int bits), -}
-//   41..    one record of 15 per renderable (instances are consecutive records), selected by gdx_pc.u_indices.x + gl_InstanceIndex * 15:
+//   41..    one record of 15 per renderable (instances are consecutive records), selected by HEADER + gl_InstanceIndex * 15 (a draw's first instance is its first record's number):
 //           0..3 world, 4..6 normal matrix (columns), 7 diffuse colour, 8 specular colour, 9 emissive colour,
 //           10 {shininess, opacity, alphaTest, bone matrices start (vec4 index, 4 per matrix)}, 11 diffuse UV transform {offsetU, offsetV, scaleU, scaleV},
 //           12 specular UV transform, 13 emissive UV transform, 14 normal map UV transform
@@ -91,7 +91,9 @@ mat4 loadMat4(int at) {
 }
 
 void main() {
-    const int inst = gdx_pc.u_indices.x + gl_InstanceIndex * RECORD;
+    // The record is found from gl_InstanceIndex alone (the draw's first instance is its first record's number): an address built from a push constant is
+    // refused by the Adreno 650's compiler once several buffer reads depend on it.
+    const int inst = HEADER + gl_InstanceIndex * RECORD;
     v_inst = inst;
     const mat4 world = loadMat4(inst);
     const vec4 params = gdx_data[inst + 10];

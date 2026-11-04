@@ -13,7 +13,7 @@ import java.nio.IntBuffer;
  */
 public final class CommandStream {
     public static final int BIND_PIPELINE = 1, PUSH_CONSTANTS = 2, VIEWPORT = 3, SCISSOR = 4, SCISSOR_ENABLE = 5, CLEAR = 6, BIND_VERTEX = 7,
-        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13, BIND_TARGET = 14, DEPTH_STATE = 15, STENCIL_STATE = 16, CULL_MODE = 17, PUSH_RANGE = 18, BIND_VERTEX_BUFFER = 19, SET0_DATA = 20, DRAW_INDEXED_INSTANCED = 21, DRAW_INDEXED_INDIRECT = 22;
+        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13, BIND_TARGET = 14, DEPTH_STATE = 15, STENCIL_STATE = 16, CULL_MODE = 17, PUSH_RANGE = 18, BIND_VERTEX_BUFFER = 19, SET0_DATA = 20, DRAW_INDEXED_INSTANCED = 21, DRAW_INDEXED_INDIRECT = 22, DRAW_INSTANCED = 23;
     public static final int INDEX_U16 = 0, INDEX_U32 = 1;
 
     private ByteBuffer buffer;   // the stream as the native side reads it
@@ -296,12 +296,32 @@ public final class CommandStream {
 
     /** {@code instanceCount} instances of an indexed draw; the vertex shader sees {@code gl_InstanceIndex} 0..n-1. */
     public void drawIndexedInstanced(int indexCount, int firstIndex, int vertexOffset, int instanceCount) {
-        ensure(5);
+        drawIndexedInstanced(indexCount, firstIndex, vertexOffset, instanceCount, 0);
+    }
+
+    /**
+     * Instances of an indexed draw whose {@code gl_InstanceIndex} runs from {@code firstInstance} to {@code firstInstance + instanceCount - 1}. A way to give a
+     * draw a number without a push constant: a shader that addresses a buffer with {@code gl_InstanceIndex} reads from the place the draw names, which some drivers
+     * (the Adreno 650's) compile where an address built from a push constant is refused.
+     */
+    public void drawIndexedInstanced(int indexCount, int firstIndex, int vertexOffset, int instanceCount, int firstInstance) {
+        ensure(6);
         put(DRAW_INDEXED_INSTANCED);
         put(indexCount);
         put(firstIndex);
         put(vertexOffset);
         put(instanceCount);
+        put(firstInstance);
+    }
+
+    /** A draw without indices, with {@code gl_InstanceIndex} starting at {@code firstInstance}. */
+    public void drawInstanced(int vertexCount, int firstVertex, int instanceCount, int firstInstance) {
+        ensure(5);
+        put(DRAW_INSTANCED);
+        put(vertexCount);
+        put(firstVertex);
+        put(instanceCount);
+        put(firstInstance);
     }
 
     public void draw(int vertexCount, int firstVertex) {

@@ -2160,10 +2160,17 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 break;
             }
             case cmd::DrawIndexedInstanced:
-                if (!need(4)) return s.fail("command stream truncated (DrawIndexedInstanced)");
+                if (!need(5)) return s.fail("command stream truncated (DrawIndexedInstanced)");
                 if (!s.passOpen() && !s.beginPass(cmd, nullptr)) return s.fail(s.error);
                 s.flushPush(cmd);
-                vkCmdDrawIndexed(cmd, static_cast<uint32_t>(w[i]), static_cast<uint32_t>(w[i + 3]), static_cast<uint32_t>(w[i + 1]), w[i + 2], 0);
+                vkCmdDrawIndexed(cmd, static_cast<uint32_t>(w[i]), static_cast<uint32_t>(w[i + 3]), static_cast<uint32_t>(w[i + 1]), w[i + 2], static_cast<uint32_t>(w[i + 4]));
+                i += 5;
+                break;
+            case cmd::DrawInstanced:
+                if (!need(4)) return s.fail("command stream truncated (DrawInstanced)");
+                if (!s.passOpen() && !s.beginPass(cmd, nullptr)) return s.fail(s.error);
+                s.flushPush(cmd);
+                vkCmdDraw(cmd, static_cast<uint32_t>(w[i]), static_cast<uint32_t>(w[i + 2]), static_cast<uint32_t>(w[i + 1]), static_cast<uint32_t>(w[i + 3]));
                 i += 4;
                 break;
             case cmd::BindStorage: {

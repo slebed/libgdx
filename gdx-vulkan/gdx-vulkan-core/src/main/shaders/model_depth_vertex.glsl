@@ -35,14 +35,14 @@ layout(location = 1) out vec2 v_texCoords0;
 layout(location = 6) out float v_depth;
 layout(location = 7) flat out int v_inst;
 
-const int RECORD = 15;
+const int RECORD = 15, HEADER = 55; // the record of an instance: HEADER + gl_InstanceIndex * RECORD (see model_default_vertex.glsl)
 
 mat4 loadMat4(int at) {
     return mat4(gdx_data[at], gdx_data[at + 1], gdx_data[at + 2], gdx_data[at + 3]);
 }
 
 void main() {
-    const int inst = gdx_pc.u_indices.x + gl_InstanceIndex * RECORD;
+    const int inst = HEADER + gl_InstanceIndex * RECORD;
     v_inst = inst;
     const mat4 world = loadMat4(inst);
 #if HAS_UV

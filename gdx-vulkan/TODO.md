@@ -11,12 +11,7 @@ Legend: **[bug]** something is wrong today, **[verify]** built but not checked o
 
 ## 1. Known bugs and problems
 
-- **[bug] Samsung Galaxy S20 FE (Adreno 650): every `VulkanModelBatch` pipeline fails** with `VK_ERROR_INITIALIZATION_FAILED` and `Adreno-GSL: GPUOBJ_ALLOC Invalid
-  argument`; the driver's compiler also crashes on later pipelines. Narrowed down (stub vertex shader builds; one dynamic storage-buffer read plus a fragment shader
-  that consumes any vertex output fails; not the light loops, cascades or varying count). 2D, framebuffers, compute, instancing and the stock classes on the shim work
-  there. Deferred by the owner ("deal with it along with the other outstanding bugs"). Next step: find the trigger or work around it (for example reading the blob
-  through a uniform buffer or vertex attributes on this driver); decide whether stock `ModelBatch` on the shim (a different shader layout) works on the phone, which would be a fallback.
-  Checklist: Gate 1a "Render correctly on the Galaxy S20", Gate 5 "pipelines build on the Adreno 650".
+- **[fixed 2026-11-04] Samsung Galaxy S20 FE (Adreno 650): every `VulkanModelBatch` pipeline failed.** The driver refuses a vertex shader whose buffer reads are addressed from a push constant; the model shaders now find their record from `gl_InstanceIndex` (the draw's first instance). The S20 passes the whole device suite, 3D included. Cause, measurements and rule: `docs/DRIVER_NOTES.md`; kept out of the shaders by `DriverRulesTest`.
 - **[bug] Adreno 840 (REDMAGIC), modern path, 128 separate textures: 37 fps** (compatibility path 10.4 fps; re-measured 2026-11-04). The one-texture case was fixed (bindless index from
   push constants instead of a varying); the many-texture case was not investigated. Optional, but it is the weak spot of the modern path on that GPU.
 - **[bug] Android: the on-screen keyboard through `Gdx.input` does not work.**
@@ -105,14 +100,14 @@ Plan in the checklist "Releases and adoption testing". Nothing is released; the 
 - **[docs] `docs/PLAN.md` and `libGDX Vulkan Backend Plan v5.0.md` describe the plan, not what exists:** the shader translator (Phase 5b), stock classes through the shim, the shader bundle, GPU timing and the demos
   are not in them. Add a "what was built differently" section, or mark the plan as the original design.
 - **[docs] The checklist's Android "21-check device suite" figures are older** than the 30-check suite (`docs/RELEASE.md` and `CLAUDE.md` were updated; the Phase 4 text was not).
-- **[docs] README performance numbers for RM-11P and S20-FE predate the sprite shader fix and this session's work**; re-measure when the phones are connected over USB.
+- **[docs] README performance numbers for RM-11P predate the sprite shader fix and this session's work in part**; the S20-FE was re-run on 2026-11-04 (see the README).
 - **[housekeeping] The fork's working tree** (`slebed/libgdx`, branch `gdx-vulkan-phase1`) has uncommitted changes to the owner's old LWJGL Vulkan backend (`backends/gdx-backend-vulkan`,
   `tests/gdx-tests-android` assets). They are not part of this project and were left alone; decide separately what to do with them.
 
 ## 7. Suggested order
 
 1. **Phone round over USB** (REDMAGIC): the device suite in both tiers, the stock-class checks, the demos' numbers, timestamps. It closes most of section 2 and refreshes README numbers.
-2. **S20 3D problem** (section 1): it is the one open correctness bug, and the stock-`ModelBatch` fallback may settle it quickly.
+2. ~~S20 3D problem~~ (fixed, see section 1).
 3. **Shim performance** (section 3): integer pipeline keys and a profile of the stock `ModelBatch` path, since "port by changing nothing" is only attractive if it is not slow.
 4. **Demo app on Android and the owner's review**, then the extra demos.
 5. **Documents** (section 6): tick the stale boxes, add the as-built section to the plan.

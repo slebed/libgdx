@@ -13,18 +13,18 @@ the plan names.
 | Section | Done | Partial | Not started | Total |
 |---|---|---|---|---|
 | Core decisions | 54 | 2 | 0 | 56 |
-| Phase 1a: Extraction, window surfaces and CI | 20 | 2 | 0 | 22 |
+| Phase 1a: Extraction, window surfaces and CI | 21 | 1 | 0 | 22 |
 | Phase 1b: Memory, layout and caches | 20 | 0 | 0 | 20 |
 | Phase 2: Unmodified 2D | 25 | 0 | 0 | 25 |
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 12 | 1 | 0 | 13 |
-| Phase 5: 3D with stock models | 9 | 3 | 1 | 13 |
+| Phase 5: 3D with stock models | 10 | 3 | 0 | 13 |
 | Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 27 | 9 | 9 | 45 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
 | Demos (gdx-vulkan-demos) | 4 | 3 | 3 | 10 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **188** | **20** | **30** | **238** |
+| **All** | **190** | **19** | **29** | **238** |
 ---
 
 ## Core decisions
@@ -135,7 +135,7 @@ the plan names.
 ### Gate 1a
 - [x] Clear screen and triangle match goldens in both tiers on lavapipe (Docker run of the CI script)
 - [x] Render correctly on the RTX 2080 (real device index 1, goldens within tolerance, both tiers; earlier claims about the 2080 were invalid, see CLAUDE.md)
-- [~] Render correctly on the "Galaxy S20": the plan's device was not available; the S20 FE 5G (Adreno 650, Vulkan 1.1 driver, so the compatibility path only) runs the 2D, framebuffer, compute, instancing, soak and lifecycle checks (24 of 25 suite checks pass; lifecycle stress 8 cycles, 0 failures, 13 ms surface recreation, Swappy on at 60 Hz). **Fails:** every `VulkanModelBatch` pipeline (3D) with `VK_ERROR_INITIALIZATION_FAILED` and `Adreno-GSL: GPUOBJ_ALLOC Invalid argument` in logcat. Narrowed down: a stub vertex shader that only writes `gl_Position` and one output builds; adding one dynamic storage-buffer read (`gdx_data[push constant]`) fails once the fragment shader consumes any vertex output; a fragment shader that consumes none builds. Not the fragment shader code, light loops, cascades, the flat instance varying (int or uint) or the varying count. Open: find the trigger or work around it
+- [x] Render correctly on the "Galaxy S20": the plan's device was not available; the S20 FE 5G (Adreno 650, Vulkan 1.1 driver, so the compatibility path only) passes the whole device suite, 32 of 32 checks, with 3D (models, knight and fog match the lavapipe goldens, 0 to 2 pixels differ; the GPU-driven instancing runs; stock `ModelBatch` on the shim matches), the lifecycle stress (8 cycles, 0 failures, 13 ms surface recreation, Swappy on at 60 Hz). Until 2026-11-04 every `VulkanModelBatch` pipeline failed there with `VK_ERROR_INITIALIZATION_FAILED` (`Adreno-GSL: GPUOBJ_ALLOC Invalid argument`): the driver refuses a vertex shader whose buffer reads are addressed from a push constant (the model shader found its record from `gdx_pc.u_indices.x`). Found by building probe pipelines on the device (docs/DRIVER_NOTES.md); fixed by naming the record with the draw's first instance and reading it from `gl_InstanceIndex`; `DriverRulesTest` keeps the pattern out of the model shaders
 
 ---
 
@@ -291,7 +291,7 @@ the plan names.
 ### Gate 5 and stress test 5
 - [x] Animated `knight.g3db` via unmodified `G3dModelLoader` + a `ModelBuilder` scene, normal mapping, skeletal animation, directional shadows: `gate5_models`, `gate5_knight`, `gate5_fog` match stock `ModelBatch` on OpenGL with 0 differing pixels and `gate5_shadows` with 1 (all within tolerance), `gate5_textures` exactly; `gate5_normalmap` has no stock equivalent and has its own lavapipe golden and a check that the mapped box shows far more detail than the plain one. All have lavapipe goldens; on the Adreno 840 they match them in both tiers (the Tier A-only scenes in Tier A)
 - [x] 250,000 instanced textured meshes moved by compute boids, 500 point lights culled in compute: `Stress5Main` (`gradlew :gdx-vulkan-desktop:stress5`), `boids.comp` (grid-based boids), `gpu_cull.comp`, `light_cull.comp`, `gpu_lit.vert/.frag`
-- [ ] `VulkanModelBatch` pipelines build on the Adreno 650 (Galaxy S20 FE): fails today, see "Render correctly on the Galaxy S20" above
+- [x] `VulkanModelBatch` pipelines build on the Adreno 650 (Galaxy S20 FE): fixed, see "Render correctly on the Galaxy S20" above and docs/DRIVER_NOTES.md
 - [~] Pass: 60+ fps on the RTX 2080 (495 fps average, 1% low 259, both tiers; RTX 5080 957-988 fps), 50,000 instances and 64 lights at 60 fps on a phone (Adreno 840, 1216x2688, vsync off: 781 fps in Tier A, 785 in Tier B; 250,000 instances and 500 lights: 52 fps; **not the Galaxy S20**), zero Java allocations per frame (0.6-1.2 bytes per frame measured over 12 s, the rest is noise in the measurement; found and removed: JDK 18+ reflection allocation in `StockMeshAccess`, now JNI field reads)
 
 ---

@@ -88,6 +88,8 @@ Demos (`gdx-vulkan-demos`, checklist "Demos"): `Demo` classes in `io.github.sleb
 
 Windows natives link the MSVC runtime statically (`CMAKE_MSVC_RUNTIME_LIBRARY` in `jni/CMakeLists.txt`): Android Studio's bundled Java has an old `msvcp140.dll` in its own `bin`, which Windows loads first, and a library built with a newer Visual C++ crashed in it (`std::mutex`) when run from the IDE but not from a terminal. `buildNatives` now lists `CMakeLists.txt` as an input.
 
+Driver rules (`docs/DRIVER_NOTES.md`): never address a buffer read in a vertex shader from a push constant (the Adreno 650 refuses the model pipelines: name the record with the draw's first instance, `drawIndexedInstanced(..., firstInstance)`, and read it from `gl_InstanceIndex`; `DriverRulesTest`); never pass a bindless index through a varying when it is the same for the whole draw (Adreno 840); link the MSVC runtime statically on Windows. The notes also describe how to bisect a pipeline a driver refuses.
+
 ## Verification state
 - **`-Dgdxvulkan.device=N` was not being forwarded to the test JVM until Phase 1b**, so every earlier "RTX 2080" result was really the
   RTX 5080. Fixed; index 0 = RTX 5080, index 1 = RTX 2080 on this machine, and the soak prints the device name it used.

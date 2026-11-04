@@ -23,6 +23,7 @@ skin, fonts and particle effects in `test-assets/` (see `NOTICE`); `-Dgdxvulkan.
   2D scenes match except the shape renderer, which differs from OpenGL by 0.18% of pixels at line ends (within tolerance).
 - **Stock classes through the shim.** `StockClassesTest` and `StockScenesTest` draw a scene with libGDX's own `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `BitmapFont`, `Stage`, a custom `ShaderProgram` and `ModelBatch` (lit, with `DefaultShader`) and compare it with the `Vulkan...` classes; Gate 2, 3 and 5 each draw every scene a second time with the stock classes and compare it with the first (`PictureCompare`: within 2, 6 and 4 levels on all but 0.05%, 0.5% and 0.5% of the pixels). `BundledShadersTest` draws stock `ModelBatch` through a matrix of materials, vertex layouts and lights with the disk cache off and fails if the run-time compiler is called: run `recordShaderBundle` when it does.
 - **Goldens.** Committed PNGs rendered on lavapipe: exact on lavapipe, within a tolerance on a real GPU or a phone.
+- **Driver rules.** `DriverRulesTest` keeps the shader patterns a driver refused (`docs/DRIVER_NOTES.md`) out of the source; the device itself is the only full test, through the Gate 5 scenes of the device suite.
 - **Demos.** `DemosSmokeTest` (module `gdx-vulkan-demos`) starts each demo of the demo app, draws 20 frames and checks the picture is not blank; it is part of `check`.
 - **Validation.** The Vulkan validation layers run in every test; any message fails it.
 

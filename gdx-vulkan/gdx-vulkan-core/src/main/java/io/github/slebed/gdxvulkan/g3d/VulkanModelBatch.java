@@ -574,6 +574,7 @@ public class VulkanModelBatch implements Disposable {
                 j = i + 1;
             }
             final int record = HEADER + k * RECORD;
+            final int firstInstance = k; // the vertex shader finds the record from gl_InstanceIndex: see model_default_vertex.glsl
             k += run;
             i = j;
 
@@ -589,7 +590,7 @@ public class VulkanModelBatch implements Disposable {
             pushIndices[1] = Float.intBitsToFloat(slots[0]);
             pushIndices[2] = Float.intBitsToFloat(slots[1]);
             pushIndices[3] = Float.intBitsToFloat(slots[2]);
-            s.pushRange(20, pushIndices, 0, 4); // u_indices: record, diffuse, specular, emissive slot
+            s.pushRange(20, pushIndices, 0, 4); // u_indices: (the record is found from gl_InstanceIndex now), diffuse, specular, emissive slot
             pushNormalSlot[0] = Float.intBitsToFloat(slots[3]);
             s.pushRange(24, pushNormalSlot, 0, 1); // u_custom0.x: the normal map's slot
             if (mesh != lastMesh) {
@@ -598,14 +599,10 @@ public class VulkanModelBatch implements Disposable {
             }
             draws++;
             if (mesh.getNumIndices() > 0) {
-                if (run > 1) {
-                    instancedDraws++;
-                    s.drawIndexedInstanced(r.meshPart.size, r.meshPart.offset, 0, run);
-                } else {
-                    s.drawIndexed(r.meshPart.size, r.meshPart.offset, 0);
-                }
+                if (run > 1) instancedDraws++;
+                s.drawIndexedInstanced(r.meshPart.size, r.meshPart.offset, 0, run, firstInstance);
             } else {
-                s.draw(r.meshPart.size, r.meshPart.offset);
+                s.drawInstanced(r.meshPart.size, r.meshPart.offset, 1, firstInstance);
             }
         }
     }

@@ -41,11 +41,10 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Spot lights, point-light shadows in `VulkanModelBatch` | libGDX's own default shader has neither. Stock `ModelBatch` through the shim compiled and drew a spot light without error, but no picture of it has been compared with OpenGL |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (188 of 238 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (190 of 238 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
-Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). **Known problem:** on the Adreno 650 everything works except 3D models
-(`VulkanModelBatch`), whose shaders its driver refuses to build; being investigated. Other GPUs and drivers should work but have not been tried.
+Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). Both phones pass the whole device suite (32 checks, 3D included); what each GPU needed is in [`docs/DRIVER_NOTES.md`](docs/DRIVER_NOTES.md). Other GPUs and drivers should work but have not been tried.
 
 ## Performance
 
@@ -60,7 +59,7 @@ table says otherwise. More devices will be added over time: see [Adding a device
 | PC-5080 | Desktop PC | Windows 10 Pro 22H2 | NVIDIA GeForce RTX 5080 (driver 610.62) | Intel Core i7-6900K, 128 GB RAM | 1.4 (1.4.341) | modern (forced to the compatibility path for one row) |
 | PC-2080 | the same desktop PC | Windows 10 Pro 22H2 | NVIDIA GeForce RTX 2080 (driver 610.62) | Intel Core i7-6900K, 128 GB RAM | 1.4 (1.4.341) | modern |
 | RM-11P | REDMAGIC Pro 11 (NX809J), display set to 144 Hz; tested over wireless debugging | Android 16 | Qualcomm Adreno 840 | Qualcomm Snapdragon (model not recorded) | 1.4 | modern, and compatibility when forced |
-| S20-FE | Samsung Galaxy S20 FE 5G (SM-G781W), display set to 120 Hz | Android 13 | Qualcomm Adreno 650 | Snapdragon 865 (SM8250) | 1.1 (1.1.128) | compatibility only (3D models do not run yet: see Known limitations) |
+| S20-FE | Samsung Galaxy S20 FE 5G (SM-G781W), display set to 120 Hz | Android 13 | Qualcomm Adreno 650 | Snapdragon 865 (SM8250) | 1.1 (1.1.128) | compatibility only |
 | CI | GitHub Actions runner | Ubuntu 24.04 | lavapipe (software, Mesa 25.2) | | 1.3 or newer | modern and compatibility; used for correctness, not speed |
 
 The modern path needs a Vulkan 1.3 driver; the compatibility path needs Vulkan 1.1 and is slower with many textures. The library picks the best one the device
@@ -97,8 +96,9 @@ Higher is better. "Stock" is libGDX 1.14.2 on OpenGL; a dash means the test has 
 | T4 250,000 meshes, 500 lights | PC-2080 | - | 495 fps (1% low: 259) | |
 | T4 250,000 meshes, 500 lights | RM-11P | - | 52 fps | |
 | T4 250,000 meshes, 500 lights | S20-FE | - | 7.5 fps | |
+| T3 1M sprites by compute | S20-FE | - | 69 fps | |
 | T5 50,000 meshes, 64 lights | RM-11P | - | 781 fps | |
-| T5 50,000 meshes, 64 lights | S20-FE | - | held at 59 fps by the display (a faster figure was not measured) | |
+| T5 50,000 meshes, 64 lights | S20-FE | - | 72 fps | |
 | T6 translated stock sprite shader | PC-5080 | built-in shader 1,332 fps (modern path), 1,323 fps (compatibility) | 1,319 fps (modern), 1,288 fps (compatibility) | 0.99x, 0.97x |
 | T6 translated stock sprite shader | PC-2080 | built-in shader 1,275 fps | 1,273 fps | 1.00x |
 | T6 translated stock sprite shader | RM-11P (144 Hz, vsync off) | built-in shader 1,545 fps | 1,457 fps | 0.94x (rounds 1 to 3 within 2% of each other; round 4 was noisy) |
@@ -128,6 +128,7 @@ How to read these:
 - The phone stepped from about 2,000 fps to about 1,240 fps between rounds 2 and 3 of the T6 run (a clock or thermal state), which is why the comparison is read inside one state.
 - T7 is the cost of not renaming: libGDX's own batch, with the shader replaced by the dedicated one, runs at about three quarters of the speed of `VulkanSpriteBatch` on the RTX 5080 (a CPU-bound test: the shim records one draw per flush, the generated batch writes straight into GPU-visible memory) and at 0.9x to 1.0x on the RTX 2080 and the phone.
 - The whole device suite was re-run on RM-11P on 2026-11-04 on the current code (32 checks, both code paths, all passed, no validation messages: the layers are not on the device): T1 1,462 fps (modern) and 1,230 (compatibility), T2 37.3 and 10.4 fps, T3 208 fps on both, T4 48.5 and 47.9 fps, T5 791 and 733 fps; GPU time per frame (timestamp queries) for the T7 sprites 0.62 ms (`VulkanSpriteBatch`) and 0.69 ms (stock `SpriteBatch` on the shim).
+- The S20-FE was re-run on 2026-11-04 on the current code (32 checks, all passed, 3D included): T1 517 fps (the phone was in a lower clock state than for the 717 above), T2 10.9 fps, T3 69 fps, T4 7.5 fps, T5 72 fps.
 - No phone has a stock OpenGL number yet; those cells will be filled in as the stock-against-Vulkan demo runs on phones.
 
 Rendering matches stock libGDX: the test scenes are drawn by stock OpenGL and by gdx-vulkan and compared pixel by pixel. The framebuffer scenes are identical;
@@ -350,7 +351,6 @@ Stock classes run unchanged because the same shim also serves what they use to d
 - On the first run, a shader outside the set compiled with the library (everything but libGDX's own sprite, shape and default and depth model shaders for common materials and lights) is translated and compiled at run time.
 - A few features need a driver with Vulkan 1.3: shadow maps and specular, emissive and normal-map textures. On a Vulkan 1.1 driver they are skipped.
 - On Android, the on-screen keyboard through `Gdx.input` does not work yet.
-- On the Samsung Galaxy S20 FE (Adreno 650, Vulkan 1.1 driver) 3D models do not run yet: its driver refuses to build the model shaders. 2D, framebuffers, compute and instancing work there.
 - Natives are built for Windows x64, Linux x64 and Android arm64. Android armeabi-v7a and x86_64 compile but have never been run.
 - Offscreen framebuffer passes recorded after a draw to the screen keep their order: a framebuffer pass in the middle of a frame interrupts the main pass.
 - The demo app is desktop only, and clustered lights and shadows are not combined in one scene: lights are sorted into clusters on the GPU-driven path (one mesh, no shadows), cascaded shadows work with `VulkanModelBatch` (up to 8 point lights).
