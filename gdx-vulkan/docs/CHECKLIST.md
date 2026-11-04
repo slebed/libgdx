@@ -19,10 +19,11 @@ the plan names.
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 11 | 1 | 0 | 12 |
 | Phase 5: 3D with stock models | 9 | 3 | 1 | 13 |
-| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 5 | 0 | 34 | 39 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 6 | 0 | 34 | 40 |
+| Demos (to plan once Phase 5 is complete) | 0 | 0 | 7 | 7 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **161** | **8** | **40** | **209** |
+| **All** | **162** | **8** | **47** | **217** |
 ---
 
 ## Core decisions
@@ -326,7 +327,8 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [ ] Measured: a translated stock shader is not slower than the same shader written as a SPIR-V bundle
 
 ### C. The compiler
-- [ ] Choose and bundle a GLSL-to-SPIR-V compiler (shaderc or glslang) in the native library for Windows x64, Linux x64 and Android arm64; record the size cost
+- [x] Choose the compiler: **glslang** used directly behind a `ShaderCompiler` interface, with the reasons and the comparison with shaderc (and with the original backend, which used shaderc through LWJGL) in `docs/SHADER_COMPILER.md`
+- [ ] Vendor a pinned glslang (16.6.0) into the native library and build it for Windows x64, Linux x64 and Android arm64; record the size cost with and without the SPIRV-Tools optimizer
 - [ ] Existing SPIRV-Reflect validation runs on every translated shader (block layout, vertex inputs, sampler count)
 - [ ] The build still works without the compiler's sources for people who only use precompiled bundles (optional component), or the dependency is vendored
 
@@ -351,6 +353,20 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [ ] Every test runs on both code paths with the validation layers clean
 - [ ] Android: translated shaders compile and render on the phone (USB only), compile time recorded
 - [ ] CI (lavapipe) runs the translator tests and the golden scenes
+
+---
+
+## Demos (to plan once Phase 5 is complete)
+
+Not started. The owner wants to discuss the list when Phase 5 is complete; these are the requirements stated so far.
+
+- [ ] Demos showcase what the library can do, and run on the desktop and on Android
+- [ ] Where a stock libGDX equivalent exists, the demo shows it next to the Vulkan version (stock OpenGL against gdx-vulkan: same scene, side by side or switchable) so the difference in speed or output is visible
+- [ ] Where there is no OpenGL equivalent (compute shaders, GPU culling, indirect drawing, clustered lights, cascaded shadows), the demo makes its purpose clear: what it does and why stock libGDX cannot
+- [ ] The demo code is clean, clear and easy to follow: they are the implementation examples users will copy from; short methods, names that explain themselves, comments where the Vulkan side differs from stock
+- [ ] Every demo is visually interesting
+- [ ] Every demo has readable text on screen that says what the demo is about (the wording of this requirement should be confirmed: "at least a little readable text" is the reading used here)
+- [ ] The demos are built by CI and listed in the README
 
 ---
 
