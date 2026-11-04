@@ -352,5 +352,5 @@ Stock classes run unchanged because the same shim also serves what they use to d
 - The demo app is desktop only, and clustered lights and shadows are not combined in one scene: lights are sorted into clusters on the GPU-driven path (one mesh, no shadows), cascaded shadows work with `VulkanModelBatch` (up to 8 point lights).
 
 ## Contributing and licence
-Issues and pull requests are welcome; run the tests first (`docs/TESTING.md`). Apache License 2.0, see `LICENSE`. Third-party code is vendored in
+Issues and pull requests are welcome; run the tests first (`docs/TESTING.md`). What is left to do and the open problems are in [`TODO.md`](TODO.md). Apache License 2.0, see `LICENSE`. Third-party code is vendored in
 `gdx-vulkan-core/jni/vendor` (volk, Vulkan-Headers, Vulkan Memory Allocator, SPIRV-Reflect), each under its own permissive licence; see `NOTICE`.
