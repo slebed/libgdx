@@ -19,12 +19,12 @@ the plan names.
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 11 | 1 | 0 | 12 |
 | Phase 5: 3D with stock models | 9 | 3 | 1 | 13 |
-| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 7 | 1 | 34 | 42 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 11 | 6 | 25 | 42 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
 | Demos (to plan once Phase 5 is complete) | 0 | 0 | 7 | 7 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **163** | **9** | **59** | **231** |
+| **All** | **167** | **14** | **50** | **231** |
 ---
 
 ## Core decisions
@@ -313,17 +313,17 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [ ] A test fails the build if a built-in code path calls the run-time compiler (a counter in the compiler, asserted by the 2D, 3D and framebuffer scene tests), so base functionality cannot start depending on it by accident
 
 ### A. Translating stock GLSL
-- [ ] Dialect: GLSL ES 1.00 / desktop 1.10-1.20 as libGDX ships it: `attribute` to `in`, `varying` to matched `out`/`in` locations across the two stages, `gl_FragColor` and `gl_FragData[n]` to declared outputs, `texture2D`/`textureCube` to `texture`, `#ifdef GL_ES` and `precision` lines
+- [x] Dialect: GLSL ES 1.00 / desktop 1.10-1.20 as libGDX ships it: `attribute` to `in`, `varying` to matched `out`/`in` locations across the two stages, `gl_FragColor` and `gl_FragData[n]` to declared outputs, `texture2D`/`texture2DProj`/`texture2DLod` to `texture`/`textureProj`/`textureLod`, `#ifdef GL_ES` and `precision` lines (`GlslTranslator`; the design is in `docs/SHADER_TRANSLATOR.md`). `textureCube` is refused until the texture shim has cube textures
 - [ ] `#version 300 es` / `330` style shaders pass through with only the Vulkan declarations added
-- [ ] `ShaderProgram.prependVertexCode` / `prependFragmentCode`, `#define`s and `#extension` lines are honoured
-- [ ] Compile errors come back as `ShaderProgram`-style logs with the line numbers of the **original** source, not of the translated one
-- [ ] Fails loudly (a clear message) on GLSL it cannot translate; no silent mis-compiles
+- [x] `ShaderProgram.prependVertexCode` / `prependFragmentCode`, `#define`s and `#extension` lines are honoured: the source is expanded with glslang's preprocessor before the declarations are read, so libGDX's flag-driven shaders (`DefaultShader`) resolve exactly; `GL_OES_*` extension lines are dropped
+- [x] Compile errors come back as `ShaderProgram`-style logs with the line numbers of the **original** source, not of the translated one: the translation never changes the number of lines and restarts numbering at 1 after its declarations; the prepend text counts as lines, as in stock (`GlslTranslatorTest.errorsKeepTheLineNumbersOfTheOriginalSource`)
+- [x] Fails loudly (a clear message with the shader, line and construct) on GLSL it cannot translate: cube and 3D samplers, struct and array-of-struct uniforms (so `DefaultShader` with lights is refused, the library has its own port), bool arrays, array varyings, a varying the vertex shader does not declare, more textures than the path can bind; no silent mis-compiles
 
 ### B. Vulkan-native mapping (the optimisation requirements)
-- [ ] Loose uniforms become one std140 uniform block per program, laid out from reflection and placed in the existing per-frame ring; at draw time only the changed byte ranges are written, never one call per uniform
-- [ ] Small, hot uniforms (a projection matrix and a few scalars) are placed in push constants within the shared 128-byte budget; the choice is made from size and update rate, not by name
-- [ ] Samplers use the existing bindless texture table (modern path) or the one-texture set (compatibility path); texture units are slots, so binding a texture is not a descriptor write
-- [ ] Vertex input comes from the program's reflected attributes and the mesh's `VertexAttributes` as pipeline vertex-input state; `glVertexAttribPointer` calls are not replayed
+- [~] Loose uniforms become one std140 uniform block per program, laid out from reflection and placed in the existing per-frame ring; at draw time only the changed byte ranges are written, never one call per uniform: the layout is done (arrays and the uniforms that no longer fit go to a std140 block at set 0, binding 0, with explicit offsets, `Translation.uniforms`); writing the changed ranges at draw time belongs to `VulkanShaderProgram` (section D)
+- [~] Small, hot uniforms (a projection matrix and a few scalars) are placed in push constants within the shared 128-byte budget: done by declaration order, first fit, with the texture slots after them and their room reserved; the rule does not look at update rates (a shader that declares a rarely-set uniform first spends push space on it). A usage-based choice is left for when measurements ask for it
+- [~] Samplers use the existing bindless texture table (modern path) or the one-texture set (compatibility path); texture units are slots, so binding a texture is not a descriptor write: the translation does this (`u_texture` becomes `gdx_textures[nonuniformEXT(slot)]`, the slot a 4-byte push member; two textures on the compatibility path are refused); binding the textures belongs to `VulkanShaderProgram`
+- [~] Vertex input comes from the program's reflected attributes and the mesh's `VertexAttributes` as pipeline vertex-input state; `glVertexAttribPointer` calls are not replayed: the attribute table (name, type, location in declaration order) is produced; building the vertex input from a mesh belongs to `VulkanShaderProgram`
 - [ ] `#define` flags that an application sets through `prependCode` can become specialization constants, so variants share SPIR-V
 - [ ] Precision qualifiers are mapped to `RelaxedPrecision` where the device benefits (mobile)
 - [ ] SPIR-V goes through an optimisation pass (spirv-opt performance recipe, debug info stripped); a benchmark shows the effect, or the pass is dropped
@@ -354,7 +354,7 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [ ] README and the migration section drop the renames once this passes (the generated Vulkan batches stay as the fast path)
 
 ### F. Tests
-- [ ] Translator tests with the shaders libGDX ships (`SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `ImmediateModeRenderer20`, `DefaultShader`, `DepthShader`) and the Gate 3 post-processing shaders
+- [~] Translator tests with the shaders libGDX ships: done for the `SpriteBatch`/`PolygonSpriteBatch`, `ShapeRenderer` and `ImmediateModeRenderer20` shaders, `DefaultShader` (unlit variants) and `DepthShader`, and a custom shader with arrays, a bool, an int, two samplers and `#ifdef` flags, each compiled by glslang on both code paths (`GlslTranslatorTest`, no GPU needed); not yet the Gate 3 post-processing shaders
 - [ ] Every test runs on both code paths with the validation layers clean
 - [ ] Android: translated shaders compile and render on the phone (USB only), compile time recorded
 - [ ] CI (lavapipe) runs the translator tests and the golden scenes

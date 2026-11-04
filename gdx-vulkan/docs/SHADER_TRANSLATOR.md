@@ -1,0 +1,63 @@
+# The stock GLSL translator
+
+Status: steps 1 to 4 below (assemble, preprocess, translate, compile) are built and tested; step 5 (the reflection check) is not; the program class and the GL-shim calls are not (see "Not in this step"). The checklist section "Phase 5b" tracks the work. Related: `docs/SHADER_COMPILER.md` (why glslang).
+
+## What it is for
+A game's own libGDX shaders: the `attribute` / `varying` / `uniform` GLSL that goes into `new ShaderProgram(vertexSource, fragmentSource)`. The translator turns them
+into Vulkan GLSL, glslang compiles that to SPIR-V, and the result runs on the library's one pipeline layout.
+
+What it is **not** for: the library's own shaders. The sprite batches, shape renderer, model batch, shadow pass, effects and compute work are dedicated Vulkan
+shaders compiled at build time; stock classes that carry libGDX's own shader text will be recognised and given those (checklist, section E). Base functionality
+never depends on the translator.
+
+## The pipeline
+1. **Assemble** the source the way `ShaderProgram` does: `prependVertexCode` / `prependFragmentCode`, then the source.
+2. **Preprocess** with glslang's preprocessor (`#ifdef`, `#define`, `#if`, `#extension`, macros). libGDX's shaders choose their variants with `#ifdef` flags
+   (`DefaultShader` has dozens), so the translator reads the **expanded** text, where each declaration is final. The preprocessor keeps `#line` directives, so every
+   later error still names the line of the original source.
+3. **Translate** the declarations (text, line by line; the number of lines never changes):
+   - drop `#version`, `precision` and the `GL_ES` conventions; the translated text is `#version 450`;
+   - `attribute T name;` becomes `layout(location = N) in T name;`, N in declaration order;
+   - `varying T name;` becomes `out` in the vertex shader and `in` in the fragment shader, with the **same location** for the same name in both stages (a varying
+     that the fragment shader uses and the vertex shader does not write is an error with both names in it);
+   - `gl_FragColor` becomes a declared `layout(location = 0) out vec4`; `gl_FragData[n]` becomes outputs 0..n;
+   - `texture2D`, `texture2DProj`, `texture2DLod`, `textureCube` become `texture`, `textureProj`, `textureLod`;
+   - `gl_Position = x;` becomes `gl_Position = gdx_vk_clip(x);` (depth range and the Android pre-rotation, the one line every built-in vertex shader also has);
+   - loose `uniform` declarations are removed and re-declared as described next.
+4. **Compile** with glslang (`#version 450`, Vulkan 1.1 target, SPIR-V 1.3), once per code path (modern: bindless textures; compatibility: one bound texture).
+5. **Reflect**: the existing SPIRV-Reflect validation checks the result (block layout, vertex inputs, sampler count).
+
+## Where the uniforms go (the optimisation rules)
+OpenGL sets uniforms one call at a time and re-uploads them at the driver's pleasure. Vulkan has two good places for them, and the translator uses both:
+
+- **Push constants** (128 bytes, no descriptor, no memory to manage): every non-array uniform that fits, in declaration order, laid out with explicit offsets. A
+  `SpriteBatch`-style shader (`u_projTrans`, 64 bytes) lives entirely here, so setting it is a push at draw time, not a descriptor update.
+- **The uniform ring** (set 0, binding 0, the per-frame dynamic uniform buffer, at most 16 KB): arrays, and any uniform that no longer fits the push budget. The
+  block is written into the frame ring only when something in it changed, and only the bytes that changed are rewritten on the CPU side; unchanged draws reuse the
+  last binding.
+- **Texture slots** (modern path): each `sampler2D` uniform becomes an index into the bindless table, kept as a 4-byte member of the push block; `u_texture` in the
+  body becomes `gdx_textures[nonuniformEXT(slot)]`. Binding a texture is then a 4-byte push, not a descriptor write. On the compatibility path the texture is the one
+  bound descriptor, so a program with more than one sampler is refused there with a clear message (the same limit the model batch has).
+- `bool` uniforms are stored as `int` and read through a macro (`#define u_flag (gdx_b_u_flag != 0)`): blocks cannot hold `bool` in Vulkan.
+- Matrices of 2x2 and 3x3 keep their column padding (16 bytes per column); the program class that sets them knows the padding from the layout table.
+- Uniforms the shader never reads (found after preprocessing) take no space.
+
+The result of a translation carries the table the program class needs: for each uniform its name, type, where it lives (push or ring), byte offset, array size and column
+stride; for each attribute its name, type and location; for each sampler its name and push offset; and the line map. Setting a uniform by name is then a copy into a
+byte array plus a dirty flag.
+
+## What it refuses (with a message naming the shader, the line and the construct)
+`samplerCube` and 3D samplers (the texture shim has no cube textures yet), samplers passed to functions, arrays of structs and struct uniforms, `bool` arrays, a
+program with more samplers than the path allows, uniform data over 16 KB, desktop GL built-ins that have no Vulkan meaning (`gl_ModelViewMatrix`, `ftransform`).
+Everything else stays a glslang error with the original line number.
+
+## Tests
+- Every shader libGDX ships through `ShaderProgram` (the `SpriteBatch` and `ShapeRenderer` shaders, the `ImmediateModeRenderer20` ones, `DefaultShader` and
+  `DepthShader` with their flag variants) is translated and compiled on both paths; the layout table is checked (the sprite shader: one push uniform, one slot).
+- A custom shader that uses arrays, a `bool`, an `int`, two samplers and `#ifdef` flags.
+- Errors: the line number of the original source survives preprocessing and translation, including through `prependVertexCode`.
+- The run-time compiler call count is zero in every built-in code path (the translator is never on the path of base functionality).
+
+## Not in this step
+The `VulkanShaderProgram` class (uniform setters, binding, the batches' `setShader`) and the GL-shim calls that let a stock `ShaderProgram` run unchanged are the next
+steps (checklist sections D and E). This step produces and tests the translation they stand on.

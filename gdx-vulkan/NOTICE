@@ -39,3 +39,6 @@ from libGDX's DefaultLwjgl3Input.java (Apache License 2.0, Copyright 2011 See AU
 
 glslang (KhronosGroup/glslang 16.6.0) is vendored in gdx-vulkan-core/jni/vendor/glslang. It is under BSD-3-Clause, MIT, Apache-2.0 and similar permissive licences;
 see gdx-vulkan-core/jni/vendor/glslang/LICENSE.txt for the full list and texts.
+
+gdx-vulkan-desktop/src/test/resources/stockshaders contains copies of libGDX's own shader sources (SpriteBatch, ImmediateModeRenderer20, DefaultShader and DepthShader;
+Apache License 2.0, libGDX authors), used as input to the translator tests, plus two shaders written for those tests.

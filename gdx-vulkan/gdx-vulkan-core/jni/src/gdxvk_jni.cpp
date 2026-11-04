@@ -13,6 +13,7 @@
 
 #include "gdxvk_context.h"
 #include "gdxvk_internal.h"
+#include "gdxvk_shader_compiler.h"
 #include "gdxvk_presenter.h"
 #include "gdxvk_deletion.h"
 #include "gdxvk_resources.h"
@@ -134,6 +135,69 @@ JNIEXPORT jobject JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeGetO
 }
 
 // Memory pressure: runs what the GPU has finished with and frees idle staging blocks. Call it on the render thread.
+// ---- run-time GLSL (the stock-GLSL translator's compiler; no context needed) ------------------------------------------------------------------
+
+namespace {
+gdxvk::ShaderCompiler* glslCompiler() {
+    static std::unique_ptr<gdxvk::ShaderCompiler> compiler = gdxvk::ShaderCompiler::createGlslang();
+    return compiler.get();
+}
+
+std::string javaString(JNIEnv* env, jstring s) {
+    if (s == nullptr) return std::string();
+    const char* chars = env->GetStringUTFChars(s, nullptr);
+    std::string out(chars ? chars : "");
+    if (chars) env->ReleaseStringUTFChars(s, chars);
+    return out;
+}
+
+gdxvk::CompileRequest glslRequest(JNIEnv* env, jint stage, jstring name, jstring source) {
+    gdxvk::CompileRequest request;
+    request.stage = stage == 0 ? gdxvk::ShaderStage::Vertex : stage == 2 ? gdxvk::ShaderStage::Compute : gdxvk::ShaderStage::Fragment;
+    request.name = javaString(env, name);
+    request.source = javaString(env, source);
+    return request;
+}
+} // namespace
+
+JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeGlslAvailable(JNIEnv*, jclass) {
+    return glslCompiler() != nullptr ? JNI_TRUE : JNI_FALSE;
+}
+
+// Returns {expanded text or null, log}.
+JNIEXPORT jobjectArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeGlslPreprocess(JNIEnv* env, jclass, jint stage, jstring name,
+                                                                                               jstring source) {
+    jobjectArray out = env->NewObjectArray(2, env->FindClass("java/lang/String"), nullptr);
+    gdxvk::ShaderCompiler* compiler = glslCompiler();
+    if (compiler == nullptr) {
+        env->SetObjectArrayElement(out, 1, utf(env, "this build of gdx-vulkan has no run-time GLSL compiler (GDXVK_GLSLANG=OFF)"));
+        return out;
+    }
+    const gdxvk::PreprocessResult r = compiler->preprocess(glslRequest(env, stage, name, source));
+    if (r.ok) env->SetObjectArrayElement(out, 0, utf(env, r.text));
+    env->SetObjectArrayElement(out, 1, utf(env, r.log));
+    return out;
+}
+
+// Returns {int[] spirv or null, String log}.
+JNIEXPORT jobjectArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeGlslCompile(JNIEnv* env, jclass, jint stage, jstring name,
+                                                                                            jstring source) {
+    jobjectArray out = env->NewObjectArray(2, env->FindClass("java/lang/Object"), nullptr);
+    gdxvk::ShaderCompiler* compiler = glslCompiler();
+    if (compiler == nullptr) {
+        env->SetObjectArrayElement(out, 1, utf(env, "this build of gdx-vulkan has no run-time GLSL compiler (GDXVK_GLSLANG=OFF)"));
+        return out;
+    }
+    const gdxvk::CompileResult r = compiler->compile(glslRequest(env, stage, name, source));
+    if (r.ok) {
+        jintArray words = env->NewIntArray(static_cast<jsize>(r.spirv.size()));
+        env->SetIntArrayRegion(words, 0, static_cast<jsize>(r.spirv.size()), reinterpret_cast<const jint*>(r.spirv.data()));
+        env->SetObjectArrayElement(out, 0, words);
+    }
+    env->SetObjectArrayElement(out, 1, utf(env, r.log));
+    return out;
+}
+
 JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeTrimMemory(JNIEnv*, jclass, jlong handle) {
     const gdxvk::ContextHandles& h = reinterpret_cast<gdxvk::Context*>(handle)->handles();
     h.deletion->collect();

@@ -19,6 +19,9 @@ final class GdxVkNative {
 
     /** Android only (the symbol is absent from desktop builds). {@code surface} is an android.view.Surface. */
     static native int nativeTrimMemory(long ctx);
+    static native boolean nativeGlslAvailable();
+    static native String[] nativeGlslPreprocess(int stage, String name, String source);
+    static native Object[] nativeGlslCompile(int stage, String name, String source);
     static native long nativeFieldId(Class<?> type, String name, String signature);
     static native int nativeGetIntField(Object o, long id);
     static native boolean nativeGetBooleanField(Object o, long id);

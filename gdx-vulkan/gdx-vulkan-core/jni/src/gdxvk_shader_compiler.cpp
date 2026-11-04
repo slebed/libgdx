@@ -32,6 +32,26 @@ class GlslangCompiler final : public ShaderCompiler {
 public:
     GlslangCompiler() { ensureInitialized(); }
 
+    PreprocessResult preprocess(const CompileRequest& request) override {
+        PreprocessResult result;
+        const EShLanguage language = languageOf(request.stage);
+        glslang::TShader shader(language);
+        const char* text = request.source.c_str();
+        const char* name = request.name.c_str();
+        shader.setStringsWithLengthsAndNames(&text, nullptr, &name, 1);
+        glslang::TShader::ForbidIncluder includer;
+        // Legacy GLSL has no #version: read it as desktop 1.10, which accepts attribute/varying; only macros and conditionals are processed here.
+        std::string out;
+        if (!shader.preprocess(GetDefaultResources(), 110, ENoProfile, false, false, EShMsgOnlyPreprocessor, &out, includer)) {
+            result.log = std::string(shader.getInfoLog()) + shader.getInfoDebugLog();
+            return result;
+        }
+        result.text = out;
+        result.log = shader.getInfoLog();
+        result.ok = true;
+        return result;
+    }
+
     CompileResult compile(const CompileRequest& request) override {
         CompileResult result;
         const EShLanguage language = languageOf(request.stage);
