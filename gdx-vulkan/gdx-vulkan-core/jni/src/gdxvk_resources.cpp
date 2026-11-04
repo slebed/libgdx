@@ -637,8 +637,11 @@ bool Resources::readBuffer(int id, uint64_t offset, void* dst, uint64_t size) {
             vkCmdCopyBuffer(cmd, src, host, 1, &region);
             VkMemoryBarrier hb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
             hb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            hb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &hb, 0, nullptr, 0, nullptr);
+            // The host buffer is destroyed afterwards and its memory is handed to the next readback: make this write available to
+            // that copy as well (the validation layer tracks the memory range across the destroyed buffer).
+            hb.dstAccessMask = VK_ACCESS_HOST_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &hb, 0,
+                                 nullptr, 0, nullptr);
             vkEndCommandBuffer(cmd);
             VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
             si.commandBufferCount = 1;
