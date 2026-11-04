@@ -46,8 +46,10 @@ an Adreno 840 (Android 16). Not the Galaxy S20 the plan names.
 - `gdx-vulkan-core/` Java API and the C++ core (`jni/`: CMake, vendored volk, VMA, SPIRV-Reflect and Vulkan headers); shaders in `src/main/shaders`
 - `gdx-vulkan-desktop/` desktop glue on stock `gdx-backend-lwjgl3` GLFW window handles, and the desktop tests and stress programs
 - `gdx-vulkan-android/` separate Gradle build (AGP): `:library` and a `:testapp` that runs the self-test and the device suite. See its README
-- `ci/` the Docker image and script that run every test on lavapipe; `.github/workflows/gdx-vulkan.yml` runs it on GitHub
-- `tools/` generators for the GL20 base class and the batch draw code (generated from stock libGDX source so the oracle stays honest)
+- `ci/` the Docker image and script that run every test on lavapipe; `.github/workflows/ci.yml` runs it on GitHub
+- `tools/` generators for the GL20 base class and the batch draw code (generated from stock libGDX source so the oracle stays honest); see `tools/README.md`
+- `test-assets/` the skin, fonts and particle effects the Gate 2 and Gate 3 scenes load (libGDX's own test assets; see `NOTICE`)
+- `docs/` the plan, the checklist and the notes for Claude Code (`CLAUDE.md`)
 
 ## Build and test
 Prerequisites: JDK 11+ (class files target Java 8), CMake 3.20+, a C++17 compiler, the Vulkan loader, `glslc` (Vulkan SDK or the `glslc`
@@ -62,8 +64,8 @@ gradlew check ... -Dgdxvulkan.requireGl=true                          # fail ins
 ```
 Native only: `cmake -S gdx-vulkan-core/jni -B build/native && cmake --build build/native && ctest --test-dir build/native`.
 
-Without a Vulkan driver the driver tests skip; `-Dgdxvulkan.requireDriver=true` turns that into a failure (CI does). Gate 2 and Gate 3 need libGDX's
-test assets (`tests/gdx-tests-android/assets` in the libGDX repository); `-Dgdxvulkan.assetsDir=` points elsewhere, and they skip without them.
+Without a Vulkan driver the driver tests skip; `-Dgdxvulkan.requireDriver=true` turns that into a failure (CI does). Gate 2 and Gate 3 use the skin, fonts and particle effects in
+`test-assets/` (see `NOTICE`); `-Dgdxvulkan.assetsDir=` points elsewhere, and they skip if the directory is missing.
 
 Benchmarks and soak (each prints a table; `-Dgdxvulkan.<name>.report=true` never fails the build):
 ```
@@ -73,10 +75,10 @@ gradlew :gdx-vulkan-desktop:stress3                                   # command 
 gradlew :gdx-vulkan-desktop:soakTest -Dgdxvulkan.soakSeconds=600      # the full soak
 ```
 
-Lavapipe, as CI runs it (mount the libGDX assets or Gate 2 and Gate 3 are skipped; see `ci/README.md`):
+Lavapipe, as CI runs it (see `ci/README.md`):
 ```
 docker build -t gdx-vulkan-ci ci
-docker run --rm -v <repo>/gdx-vulkan:/src:ro -v <repo>/tests/gdx-tests-android/assets:/assets:ro -v <out>:/out -v gdxvk-gradle:/root/.gradle gdx-vulkan-ci bash /src/ci/run-checks.sh
+docker run --rm -v <repo>:/src:ro -v <out>:/out -v gdxvk-gradle:/root/.gradle gdx-vulkan-ci bash /src/ci/run-checks.sh
 ```
 
 Android (`gdx-vulkan-android/`, its own Gradle build):

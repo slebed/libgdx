@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs inside the CI image (ci/Dockerfile), on lavapipe under Xvfb. Same script for GitHub Actions and local Docker runs.
 #
-#   /src  the gdx-vulkan project, mounted read-only (it is copied to /work so build output never touches it)
+#   /src  the repository, mounted read-only (it is copied to /work so build output never touches it)
 #   /out  results: test reports, golden diffs, and (UPDATE_GOLDENS=1) regenerated goldens
 #
 # Environment:
@@ -25,7 +25,7 @@ fi
 
 # Build from a copy so Windows/macOS build directories in the mount are never reused.
 rm -rf /work/project && mkdir -p /work/project
-tar -C "$SRC" --exclude=build --exclude=.gradle --exclude=.idea --exclude=local.properties -cf - . | tar -C /work/project -xf -
+tar -C "$SRC" --exclude=build --exclude=.gradle --exclude=.idea --exclude=.git --exclude=local.properties -cf - . | tar -C /work/project -xf -
 cd /work/project
 chmod +x gradlew
 
@@ -46,7 +46,7 @@ collect() {
 }
 trap collect EXIT
 
-# libGDX's test assets (skin, fonts, atlases, ...) live in the repository next to gdx-vulkan; mount them at /assets.
+# The test assets (skin, fonts, particle effects) are in test-assets/ and used by default; mounting a directory at /assets overrides them.
 ASSETS_ARG=""
 [ -d /assets ] && ASSETS_ARG="-Dgdxvulkan.assetsDir=/assets"
 run() { xvfb-run -a -s "-screen 0 1280x1024x24" ./gradlew --console=plain --no-daemon "$@"; }

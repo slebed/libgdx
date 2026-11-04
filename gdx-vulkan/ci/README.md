@@ -35,8 +35,8 @@ The base image is pinned by digest in the Dockerfile; bump it deliberately.
 Windows (RTX 5080/2080) and Android (Galaxy S20) runs are manual: GitHub's hosted runners have no GPU and emulator Vulkan is too
 flaky to gate on. Run `gradlew check -Dgdxvulkan.requireDriver=true` (and `-Dgdxvulkan.forceTierB=true`) on a desktop GPU.
 
-## The libGDX test assets
+## Test assets
 
-Gate 2 and Gate 3 need the skin, fonts and atlases from `tests/gdx-tests-android/assets` in the libGDX repository. Mount them read-only at
-`/assets` (`-v <repo>/tests/gdx-tests-android/assets:/assets:ro`), otherwise `run-checks.sh` skips those tests without failing: a local
-run without the mount is not a full run.
+Gate 2 and Gate 3 load a skin, fonts and particle effects. The 13 files they need are in `test-assets/data` (taken from libGDX's `tests/gdx-tests-android`
+assets, see `NOTICE`) and are found by default; mounting a directory at `/assets` (`-v <dir>:/assets:ro`) or passing `-Dgdxvulkan.assetsDir=` overrides them. If neither
+exists the two tests skip rather than fail, so a local run with the assets missing is not a full run.

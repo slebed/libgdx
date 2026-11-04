@@ -25,7 +25,7 @@ def configureGpuTest = { Test t ->
     t.systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'true')
     t.systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
     // libGDX's own test assets (skin, fonts, atlases, particle effects, TTFs) are the content for the Gate 2 scenes.
-    t.systemProperty 'gdxvulkan.assetsDir', System.getProperty('gdxvulkan.assetsDir') ?: file('../../tests/gdx-tests-android/assets').absolutePath
+    t.systemProperty 'gdxvulkan.assetsDir', System.getProperty('gdxvulkan.assetsDir') ?: file('../test-assets').absolutePath
     t.systemProperty 'gdxvulkan.requireDriver', System.getProperty('gdxvulkan.requireDriver', 'false')
     // -Dgdxvulkan.device=N picks a physical device by index; the soak and golden output print the device name actually used.
     System.getProperty('gdxvulkan.device')?.with { v -> t.systemProperty('gdxvulkan.device', v) }
@@ -75,7 +75,7 @@ tasks.register('glReferences', JavaExec) {
     mainClass = 'io.github.slebed.gdxvulkan.desktop.GlReferenceMain'
     dependsOn 'testClasses'
     ignoreExitValue = true
-    args glReferenceDir.get().asFile.absolutePath, (System.getProperty('gdxvulkan.assetsDir') ?: file('../../tests/gdx-tests-android/assets').absolutePath)
+    args glReferenceDir.get().asFile.absolutePath, (System.getProperty('gdxvulkan.assetsDir') ?: file('../test-assets').absolutePath)
     doFirst { glReferenceDir.get().asFile.deleteDir() }
 }
 test.dependsOn 'glReferences'
