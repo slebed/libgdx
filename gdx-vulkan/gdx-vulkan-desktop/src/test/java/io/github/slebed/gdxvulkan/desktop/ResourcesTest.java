@@ -82,6 +82,33 @@ class ResourcesTest {
         }
     }
 
+    @Test void trimMemoryFreesIdleStagingAndKeepsEverythingElse() {
+        try (GdxVkContext ctx = GdxVkContext.create(GdxVkConfig.fromSystemProperties())) {
+            GdxVkResources r = ctx.resources();
+            int tex = r.createTexture(256, 256, solid(256, 256, 9, 8, 7, 255), new GdxVkSampler());
+            int[] bufs = new int[8];
+            for (int i = 0; i < bufs.length; i++) {
+                bufs[i] = r.createBuffer(1 << 20);
+                r.writeBuffer(bufs[i], 0, new byte[1 << 20], 0, 1 << 20); // 8 MB of staging traffic
+            }
+            r.flushUploads();
+            r.flushUploads();
+            r.collectGarbage();
+            assertTrue(r.stats().stagingBlocks > 0, "the uploads used staging blocks: " + r.stats());
+            int freed = ctx.trimMemory();
+            assertTrue(freed > 0, "idle staging blocks were freed");
+            GdxVkResources.Stats s = r.stats();
+            assertEquals(0, s.stagingBlocks, "nothing is recording or in flight, so nothing stays: " + s);
+            assertEquals(1, s.texturesLive, "textures are not touched");
+            assertEquals(bufs.length, s.buffersLive, "buffers are not touched");
+            // The ring grows again on demand.
+            r.writeBuffer(bufs[0], 0, new byte[4096], 0, 4096);
+            r.flushUploads();
+            assertTrue(r.slotOf(tex) >= 0 || ctx.caps().tier != VulkanCaps.Tier.A, "the texture is still usable");
+            assertEquals(0, ctx.validationMessageCount());
+        }
+    }
+
     @Test void bufferRangesAreReusedAfterCompletion() {
         try (GdxVkContext ctx = GdxVkContext.create(GdxVkConfig.fromSystemProperties())) {
             GdxVkResources r = ctx.resources();

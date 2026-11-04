@@ -12,8 +12,14 @@ layout(push_constant) uniform GdxPush {
 } gdx_pc;
 
 // GL clip depth is [-1, 1], Vulkan's is [0, 1]. Remapped in every vertex shader, no extension branch.
+// Pre-rotation of the swapchain (Android): quarter turns clockwise, set per pipeline from the presenter (0 for render targets).
+layout(constant_id = 0) const int GDX_PREROT = 0;
+
 vec4 gdx_vk_clip(vec4 p) {
     p.z = 0.5 * (p.z + p.w);
+    if (GDX_PREROT == 1) p.xy = vec2(p.y, -p.x);
+    else if (GDX_PREROT == 2) p.xy = -p.xy;
+    else if (GDX_PREROT == 3) p.xy = vec2(-p.y, p.x);
     return p;
 }
 

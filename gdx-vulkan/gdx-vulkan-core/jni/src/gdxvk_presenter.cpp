@@ -102,7 +102,15 @@ struct Presenter::Impl {
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VkFormat format = VK_FORMAT_UNDEFINED;
     VkColorSpaceKHR colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    VkExtent2D extent{0, 0};
+    VkExtent2D extent{0, 0}; // the swapchain image, in the display native orientation
+    // Pre-rotation (Android): the swapchain is built with the display's current rotation so the compositor does not rotate it. The
+    // application still sees the logical (unrotated) size; the output is rotated in clip space (specialization constant 0 of every vertex
+    // shader that calls gdx_vk_clip) and viewport/scissor rectangles are rotated into the image. `rot` is quarter turns clockwise.
+    bool preRotate = false;
+    int forcedRot = -1; // diagnostics/tests: render as if the display were rotated by this many quarter turns (the surface keeps its transform)
+    uint32_t rot = 0;
+    uint32_t logicalW() const { return (rot & 1u) ? extent.height : extent.width; }
+    uint32_t logicalH() const { return (rot & 1u) ? extent.width : extent.height; }
     VkExtent2D requested{0, 0};
     bool vsync = true;
     bool dirty = true; // swapchain needs (re)creation before the next frame
@@ -133,6 +141,7 @@ struct Presenter::Impl {
             ColorSet colors;
             VkFormat depthFormat;
             bool offscreen;  // Tier B only: the front face is baked in
+            uint32_t rot;    // pre-rotation of the swapchain this was built for (0 for render targets)
             uint32_t ds;     // Tier B only: the packed depth/stencil state (see DsState::pack)
             uint32_t cull;   // Tier B only: the cull mode (VkCullModeFlags) baked into the pipeline
             VkPipeline pipeline;
@@ -246,19 +255,20 @@ struct Presenter::Impl {
         // Without a depth attachment the depth and stencil state does nothing: one variant serves every state.
         const uint32_t bakedDs = (!h.tierA && depthFmt != VK_FORMAT_UNDEFINED) ? dsState.pack() : 0u;
         const uint32_t bakedCull = h.tierA ? 0u : effectiveCull(id); // Tier A sets the cull mode dynamically
+        const uint32_t vrot = offscreen ? 0u : rot; // render targets are never pre-rotated
         for (const PipelineRec::Variant& v : rec.variants) {
-            if (v.colors == colors && v.depthFormat == depthFmt && v.offscreen == bakedKind && v.ds == bakedDs && v.cull == bakedCull) return v.pipeline;
+            if (v.colors == colors && v.depthFormat == depthFmt && v.offscreen == bakedKind && v.rot == vrot && v.ds == bakedDs && v.cull == bakedCull) return v.pipeline;
         }
-        VkPipeline p = buildPipeline(rec, colors, depthFmt, offscreen, bakedDs, bakedCull);
+        VkPipeline p = buildPipeline(rec, colors, depthFmt, offscreen, bakedDs, bakedCull, vrot);
         if (p != VK_NULL_HANDLE) {
-            rec.variants.push_back({colors, depthFmt, bakedKind, bakedDs, bakedCull, p});
+            rec.variants.push_back({colors, depthFmt, bakedKind, vrot, bakedDs, bakedCull, p});
             nameObject(h, VK_OBJECT_TYPE_PIPELINE, (uint64_t)p,
                        (rec.name + (offscreen ? " (render target, " : " (swapchain, ") + std::to_string(colors.count) + " colour" + (depthFmt != VK_FORMAT_UNDEFINED ? ", depth)" : ")")).c_str());
         }
         return p;
     }
 
-    VkPipeline buildPipeline(const PipelineRec& rec, const ColorSet& colors, VkFormat depthFmt, bool offscreen, uint32_t bakedDs, uint32_t bakedCull) {
+    VkPipeline buildPipeline(const PipelineRec& rec, const ColorSet& colors, VkFormat depthFmt, bool offscreen, uint32_t bakedDs, uint32_t bakedCull, uint32_t vrot) {
         const PipelineDesc& desc = rec.desc;
         if (desc.colorOutputs != colors.count) {
             error = "pipeline " + rec.name + " writes " + std::to_string(desc.colorOutputs) + " colour output(s) but its render target has " +
@@ -270,6 +280,11 @@ struct Presenter::Impl {
         stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
         stages[0].module = rec.vs;
         stages[0].pName = "main";
+        // Specialization constant 0 is the pre-rotation (gdx_vk_common.glsl). A shader without that constant ignores the entry.
+        const int32_t rotValue = static_cast<int32_t>(vrot);
+        const VkSpecializationMapEntry rotEntry{0, 0, sizeof(int32_t)};
+        const VkSpecializationInfo rotSpec{1, &rotEntry, sizeof(int32_t), &rotValue};
+        stages[0].pSpecializationInfo = &rotSpec;
         stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
         stages[1].module = rec.fs;
         stages[1].pName = "main";
@@ -572,8 +587,21 @@ struct Presenter::Impl {
         return p.pass;
     }
 
-    uint32_t targetW() const { return curOff >= 0 ? off.w : extent.width; }
-    uint32_t targetH() const { return curOff >= 0 ? off.h : extent.height; }
+    // The size GL sees: a render target's, or the swapchain's logical size. physW/physH are the image the pass renders into.
+    uint32_t targetW() const { return curOff >= 0 ? off.w : logicalW(); }
+    uint32_t targetH() const { return curOff >= 0 ? off.h : logicalH(); }
+    uint32_t physW() const { return curOff >= 0 ? off.w : extent.width; }
+    uint32_t physH() const { return curOff >= 0 ? off.h : extent.height; }
+    // A rectangle in the logical swapchain image (origin top-left) as the same rectangle in the pre-rotated image.
+    VkRect2D rotateRect(int32_t x, int32_t y, int32_t w, int32_t h) const {
+        const int32_t lw = static_cast<int32_t>(logicalW()), lh = static_cast<int32_t>(logicalH());
+        switch (rot) {
+            case 1: return VkRect2D{{lh - (y + h), x}, {static_cast<uint32_t>(h), static_cast<uint32_t>(w)}};
+            case 2: return VkRect2D{{lw - (x + w), lh - (y + h)}, {static_cast<uint32_t>(w), static_cast<uint32_t>(h)}};
+            case 3: return VkRect2D{{y, lw - (x + w)}, {static_cast<uint32_t>(h), static_cast<uint32_t>(w)}};
+            default: return VkRect2D{{x, y}, {static_cast<uint32_t>(w), static_cast<uint32_t>(h)}};
+        }
+    }
     ColorSet targetColors() const { return curOff >= 0 ? off.colorSet() : swapColors(); }
     VkFormat targetDepthFormat() const { return curOff >= 0 ? off.depthFormat : VK_FORMAT_UNDEFINED; }
     bool passOpen() const { return curOff >= 0 ? offOpen : swapOpen; }
@@ -591,10 +619,12 @@ struct Presenter::Impl {
             y0 = std::max(0, th - (y + std::max(0, rh)));
             y1 = std::min(th, th - y);
         }
-        return VkRect2D{{x0, y0}, {static_cast<uint32_t>(std::max(0, x1 - x0)), static_cast<uint32_t>(std::max(0, y1 - y0))}};
+        const int32_t cw = std::max(0, x1 - x0), ch = std::max(0, y1 - y0);
+        if (curOff < 0 && rot != 0) return rotateRect(x0, y0, cw, ch);
+        return VkRect2D{{x0, y0}, {static_cast<uint32_t>(cw), static_cast<uint32_t>(ch)}};
     }
     VkRect2D currentScissor() const {
-        return scissorOn ? toVkRect(glScissor[0], glScissor[1], glScissor[2], glScissor[3]) : VkRect2D{{0, 0}, {targetW(), targetH()}};
+        return scissorOn ? toVkRect(glScissor[0], glScissor[1], glScissor[2], glScissor[3]) : VkRect2D{{0, 0}, {physW(), physH()}};
     }
     void applyScissor(VkCommandBuffer cmd) {
         const VkRect2D r = currentScissor();
@@ -611,7 +641,13 @@ struct Presenter::Impl {
         }
         VkViewport v;
         if (curOff >= 0) v = {x, y, w, hh, 0.0f, 1.0f};                   // positive height: GL's memory layout
-        else v = {x, th - y, w, -hh, 0.0f, 1.0f};                           // negative height: the image comes out upright
+        else if (rot == 0) v = {x, th - y, w, -hh, 0.0f, 1.0f};            // negative height: the image comes out upright
+        else {
+            // The same viewport rectangle (top-left origin in the logical image), rotated into the pre-rotated image.
+            const VkRect2D r = rotateRect(static_cast<int32_t>(x), static_cast<int32_t>(th - y - hh), static_cast<int32_t>(w), static_cast<int32_t>(hh));
+            v = {static_cast<float>(r.offset.x), static_cast<float>(r.offset.y + static_cast<int32_t>(r.extent.height)), static_cast<float>(r.extent.width),
+                 -static_cast<float>(r.extent.height), 0.0f, 1.0f};
+        }
         vkCmdSetViewport(cmd, 0, 1, &v);
     }
     VkFrontFace frontFace() const { return curOff >= 0 ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE; }
@@ -693,7 +729,7 @@ struct Presenter::Impl {
             cc = true;
             for (int i = 0; i < 4; ++i) cv[0].color.float32[i] = frameClear[i];
         }
-        const VkRect2D area{{0, 0}, {targetW(), targetH()}};
+        const VkRect2D area{{0, 0}, {physW(), physH()}};
         if (curOff < 0) {
             if (h.tierA) {
                 VkRenderingAttachmentInfo ca{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
@@ -954,6 +990,20 @@ struct Presenter::Impl {
         if (format == VK_FORMAT_B8G8R8A8_UNORM) {
             for (size_t i = 0; i < n; i += 4) std::swap(captured[i], captured[i + 2]);
         }
+        if (rot != 0) { // hand back the logical orientation
+            const uint32_t pw = extent.width, lw = logicalW(), lh = logicalH();
+            std::vector<uint8_t> out(n);
+            for (uint32_t y = 0; y < lh; ++y) {
+                for (uint32_t x = 0; x < lw; ++x) {
+                    uint32_t px, py;
+                    if (rot == 1) { px = lh - 1 - y; py = x; }
+                    else if (rot == 2) { px = lw - 1 - x; py = lh - 1 - y; }
+                    else { px = y; py = lw - 1 - x; }
+                    std::memcpy(&out[(static_cast<size_t>(y) * lw + x) * 4], &captured[(static_cast<size_t>(py) * pw + px) * 4], 4);
+                }
+            }
+            captured.swap(out);
+        }
     }
 
     // (Re)builds the swapchain for the current surface size. Returns Skipped when the surface has zero area.
@@ -1021,6 +1071,10 @@ struct Presenter::Impl {
             }
         }
 
+        if (forcedRot >= 0 && (forcedRot & 1) && ext.width != ext.height && caps.minImageExtent.width <= ext.height && ext.height <= caps.maxImageExtent.width &&
+            caps.minImageExtent.height <= ext.width && ext.width <= caps.maxImageExtent.height) {
+            std::swap(ext.width, ext.height); // a surface that allows the display native size (not a fixed-size desktop window)
+        }
         VkSwapchainCreateInfoKHR sci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
         sci.surface = surface;
         sci.minImageCount = count;
@@ -1032,9 +1086,25 @@ struct Presenter::Impl {
         sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
         canCapture = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
         sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        // Phase 4 switches this to caps.currentTransform plus clip-space pre-rotation; identity until then.
-        sci.preTransform = (caps.currentTransform & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
-                                                                                              : caps.currentTransform;
+        // Identity whenever the surface allows it: the compositor rotates for us. (Taking currentTransform without rotating the
+        // output in clip space, as this did before, shows a rotated image on a rotated display.)
+        sci.preTransform = (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
+                                                                                                : caps.currentTransform;
+        uint32_t newRot = 0;
+        if (preRotate && (caps.supportedTransforms & caps.currentTransform)) {
+            switch (caps.currentTransform) {
+                case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR: newRot = 1; break;
+                case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: newRot = 2; break;
+                case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR: newRot = 3; break;
+                default: break;
+            }
+            if (newRot != 0) {
+                sci.preTransform = caps.currentTransform;
+                // The window size is reported in the logical orientation; the image is in the display native one.
+                if ((newRot & 1u) && ext.width == requested.width && ext.height == requested.height && ext.width != ext.height) std::swap(ext.width, ext.height);
+                sci.imageExtent = ext;
+            }
+        }
         sci.compositeAlpha = alpha;
         sci.presentMode = mode;
         sci.clipped = VK_TRUE;
@@ -1048,6 +1118,8 @@ struct Presenter::Impl {
         if (r != VK_SUCCESS) return mapResult(r) == FrameStatus::Error ? fail("vkCreateSwapchainKHR failed (VkResult " + std::to_string(r) + ")") : mapResult(r);
         swapchain = fresh;
         extent = ext;
+        rot = (sci.preTransform == caps.currentTransform) ? newRot : 0u;
+        if (forcedRot >= 0) rot = static_cast<uint32_t>(forcedRot);
 
         uint32_t n = 0;
         vkGetSwapchainImagesKHR(h.device, swapchain, &n, nullptr);
@@ -1090,7 +1162,7 @@ Presenter::~Presenter() {
 }
 
 std::unique_ptr<Presenter> Presenter::create(Context& ctx, const SurfaceHandles& handles, uint32_t width, uint32_t height,
-                                             bool vsync, std::string& error, std::string& errorKind) {
+                                             bool vsync, bool preRotate, std::string& error, std::string& errorKind) {
     const ContextHandles& h = ctx.handles();
     if (!h.swapchainEnabled) {
         errorKind = "device";
@@ -1102,6 +1174,7 @@ std::unique_ptr<Presenter> Presenter::create(Context& ctx, const SurfaceHandles&
     Impl& s = *p->impl_;
     s.requested = {width, height};
     s.vsync = vsync;
+    s.preRotate = preRotate;
     s.native = handles; // from here on ~Presenter releases the window, including on the early-return failure paths
 
 #if defined(VK_USE_PLATFORM_WIN32_KHR)
@@ -1148,6 +1221,11 @@ std::unique_ptr<Presenter> Presenter::create(Context& ctx, const SurfaceHandles&
         return nullptr;
     }
     return p;
+}
+
+void Presenter::debugForceRotation(int quarterTurns) {
+    impl_->forcedRot = quarterTurns;
+    impl_->dirty = true;
 }
 
 void Presenter::resize(uint32_t width, uint32_t height) {
@@ -1800,8 +1878,9 @@ void Presenter::lastPassCounts(uint32_t out[2]) const {
 }
 const std::vector<uint8_t>& Presenter::capturedPixels() const { return impl_->captured; }
 
-uint32_t Presenter::width() const { return impl_->extent.width; }
-uint32_t Presenter::height() const { return impl_->extent.height; }
+uint32_t Presenter::rotation() const { return impl_->rot; }
+uint32_t Presenter::width() const { return impl_->logicalW(); }
+uint32_t Presenter::height() const { return impl_->logicalH(); }
 uint32_t Presenter::swapchainFormat() const { return static_cast<uint32_t>(impl_->format); }
 uint32_t Presenter::imageCount() const { return static_cast<uint32_t>(impl_->images.size()); }
 const std::string& Presenter::lastError() const { return impl_->error; }

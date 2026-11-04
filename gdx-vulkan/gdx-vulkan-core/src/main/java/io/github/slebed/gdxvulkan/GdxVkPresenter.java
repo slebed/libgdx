@@ -193,6 +193,15 @@ public final class GdxVkPresenter implements AutoCloseable {
         return slot;
     }
 
+    /**
+     * Diagnostics and tests: draws as if the display were rotated by {@code quarterTurns} clockwise (0 to 3; -1 follows the surface), exactly as
+     * pre-rotation on Android would, but on any surface. Captures still come back in the logical orientation. Use a square surface.
+     */
+    public void debugForceRotation(int quarterTurns) {
+        check();
+        GdxVkNative.nativeDebugForceRotation(handle, quarterTurns);
+    }
+
     /** Tells the presenter the window size changed. The swapchain is rebuilt on the next {@link #beginFrame}. */
     public void resize(int width, int height) {
         check();
@@ -207,7 +216,11 @@ public final class GdxVkPresenter implements AutoCloseable {
     /** The swapchain's VkFormat value (always a UNORM format). */
     public int vkFormat() { check(); return GdxVkNative.nativePresenterInfo(handle)[2]; }
 
+    /** Quarter turns clockwise the swapchain image is pre-rotated by: 0 when the compositor does the rotating (and always on desktop). */
+    public int rotation() { check(); return GdxVkNative.nativePresenterInfo(handle)[4]; }
+
     public int imageCount() { check(); return GdxVkNative.nativePresenterInfo(handle)[3]; }
+
 
     @Override public synchronized void close() {
         if (handle != 0) {

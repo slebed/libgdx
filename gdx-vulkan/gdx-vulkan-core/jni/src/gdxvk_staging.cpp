@@ -324,6 +324,16 @@ void StagingRing::collect(uint64_t completedSerial) {
     for (Block* b : surplus) destroyBlock(b);
 }
 
+size_t StagingRing::trim() {
+    std::vector<Block*> idle;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        idle.swap(free_);
+    }
+    for (Block* b : idle) destroyBlock(b);
+    return idle.size();
+}
+
 size_t StagingRing::blockCount() {
     std::lock_guard<std::mutex> lock(mutex_);
     return active_.size() + recording_.size() + inFlight_.size() + free_.size();

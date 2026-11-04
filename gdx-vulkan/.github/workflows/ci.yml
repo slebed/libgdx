@@ -55,3 +55,29 @@ jobs:
           name: gdx-vulkan-reports
           path: ${{ runner.temp }}/out
           if-no-files-found: ignore
+
+  # Linux arm64 natives (checklist: Core decisions, "natives for Linux arm64"). GitHub's free arm64 runner builds the native library and
+  # runs its own tests on lavapipe. The Java suite and the exact goldens stay on x86-64: lavapipe's arithmetic is not promised to be bit-identical
+  # across architectures, so they would need their own goldens.
+  arm64-natives:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build build-essential glslc libvulkan1 mesa-vulkan-drivers \
+            vulkan-validationlayers libx11-dev xvfb xauth
+          uname -m
+          dpkg-query -W -f='mesa-vulkan-drivers ${Version}\n' mesa-vulkan-drivers
+
+      - name: Build the natives
+        run: |
+          cmake -S gdx-vulkan-core/jni -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native --parallel
+          file build/native/libgdxvk.so || ls build/native
+
+      - name: Native tests on lavapipe
+        run: xvfb-run -a ctest --test-dir build/native --output-on-failure

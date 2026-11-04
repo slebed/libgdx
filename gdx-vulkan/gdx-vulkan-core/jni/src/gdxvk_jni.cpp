@@ -96,6 +96,18 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeValidat
     return static_cast<jint>(reinterpret_cast<gdxvk::Context*>(handle)->validationMessageCount());
 }
 
+JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDebugForceRotation(JNIEnv*, jclass, jlong presenter, jint quarterTurns) {
+    reinterpret_cast<gdxvk::Presenter*>(presenter)->debugForceRotation(static_cast<int>(quarterTurns));
+}
+
+// Memory pressure: runs what the GPU has finished with and frees idle staging blocks. Call it on the render thread.
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeTrimMemory(JNIEnv*, jclass, jlong handle) {
+    const gdxvk::ContextHandles& h = reinterpret_cast<gdxvk::Context*>(handle)->handles();
+    h.deletion->collect();
+    h.staging->collect(h.timeline->completed());
+    return static_cast<jint>(h.staging->trim());
+}
+
 // ---- Presenter (window surface + swapchain) -------------------------------------------------------------------
 
 JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreatePresenter(JNIEnv* env, jclass, jlong ctx, jlong display,
@@ -107,7 +119,7 @@ JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreate
     std::string error, kind;
     std::unique_ptr<gdxvk::Presenter> p = gdxvk::Presenter::create(*reinterpret_cast<gdxvk::Context*>(ctx), handles,
                                                                    static_cast<uint32_t>(width), static_cast<uint32_t>(height),
-                                                                   vsync == JNI_TRUE, error, kind);
+                                                                   vsync == JNI_TRUE, false, error, kind);
     if (!p) {
         throwKind(env, kind, error);
         return 0;
@@ -119,7 +131,7 @@ JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreate
 // `surface` is an android.view.Surface. The ANativeWindow reference taken here is released when the presenter is destroyed.
 JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreatePresenterAndroid(JNIEnv* env, jclass, jlong ctx,
                                                                                                   jobject surface, jint width,
-                                                                                                  jint height, jboolean vsync) {
+                                                                                                  jint height, jboolean vsync, jboolean preRotate) {
     ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
     if (window == nullptr) {
         throwKind(env, "init", "ANativeWindow_fromSurface returned null (surface already released?)");
@@ -131,7 +143,7 @@ JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreate
     std::string error, kind;
     std::unique_ptr<gdxvk::Presenter> p = gdxvk::Presenter::create(*reinterpret_cast<gdxvk::Context*>(ctx), handles,
                                                                    static_cast<uint32_t>(width), static_cast<uint32_t>(height),
-                                                                   vsync == JNI_TRUE, error, kind);
+                                                                   vsync == JNI_TRUE, preRotate == JNI_TRUE, error, kind);
     if (!p) { // Presenter::create has already released the window through ~Presenter
         throwKind(env, kind, error);
         return 0;
@@ -237,10 +249,10 @@ JNIEXPORT jbyteArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeC
 // [width, height, VkFormat, imageCount]
 JNIEXPORT jintArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativePresenterInfo(JNIEnv* env, jclass, jlong handle) {
     const gdxvk::Presenter* p = reinterpret_cast<gdxvk::Presenter*>(handle);
-    const jint v[4] = {static_cast<jint>(p->width()), static_cast<jint>(p->height()), static_cast<jint>(p->swapchainFormat()),
-                       static_cast<jint>(p->imageCount())};
-    jintArray out = env->NewIntArray(4);
-    env->SetIntArrayRegion(out, 0, 4, v);
+    const jint v[5] = {static_cast<jint>(p->width()), static_cast<jint>(p->height()), static_cast<jint>(p->swapchainFormat()),
+                       static_cast<jint>(p->imageCount()), static_cast<jint>(p->rotation())};
+    jintArray out = env->NewIntArray(5);
+    env->SetIntArrayRegion(out, 0, 5, v);
     return out;
 }
 

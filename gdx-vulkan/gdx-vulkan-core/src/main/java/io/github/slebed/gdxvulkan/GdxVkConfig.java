@@ -6,6 +6,8 @@ public class GdxVkConfig {
     public boolean enableValidation = false;
     /** Run the Tier B fallback paths even on devices that support Tier A. */
     public boolean forceTierB = false;
+    /** Android: build the swapchain with the display rotation (no compositor rotation pass). Default on in {@code VulkanAndroidApplication}. */
+    public boolean preRotate = true;
     /** Index into the physical device list, or -1 to pick the best (discrete > integrated > virtual > cpu). */
     public int preferredDeviceIndex = -1;
     /** Highest Vulkan 1.x minor version to request (1..4). The effective version is min(device, this). */

@@ -18,7 +18,9 @@ final class GdxVkNative {
     static native long nativeCreatePresenter(long ctx, long display, long window, int width, int height, boolean vsync);
 
     /** Android only (the symbol is absent from desktop builds). {@code surface} is an android.view.Surface. */
-    static native long nativeCreatePresenterAndroid(long ctx, Object surface, int width, int height, boolean vsync);
+    static native int nativeTrimMemory(long ctx);
+    static native void nativeDebugForceRotation(long presenter, int quarterTurns);
+    static native long nativeCreatePresenterAndroid(long ctx, Object surface, int width, int height, boolean vsync, boolean preRotate);
 
     static native int nativeCreateBuffer(long ctx, long size);
     static native boolean nativeWriteBuffer(long ctx, int id, long offset, byte[] data, int start, int length);

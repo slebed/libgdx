@@ -8,6 +8,7 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
 import io.github.slebed.gdxvulkan.CommandStream;
 import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkPipelineDesc;
+import io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle;
 import io.github.slebed.gdxvulkan.GdxVkPresenter;
 
 import java.nio.ByteBuffer;
@@ -34,6 +35,23 @@ public class VulkanImmediateModeRenderer implements ImmediateModeRenderer {
     private final Matrix4 projModelView = new Matrix4();
     private final float[] push = new float[32];
     private float colorBits = Color.WHITE_FLOAT_BITS;
+    private VulkanShaderPipelineBundle bundle;
+
+    /**
+     * Custom shading for what this renderer draws: the bundle's shaders replace {@code shape.vert}/{@code shape.frag}. The vertex layout is the
+     * renderer's own (location 0 position, 1 colour) and the bundle's {@code custom0}/{@code custom1} reach the shader as {@code u_custom0}/
+     * {@code u_custom1}, except {@code custom0.x}, which carries the thin-line nudge {@code shape.vert} applies (a bundle that reuses
+     * {@code shape.vert} keeps it; use y, z, w and {@code custom1}). Null restores the default. Flushes what is queued first.
+     */
+    public void setShaderBundle (VulkanShaderPipelineBundle bundle) {
+        if (bundle == this.bundle) return;
+        flush();
+        this.bundle = bundle;
+    }
+
+    public VulkanShaderPipelineBundle getShaderBundle () {
+        return bundle;
+    }
 
     public VulkanImmediateModeRenderer (GdxVkFrame frame, int maxVertices) {
         this.frame = frame;
@@ -99,6 +117,12 @@ public class VulkanImmediateModeRenderer implements ImmediateModeRenderer {
         // Lines and points: move them 1/256 pixel in GL's downward direction so a primitive on a pixel boundary lands on the pixel GL
         // picks (see shape.vert). Triangles are not nudged.
         final boolean thin = primitiveType == GL_POINTS || primitiveType == GL_LINES || primitiveType == GL_LINE_STRIP;
+        if (bundle != null) {
+            System.arraycopy(bundle.custom0, 0, push, 24, 4);
+            System.arraycopy(bundle.custom1, 0, push, 28, 4);
+        } else {
+            java.util.Arrays.fill(push, 25, 32, 0f);
+        }
         push[24] = thin ? -2f / 256f / Math.max(1, frame.height()) : 0f;
         s.pushConstants(push);
         s.bindVertex(block, offset);
@@ -122,6 +146,10 @@ public class VulkanImmediateModeRenderer implements ImmediateModeRenderer {
             d.dstColor = f[1];
             d.srcAlpha = f[2];
             d.dstAlpha = f[3];
+        }
+        if (bundle != null) {
+            d.colorOutputs = bundle.colorOutputs();
+            return frame.pipeline(key + "|" + bundle.key(), "shape:" + bundle.key(), bundle, d);
         }
         return frame.pipeline(key, "shape", "shape.vert", "shape.frag", d);
     }

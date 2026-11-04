@@ -24,7 +24,7 @@ public final class GdxVkFrame {
     public static final int MAX_QUADS = 16383;
 
     private final GdxVkContext context;
-    private final GdxVkPresenter presenter;
+    private GdxVkPresenter presenter;
     private final VulkanGL20 gl;
     private final CommandStream stream = new CommandStream();
     private final boolean tierA;
@@ -91,6 +91,19 @@ public final class GdxVkFrame {
     public CommandStream stream() { return stream; }
 
     public GdxVkPresenter presenter() { return presenter; }
+
+    /**
+     * Moves this frame to a new presenter after the surface was recreated (Android). The frame object, and everything holding it (the sprite
+     * batches), stay valid. Pipelines belonged to the old presenter and are created again on first use; the shared index buffer, textures
+     * and buffers belong to the context and are kept.
+     */
+    public void replacePresenter(GdxVkPresenter p) {
+        presenter = p;
+        pipelines.clear();
+        java.util.Arrays.fill(blockCache, null);
+        cachedFrame = -1;
+        open = false;
+    }
 
     public GdxVkContext context() { return context; }
 

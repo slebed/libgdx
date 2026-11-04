@@ -50,6 +50,9 @@ public:
     void markSubmitted(uint64_t serial);
     // Returns blocks the GPU has finished with to the free list (and trims the surplus).
     void collect(uint64_t completedSerial);
+    // Memory pressure (Android onTrimMemory): frees every block the GPU has finished with, not just the surplus over kMaxFreeBlocks.
+    // Blocks that are recording or in flight stay; the ring grows again on demand.
+    size_t trim();
 
     size_t blockCount();
     size_t pendingCopies();

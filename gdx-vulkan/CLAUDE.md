@@ -2,7 +2,7 @@
 
 Standalone Vulkan renderer for libGDX (stock libGDX, no fork; gdx 1.14.2 until 1.14.3 is published). Read `docs/PLAN.md` first. The full plan is
 "libGDX Vulkan Backend Plan v5.0" in the user's Claude Project "libGDX Vulkan" (plans/ and claude/ docs hold v2-v5 and their reviews).
-Work happens on branch `gdx-vulkan-phase1` (pushed to the fork `slebed/libgdx`; GitHub Actions runs the lavapipe suite on every push).
+The project lives in its own repository, `slebed/gdx-vulkan` (public, branch `main`; GitHub Actions runs the lavapipe suite on every push). It was split out of the user's fork `slebed/libgdx`, where this directory is still on branch `gdx-vulkan-phase1`; the fork also holds the user's old LWJGL Vulkan backend work, which must not be touched. Commits made in the fork's `gdx-vulkan/` directory are mirrored to the standalone repo by committing the tree `HEAD:gdx-vulkan` on top of its `main` (`git commit-tree`, same author, date and message).
 
 ## Status
 Phase 1a is complete on Windows, Linux (lavapipe) and Android. Phase 1b is implemented and verified on desktop GPUs and lavapipe; the
@@ -43,14 +43,24 @@ Native core (`gdx-vulkan-core/jni/src`), one file per subsystem, all owned by `C
   beginFrame/endFrame at close, `GDXVK_PRESENT=immediate|mailbox`, `GDXVK_IMAGES=n`. The Gradle `test` task rebuilds natives; run `:gdx-vulkan-core:buildNatives` first when
   only C++ changed and you run a single test. `transient` is a Java keyword: do not use it as a parameter name.
 
-Tests (`gdx-vulkan-desktop`): `TextureShimTest`, `SpriteBatchTest`, `InstancedBatchTest`, `FrameBufferTest`, `Gate2GoldenTest` (7 scenes: stock-GL oracle with tolerance, then exact lavapipe goldens),
+Tests (`gdx-vulkan-desktop`): `TextureShimTest`, `SpriteBatchTest` (incl. shape-renderer bundles and `VulkanDebugOverlay`), `PreRotationTest`, `AssetManagerTest`, `InstancedBatchTest`, `FrameBufferTest`, `Gate2GoldenTest` (7 scenes: stock-GL oracle with tolerance, then exact lavapipe goldens),
 `PresenterTest`, `TriangleTest`, `GoldenTest` (lavapipe goldens, exact on lavapipe, tolerance on GPUs),
 `ResourcesTest` (all three sets reach the shader, deferred deletion, pipeline cache file, reflection rejects bad shaders), and `SoakTest`
 via its own Gradle task `soakTest` (`-Dgdxvulkan.soakSeconds=600` for the full run). CI: `.github/workflows/gdx-vulkan.yml` ->
-`ci/Dockerfile` + `ci/run-checks.sh` (see `ci/README.md`). Android: `gdx-vulkan-android` (separate Gradle 8.14/AGP 8.13 build).
+`ci/Dockerfile` + `ci/run-checks.sh` (see `ci/README.md`). Android: `gdx-vulkan-android` (separate Gradle 8.14/AGP 8.13 build). `docs/RELEASE.md` lists the manual runs a release needs.
 
-Open items: Adreno Tier A throughput (see below); Wayland/macOS; running armeabi-v7a/x86_64 (they compile); Linux arm64 natives; swapchain framebuffers still retire after waitIdle;
-`VulkanSpriteBatchInstanced`; Phases 3-6.
+Phase 4 (Android lifecycle): `VulkanAndroidApplication` + `VulkanAndroidGraphics` in `gdx-vulkan-android/library` (render thread owns every Vulkan call; events from the UI thread are posted to it,
+`surfaceDestroyed`/`onPause`/`onDestroy` wait for it). Only the presenter is destroyed with the surface; `GdxVkFrame.replacePresenter` keeps the batches valid and clears the frame's pipeline map.
+`SnapshotArray.begin()` returns the backing array: iterate to `size`, not the array (this was a real NPE). Pre-rotation: `Presenter::create(..., preRotate)` builds the swapchain with the display
+transform; `Impl::rot` (quarter turns clockwise) rotates viewport and scissor rectangles into the image (`rotateRect`), and specialization constant 0 of every vertex shader that calls
+`gdx_vk_clip` (`GDX_PREROT`, part of the pipeline variant key) rotates the clip-space output; captures are un-rotated so tests see the logical orientation. A bundle whose vertex shader skips
+`gdx_vk_clip` is not rotated. `GdxVkPresenter.debugForceRotation` lets the desktop test (`PreRotationTest`, square window) prove the pieces agree; the phone confirmed the direction at all four angles.
+`presenter.rotation()` reports it (it lags `resize()` by one frame: the swapchain is rebuilt in the next `beginFrame`). `GdxVkContext.trimMemory()` backs `onTrimMemory`. The phone tests are
+`LifecycleActivity` (+ `CoverActivity`) driven by `tools/stress4.sh` (50 cycles by default; the user judged 500 far too long). Unloading a texture between drawing it and flushing the batch throws
+"texture has no storage": dispose only between frames or after `end()`.
+
+Open items: Adreno Tier A throughput (see below); Wayland/macOS; running armeabi-v7a/x86_64 (they compile); Linux arm64 natives (CI job `arm64-natives`); swapchain framebuffers still retire after waitIdle
+(2-5 ms measured, `VK_KHR_swapchain_maintenance1` would remove it); Swappy; a desktop `Application` (`Lwjgl3Window`'s constructor is package-private, so stock `Lwjgl3Input` cannot be reused cleanly); Phases 5-6.
 `./gradlew :gdx-vulkan-desktop:stressInstanced -Dgdxvulkan.device=1` is the instanced sprite stress test (1M sprites; not the plan's Stress test 3, which is Phase 3). `./gradlew :gdx-vulkan-desktop:stress2` is Stress test 2 (stock GL vs VulkanSpriteBatch, each in its own JVM). Note GL runs on the display GPU, so a
 second-GPU Vulkan comparison is capped by presentation and means nothing.
 

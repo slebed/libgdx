@@ -40,6 +40,7 @@ android {
 
 dependencies {
     api "com.badlogicgames.gdx:gdx:${gdxVersion}"
+    api "com.badlogicgames.gdx:gdx-backend-android:${gdxVersion}" // VulkanAndroidApplication reuses its input, audio and files
 }
 
 tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn 'compileShaders' }

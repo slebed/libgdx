@@ -337,6 +337,47 @@ class SpriteBatchTest {
         orange.dispose();
     }
 
+    @Test void shaderBundleWorksForTheShapeRenderer() {
+        final io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle invert =
+            io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle.fromResources("shape_invert", "shape.vert", "shape_invert.frag");
+        byte[] f = render(BLACK, b -> {
+            io.github.slebed.gdxvulkan.g2d.VulkanShapeRenderer shapes = new io.github.slebed.gdxvulkan.g2d.VulkanShapeRenderer(frame);
+            shapes.getProjectionMatrix().setToOrtho2D(0, 0, S, S);
+            shapes.begin(io.github.slebed.gdxvulkan.g2d.VulkanShapeRenderer.ShapeType.Filled);
+            shapes.setColor(1f, 0.5f, 0f, 1f);
+            shapes.rect(0, 32, 16, 16); // default shader
+            ((io.github.slebed.gdxvulkan.g2d.VulkanImmediateModeRenderer)shapes.getRenderer()).setShaderBundle(invert);
+            invert.custom0[1] = 1f;
+            shapes.rect(16, 32, 16, 16); // inverted
+            ((io.github.slebed.gdxvulkan.g2d.VulkanImmediateModeRenderer)shapes.getRenderer()).setShaderBundle(null);
+            shapes.rect(32, 32, 16, 16); // default again, with nothing left over from the bundle
+            shapes.end();
+            shapes.dispose();
+        });
+        assertPx(f, 8, 24, 255, 128, 0, 1, "default shader");
+        assertPx(f, 24, 24, 0, 127, 255, 2, "inverting bundle");
+        assertPx(f, 40, 24, 255, 128, 0, 1, "default restored");
+    }
+
+    @Test void debugOverlayReportsTheRendererAndDrawsText() {
+        final io.github.slebed.gdxvulkan.g2d.VulkanDebugOverlay overlay = new io.github.slebed.gdxvulkan.g2d.VulkanDebugOverlay(frame);
+        final String[] text = new String[1];
+        byte[] f = render(BLACK, b -> {
+            overlay.render();
+            text[0] = overlay.text().toString();
+        });
+        assertTrue(text[0].contains("renames/frame") && text[0].contains("retired pending") && text[0].contains("samplers"), text[0]);
+        assertTrue(text[0].contains(frame.isTierA() ? "tier A" : "tier B"), text[0]);
+        int lit = 0; // glyphs are white on the black clear: the top-left corner must have some bright pixels
+        for (int y = 0; y < H / 3; y++) {
+            for (int x = 0; x < W / 2; x++) {
+                if ((f[(y * W + x) * 4] & 0xFF) > 128) lit++;
+            }
+        }
+        assertTrue(lit > 50, "the overlay drew text in the top-left corner (" + lit + " bright pixels)");
+        overlay.dispose();
+    }
+
     @Test void texturesRenamedDuringAFrameAreCounted() {
         Texture t = solid(1, 0, 0, 1);
         render(BLACK, b -> { // the first draw creates the image: not a rename

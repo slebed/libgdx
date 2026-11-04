@@ -67,12 +67,30 @@ public final class GdxVkContext implements AutoCloseable {
      * @param surface an {@code android.view.Surface} (typed as Object so this module has no Android dependency)
      */
     public synchronized GdxVkPresenter createPresenterAndroid(Object surface, int width, int height, boolean vsync) {
+        return createPresenterAndroid(surface, width, height, vsync, false);
+    }
+
+    /**
+     * @param preRotate build the swapchain with the display's rotation so the compositor skips its rotation pass. The application keeps seeing
+     *           the logical size; shaders that call {@code gdx_vk_clip} (all of this library's) rotate their output.
+     */
+    public synchronized GdxVkPresenter createPresenterAndroid(Object surface, int width, int height, boolean vsync, boolean preRotate) {
         if (handle == 0) throw new IllegalStateException("Context is closed");
-        long p = GdxVkNative.nativeCreatePresenterAndroid(handle, surface, width, height, vsync);
+        long p = GdxVkNative.nativeCreatePresenterAndroid(handle, surface, width, height, vsync, preRotate);
         if (p == 0) throw new VulkanInitException("Native presenter creation returned null without an exception");
         GdxVkPresenter presenter = new GdxVkPresenter(this, p);
         presenters.add(presenter);
         return presenter;
+    }
+
+    /**
+     * Gives memory back under pressure (Android {@code onTrimMemory}): runs the deletions the GPU has finished with and frees idle staging
+     * blocks. Textures, buffers and everything the application holds stay. Call it on the thread that renders.
+     * @return how many staging blocks were freed
+     */
+    public synchronized int trimMemory() {
+        if (handle == 0) return 0;
+        return GdxVkNative.nativeTrimMemory(handle);
     }
 
     /** Validation-layer warnings and errors seen so far. Tests and CI require this to stay 0. */

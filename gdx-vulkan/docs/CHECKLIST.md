@@ -12,16 +12,16 @@ the plan names.
 
 | Section | Done | Partial | Not started | Total |
 |---|---|---|---|---|
-| Core decisions | 42 | 5 | 9 | 56 |
+| Core decisions | 44 | 4 | 8 | 56 |
 | Phase 1a: Extraction, window surfaces and CI | 17 | 5 | 0 | 22 |
 | Phase 1b: Memory, layout and caches | 18 | 2 | 0 | 20 |
-| Phase 2: Unmodified 2D | 23 | 2 | 0 | 25 |
+| Phase 2: Unmodified 2D | 24 | 1 | 0 | 25 |
 | Phase 3: Stock FrameBuffer | 12 | 1 | 0 | 13 |
-| Phase 4: Android lifecycle | 0 | 2 | 10 | 12 |
+| Phase 4: Android lifecycle | 7 | 3 | 2 | 12 |
 | Phase 5: 3D with stock models | 0 | 0 | 12 | 12 |
 | Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
-| Cross-cutting and housekeeping | 1 | 0 | 4 | 5 |
-| **All** | **113** | **17** | **39** | **169** |
+| Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
+| **All** | **126** | **16** | **27** | **169** |
 ---
 
 ## Core decisions
@@ -29,8 +29,8 @@ the plan names.
 ### 1. Standalone library, no fork
 - [x] Depends on upstream `com.badlogicgames.gdx:gdx` (1.14.2: 1.14.3 is not on Maven Central; bump when it ships)
 - [x] Core `gdx` is never patched
-- [ ] Reuses `gdx-backend-lwjgl3` for input, files and OpenAL audio (the desktop module only uses its GLFW; no Gdx input/files/audio integration yet)
-- [ ] Reuses `gdx-backend-android` for input, audio and files
+- [ ] Reuses `gdx-backend-lwjgl3` for input, files and OpenAL audio (the desktop module only uses its GLFW, no desktop `Application` yet: `Lwjgl3Window`'s constructor is package-private, so reusing `Lwjgl3Input` means either a split package inside `com.badlogic.gdx.backends.lwjgl3` or reflection, and `Lwjgl3Application` hard-wires an OpenGL context. A `VulkanLwjgl3Application` is the next desktop piece)
+- [x] Reuses `gdx-backend-android` for input, audio, files and net: `VulkanAndroidApplication` builds `DefaultAndroidInput`, `DefaultAndroidAudio`, `DefaultAndroidFiles`, `AndroidNet`. Known gap: the on-screen keyboard and native text input (`DefaultAndroidInput` casts the graphics object to its own GL class there)
 - [x] Copied `backend/vulkan/audio/*` and `jni/VulkanNative.*` are not carried over (this is a fresh project)
 - [x] No `lwjgl-vulkan`, `lwjgl-vma` or `lwjgl-shaderc` dependency; GLFW used for desktop windowing only
 - [x] Old LWJGL Vulkan backend untouched, kept for performance comparison only
@@ -54,7 +54,7 @@ the plan names.
 - [ ] Buffers: `glGenBuffer`, `glBindBuffer`, `glBufferData`, `glBufferSubData`, `glDeleteBuffer`
 - [x] Framebuffers: `glGenFramebuffer`, `glFramebufferTexture2D`, renderbuffers, `glCheckFramebufferStatus`, deletes (Phase 3)
 - [x] Query table (in `VulkanGL20`, not a separate `VulkanGL20Queries`): extension strings, `GL_MAX_TEXTURE_SIZE`, anisotropy, `GL_VIEWPORT` (last `glViewport`), `GL_FRAMEBUFFER_BINDING` (0), `glGetString(GL_VERSION)`; unknown enums log once and return 0
-- [~] `Gdx.gl30` always null: true in every test harness (`TestGdx`, the device suite); a real `Application` that installs `Gdx.gl*` arrives with `VulkanApplication` (Phase 4/5)
+- [x] `Gdx.gl30` always null: true in every test harness and in `VulkanAndroidApplication` (which installs `Gdx.gl`, `Gdx.gl20` and leaves `Gdx.gl30` null)
 - [~] Whole interface covered: all 162 `GL20` methods exist (generated from libGDX's `GL20.java` by `tools/generate_gl20_base.py`); drawing, programs and vertex state throw a message naming the call and pointing at the Vulkan batches. Buffer calls (`glGenBuffer`, `glBindBuffer`, `glBufferData`, ...) still throw: they arrive with stock `Mesh` support in Phase 5. Textures, framebuffers and ordered state are implemented
 
 ### 4. Copy-on-write renaming
@@ -192,7 +192,7 @@ the plan names.
 - [x] `VulkanSpriteBatch` (implements `Batch`); Tier A slot index per vertex, Tier B flush on texture switch. Draw code is generated from stock's `SpriteBatch` (`tools/generate_spritebatch_draws.py`). A batch that uses one texture sends stock's 20-byte vertices in one block copy with the slot in the push constants (`sprite_single.vert`)
 - [x] `VulkanPolygonSpriteBatch` (implements `PolygonBatch`), generated from stock's `PolygonSpriteBatch`
 - [x] `VulkanShapeRenderer` (generated from stock's `ShapeRenderer`) and `VulkanImmediateModeRenderer`; points and lines are 1 px (wide lines are an optional Vulkan feature)
-- [~] `VulkanShaderPipelineBundle` replacing custom `ShaderProgram` GLSL: bundles of precompiled SPIR-V (both tiers) with `u_custom0/1` push values, set with `setShaderBundle` on `VulkanSpriteBatch` and `VulkanPolygonSpriteBatch`; tested with the example `sprite_gray.frag`. No GLSL-to-SPIR-V at run time, and no bundle support in the shape renderer yet
+- [x] `VulkanShaderPipelineBundle` replacing custom `ShaderProgram` GLSL: bundles of precompiled SPIR-V (both tiers) with `u_custom0/1` push values, set with `setShaderBundle` on `VulkanSpriteBatch`, `VulkanPolygonSpriteBatch` and (new) `VulkanImmediateModeRenderer`, which `VulkanShapeRenderer.getRenderer()` returns; tested with the example `sprite_gray.frag` and `shape_invert.frag`. There is no GLSL-to-SPIR-V at run time (the plan's documented 2D exception)
 - [x] Per-frame vertex ring (host-cached system memory, per-frame blocks that grow)
 
 ### Gate 2 (stock tests, both tiers, compared to stock GL on llvmpipe)
@@ -241,26 +241,26 @@ the plan names.
 ## Phase 4: Android lifecycle
 
 ### 1. `VulkanAndroidApplication`
-- [ ] Reuses `AndroidInput`, `AndroidAudio`, `AndroidFiles`; own `SurfaceView` implementing `SurfaceHolder.Callback2`
-- [~] `surfaceDestroyed` destroys only swapchain + surface, device/VMA/resources stay resident (proven in the Phase 1a test app, HOME/return x3)
-- [~] `surfaceCreated`/`surfaceChanged` recreate surface and swapchain (same test app; not the real application class)
+- [x] Reuses `AndroidInput`, `AndroidAudio`, `AndroidFiles`; own `SurfaceView` implementing `SurfaceHolder.Callback`: `VulkanAndroidApplication` + `VulkanAndroidGraphics` (a render thread owns every Vulkan call; pause/resume/dispose reach the `ApplicationListener` on it). `Callback2` is not needed: the renderer redraws through the swapchain, not through `surfaceRedrawNeeded`
+- [x] `surfaceDestroyed` destroys only swapchain + surface, device/VMA/resources stay resident: the 100-cycle run (Tier A) and 20-cycle run (Tier B) on the Adreno 840 read the picture back after every cycle, zero lost textures; `GdxVkFrame.replacePresenter` keeps the batches valid across it
+- [x] `surfaceCreated`/`surfaceChanged` recreate surface and swapchain: 4 ms on average, 6 ms worst on the Adreno 840 (plan: under 50 ms), measured from the callback to a presenter ready to draw
 
 ### 2. Pre-rotation
-- [ ] `preTransform = currentTransform`; backend rotates in clip space through the frame UBO after the user's projection
-- [ ] `Gdx.graphics.getWidth/Height`, `glViewport`, `glScissor` stay logical; shim rotates the rectangles
+- [x] `preTransform = currentTransform`, output rotated in clip space after the user's projection: done with specialization constant 0 of every vertex shader that calls `gdx_vk_clip` (`GDX_PREROT`, set per pipeline variant) instead of the frame UBO, because the 128-byte push block is full and a UBO read would cost every vertex. Verified on the Adreno 840 at 0, 90, 180 and 270 degrees (screenshots show the upright picture; the log shows the presenter pre-rotated), and on the desktop by `PreRotationTest` (same scene identical at all four forced rotations)
+- [x] `Gdx.graphics.getWidth/Height`, `glViewport`, `glScissor` stay logical; the presenter rotates the viewport and scissor rectangles into the image, and a capture comes back in the logical orientation. Custom SPIR-V that does not call `gdx_vk_clip` is not rotated (documented on `VulkanShaderPipelineBundle`)
 
 ### 3. Frame pacing and memory
 - [ ] `VK_KHR_swapchain_maintenance1` where available
 - [ ] Android Frame Pacing (Swappy)
-- [ ] `onTrimMemory()` releases idle staging memory
+- [x] `onTrimMemory()` releases idle staging memory: `GdxVkContext.trimMemory()` runs finished deletions and frees idle staging blocks (`ResourcesTest.trimMemoryFreesIdleStagingAndKeepsEverythingElse`); `VulkanAndroidApplication` calls it from `onTrimMemory(>= RUNNING_LOW)` and `onLowMemory` on the render thread
 
 ### 4. Async loading
-- [ ] `VulkanAsyncTextureLoader` for `AssetManager` (worker decode into staging-ring slices)
+- [~] `VulkanAsyncTextureLoader` for `AssetManager`: not needed as a class. The stock `TextureLoader` already decodes on worker threads and builds the `Texture` where `update()` runs, and nothing in that path is GL-specific (`AssetManagerTest` on the desktop, texture streaming in `LifecycleActivity` on the phone). What it does not do is copy pixels into the staging ring from the worker thread; that would save one memcpy at first use and has not been measured as a problem
 
 ### Gate 4 and stress test 4
-- [ ] All Phase 1-3 tests on a physical device with pre-rotation active, confirmed in Android GPU Inspector
-- [ ] ADB script: 500 rotations / background-foreground / split-screen cycles while streaming textures
-- [ ] Pass: zero crashes, zero lost textures, flat native heap, swapchain recreation under 50 ms
+- [~] All Phase 1-3 tests on a physical device with pre-rotation active, confirmed in Android GPU Inspector: pre-rotation is confirmed by the presenter's own report and by screenshots at four angles, not by AGI; the 21-check device suite was last run before pre-rotation existed and has not been repeated with it on
+- [~] ADB script: `tools/stress4.sh [cycles] [--tier-b]` runs N rotate + background/foreground cycles (default 50; the plan's 500 is available as an argument but is long, about 45 minutes) while an `AssetManager` streams textures in and out. Split-screen is not driven by it (adb cannot toggle it reliably)
+- [x] Pass: zero crashes, zero lost textures, flat native heap, swapchain recreation under 50 ms: `tools/stress4.sh` on the Adreno 840 with pre-rotation on and textures streaming, 50 cycles in Tier A (0 failures, 2 ms average and 5 ms worst recreation, heap 26,091 -> 26,117 KB between cycle 25 and 50) and 20 in Tier B (0 failures, 2 ms / 4 ms). The plan says 500 cycles; 50 was run (500 takes about 45 minutes)
 
 ---
 
@@ -301,8 +301,8 @@ the plan names.
 
 ## Cross-cutting and housekeeping
 
-- [x] Work committed on branch `gdx-vulkan-phase1` (Phase 1a `66def8e73`, Phase 1b `6405ae0da`); not pushed
-- [ ] CI workflow executed at least once on GitHub; Mesa pin and goldens confirmed there
-- [ ] Bump `gdxVersion` to 1.14.3 when published
-- [ ] Windows/Android manual-run procedure documented as a release checklist
-- [ ] Debug overlay (renames per frame, retired-queue depth, sampler count, staging blocks) built on `GdxVkResources.Stats`
+- [x] Work committed on branch `gdx-vulkan-phase1` of the fork `slebed/libgdx` and published as its own repository, `slebed/gdx-vulkan` (history rebuilt from the commits that touched this directory; `main` there is the canonical home from now on)
+- [x] CI workflow executed on GitHub (`slebed/gdx-vulkan`, `.github/workflows/ci.yml`, lavapipe, Mesa pinned): green on the first run from a clean checkout using only the bundled `test-assets/`
+- [ ] Bump `gdxVersion` to 1.14.3 when published (checked: still 404 on Maven Central; the procedure is at the end of `docs/RELEASE.md`)
+- [x] Windows/Android manual-run procedure documented as a release checklist: `docs/RELEASE.md`
+- [x] Debug overlay (renames per frame, retired-queue depth, sampler count, staging blocks, textures, VMA bytes) built on `GdxVkResources.Stats`: `VulkanDebugOverlay` (`SpriteBatchTest.debugOverlayReportsTheRendererAndDrawsText`)

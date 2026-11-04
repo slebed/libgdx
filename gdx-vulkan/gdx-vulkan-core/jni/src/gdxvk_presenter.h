@@ -53,13 +53,16 @@ class Presenter {
 public:
     // Returns null and fills `error` / `errorKind` ("device" or "init") on failure.
     static std::unique_ptr<Presenter> create(Context& ctx, const SurfaceHandles& handles, uint32_t width, uint32_t height,
-                                             bool vsync, std::string& error, std::string& errorKind);
+                                             bool vsync, bool preRotate, std::string& error, std::string& errorKind);
     ~Presenter();
     Presenter(const Presenter&) = delete;
     Presenter& operator=(const Presenter&) = delete;
 
     // The swapchain is rebuilt at the start of the next beginFrame.
     void resize(uint32_t width, uint32_t height);
+    // Diagnostics and tests: render as if the display were rotated by `quarterTurns` (0-3, clockwise); -1 follows the surface. The swapchain is
+    // rebuilt on the next frame. Only meaningful on a square surface (a desktop window cannot change its image size).
+    void debugForceRotation(int quarterTurns);
 
     // Waits for a free frame slot, acquires an image and starts a pass that clears it to `rgba`.
     FrameStatus beginFrame(const float rgba[4]);
@@ -125,6 +128,8 @@ public:
     uint32_t height() const;
     uint32_t swapchainFormat() const; // VkFormat
     uint32_t imageCount() const;
+    // Quarter turns clockwise the swapchain image is pre-rotated by (0 when the compositor rotates).
+    uint32_t rotation() const;
     const std::string& lastError() const;
 
 private:
