@@ -4,7 +4,7 @@ A Vulkan renderer for libGDX, built as a standalone library on **stock libGDX** 
 libGDX is needed: unmodified `Texture`, `Pixmap`, `SpriteBatch`, `FrameBuffer`, Scene2D, `BitmapFont` and friends run against Vulkan through a
 GL20 shim, and the result is compared with stock libGDX on OpenGL.
 
-`docs/PLAN.md` has the architecture and the phases; `docs/CHECKLIST.md` is the item-by-item state (150 done, 11 partial, 8 not started, of 169; what is left is Phase 6 (tabled, needs a Mac), the desktop `Application`, Swappy and `VK_KHR_swapchain_maintenance1`, shadow cascades and spot lights, the Galaxy S20, an Android GPU Inspector capture, running the other Android ABIs, filing the upstream PR, and the 1.14.3 bump),
+`docs/PLAN.md` has the architecture and the phases; `docs/CHECKLIST.md` is the item-by-item state (155 done, 9 partial, 5 not started, of 169; what is left is Phase 6 (tabled, needs a Mac), the Galaxy S20, an Android GPU Inspector capture, running the other Android ABIs, spot lights and point-light shadows (stock has neither), filing the upstream PR, and the 1.14.3 bump),
 marking only what has been built **and verified**.
 
 ## Status
@@ -16,7 +16,7 @@ marking only what has been built **and verified**.
 | 2 Unmodified 2D | done: sprite batches, polygon batch, shape renderer, compressed textures, shader bundles, `VulkanSpriteBatchInstanced` (1,000,000 sprites moved by compute); every Stress 2 target met |
 | 3 Stock `FrameBuffer` | done: colour, depth and stencil framebuffers, `VulkanMultiTargetFrameBuffer` (several and floating-point attachments), GL cull/depth/stencil state, pass scheduling, Gate 3 scenes, Stress test 3. Not done: reordering offscreen passes that come after a swapchain draw |
 | 4 Android lifecycle | done apart from Swappy frame pacing, `VK_KHR_swapchain_maintenance1` and an Android GPU Inspector capture: `VulkanAndroidApplication` (stock input, audio and files), surface loss and recreation with everything resident (2 ms average), pre-rotation verified at all four angles on the phone, `onTrimMemory`, stock `AssetManager` texture streaming, Stress test 4 at 50 cycles, the 21-check device suite with the swapchain pre-rotated (both tiers) |
-| 5 3D with stock models | done apart from shadow cascades and point-light shadows: stock `Mesh` data through the GL buffer shim, a swapchain depth buffer, `VulkanModelBatch` (the stock `ModelBatch` API on a port of the default shader: lights, specular, emissive, textures, normal maps, fog, one directional shadow map, blending, skeletal animation, instancing), `VulkanComputeShader`, and GPU-driven instancing with compute culling, indirect draws and clustered point lights (`VulkanGpuInstances`). The animated knight and the `ModelBuilder` scenes match stock GL; Stress test 5 runs 250,000 boids and 500 lights at 495 fps on the RTX 2080 |
+| 5 3D with stock models | done apart from point-light shadows (stock has neither point-light shadows nor spot lights): stock `Mesh` data through the GL buffer shim, a swapchain depth buffer, `VulkanModelBatch` (the stock `ModelBatch` API on a port of the default shader: lights, specular, emissive, textures, normal maps, fog, one directional shadow map or a cascaded one (`VulkanCascadedShadowLight`), blending, skeletal animation, instancing), `VulkanComputeShader`, and GPU-driven instancing with compute culling, indirect draws and clustered point lights (`VulkanGpuInstances`). The animated knight and the `ModelBuilder` scenes match stock GL; Stress test 5 runs 250,000 boids and 500 lights at 495 fps on the RTX 2080 |
 | 6 macOS / iOS | tabled: it needs a Mac to build and test (stretch) |
 
 **Two tiers.** Tier A (Vulkan 1.3: dynamic rendering, a bindless texture table, dynamic raster state) and Tier B (Vulkan 1.1: render passes,
@@ -46,7 +46,7 @@ an Adreno 840 (Android 16). Not the Galaxy S20 the plan names.
 
 ## Layout
 - `gdx-vulkan-core/` Java API and the C++ core (`jni/`: CMake, vendored volk, VMA, SPIRV-Reflect and Vulkan headers); shaders in `src/main/shaders`
-- `gdx-vulkan-desktop/` desktop glue on stock `gdx-backend-lwjgl3` GLFW window handles, and the desktop tests and stress programs
+- `gdx-vulkan-desktop/` the desktop `Application` (`VulkanDesktopApplication`) on stock `gdx-backend-lwjgl3` GLFW, files, audio and networking, plus the desktop tests and stress programs
 - `gdx-vulkan-android/` separate Gradle build (AGP): `:library` and a `:testapp` that runs the self-test and the device suite. See its README
 - `ci/` the Docker image and script that run every test on lavapipe; `.github/workflows/ci.yml` runs it on GitHub
 - `tools/` generators for the GL20 base class and the batch draw code (generated from stock libGDX source so the oracle stays honest); see `tools/README.md`
@@ -75,6 +75,17 @@ gpu.render(camera, width, height);           // culls, sorts the lights into clu
 ```
 The transforms never leave GPU memory; the CPU's part of a frame is a 224-byte header write, five dispatches and one indirect draw. See
 `Stress5Main` for a complete program and `gpu_world.glsl` for the buffer layout.
+
+## Using it on the desktop
+```java
+VulkanDesktopConfiguration config = new VulkanDesktopConfiguration();
+config.title = "My game";
+config.width = 1280; config.height = 720;
+new VulkanDesktopApplication(new MyGame(), config);   // runs on this thread until the window closes
+```
+`Gdx.graphics`, `Gdx.input`, `Gdx.files`, `Gdx.audio`, `Gdx.net` and `Gdx.gl` are set, so the stock `Texture`, `Pixmap`, `FrameBuffer`, `Mesh`,
+`Stage` and the batches of this library work unchanged. Input is the stock LWJGL3 key mapping and event queue (a generated copy, see
+`tools/generate_desktop_input.py`). Not done: custom cursors (`newCursor` returns null), HiDPI `HdpiMode.Pixels`, and more than one window.
 
 ## Using it on Android
 ```java
@@ -141,7 +152,6 @@ of the built `gdxvk` library). Environment `GDXVK_COMPLETION=fence|timeline` ove
 - Custom shaders are precompiled SPIR-V bundles (`VulkanShaderPipelineBundle`); there is no run-time GLSL compilation.
 - Natives run on Windows x64, Linux x64 and Android arm64-v8a. The Android library also compiles for armeabi-v7a and x86_64, which have never been run.
 - Android: the on-screen keyboard and native text input through `Gdx.input` do not work yet (stock `DefaultAndroidInput` casts the graphics object to its own GL class there). No Swappy frame pacing, and swapchains are rebuilt after `vkDeviceWaitIdle` (2-5 ms measured).
-- There is no desktop `Application` yet: desktop programs build the context, presenter and frame themselves, as the tests do (see `gdx-vulkan-desktop`).
 - Linux arm64 natives are built and their native tests run by CI on GitHub's arm64 runner; the Java suite does not run there.
 - Offscreen passes that come after a swapchain draw are not reordered ahead of it (a framebuffer pass in the middle of a frame still suspends the main pass).
 - A framebuffer's depth keeps its contents between passes, as in GL; the on-chip (transient) depth of tile-based GPUs is an opt-in that needs every pass to clear it.

@@ -138,6 +138,7 @@ struct Presenter::Impl {
         std::vector<VkFence> fences; // owned: signalled when the last present of this swapchain has finished
     };
     std::vector<RetiredSwap> retiredSwaps;
+    std::vector<VkFence> strayFences; // present fences of failed presents that never signalled; destroyed with the presenter
 
     void destroyRetired(RetiredSwap& r) {
         for (VkFramebuffer f : r.framebuffers) vkDestroyFramebuffer(h.device, f, nullptr);
@@ -153,7 +154,8 @@ struct Presenter::Impl {
         for (size_t i = 0; i < retiredSwaps.size();) {
             bool done = true;
             for (VkFence f : retiredSwaps[i].fences) {
-                if (!force && vkGetFenceStatus(h.device, f) != VK_SUCCESS) { done = false; break; }
+                if (force) vkWaitForFences(h.device, 1, &f, VK_TRUE, 1000000000ull); // a device wait does not retire a present fence
+                else if (vkGetFenceStatus(h.device, f) != VK_SUCCESS) { done = false; break; }
             }
             if (done) {
                 destroyRetired(retiredSwaps[i]);
@@ -1055,9 +1057,14 @@ struct Presenter::Impl {
         }
         vkDeviceWaitIdle(h.device);
         collectRetired(true);
+        for (VkFence f : strayFences) vkDestroyFence(h.device, f, nullptr);
+        strayFences.clear();
         for (uint32_t i = 0; i < kFramesInFlight; ++i) {
-            if (slotFence[i] != VK_NULL_HANDLE) vkDestroyFence(h.device, slotFence[i], nullptr);
+            if (slotFence[i] == VK_NULL_HANDLE) continue;
+            if (slotFencePending[i]) vkWaitForFences(h.device, 1, &slotFence[i], VK_TRUE, 1000000000ull);
+            vkDestroyFence(h.device, slotFence[i], nullptr);
             slotFence[i] = VK_NULL_HANDLE;
+            slotFencePending[i] = false;
         }
         destroySwapchainViews();
         if (swapDepthId >= 0) h.resources->destroyDepthImage(swapDepthId);
@@ -1631,8 +1638,9 @@ FrameStatus Presenter::endFrame(bool capture) {
     }
     s.profLap(7);
     if (pi.pNext && (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR)) s.slotFencePending[slot] = true;
-    else if (pi.pNext) { // the present did not happen: the fence will never signal
-        vkDestroyFence(h.device, s.slotFence[slot], nullptr);
+    else if (pi.pNext) { // the present failed (out of date): the fence may never signal, so give it a moment and otherwise keep it for the end
+        if (vkWaitForFences(h.device, 1, &s.slotFence[slot], VK_TRUE, 20000000ull) == VK_SUCCESS) vkDestroyFence(h.device, s.slotFence[slot], nullptr);
+        else s.strayFences.push_back(s.slotFence[slot]);
         s.slotFence[slot] = VK_NULL_HANDLE;
     }
     ++s.profFrames;

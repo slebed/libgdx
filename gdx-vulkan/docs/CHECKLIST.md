@@ -12,16 +12,16 @@ the plan names.
 
 | Section | Done | Partial | Not started | Total |
 |---|---|---|---|---|
-| Core decisions | 53 | 2 | 1 | 56 |
+| Core decisions | 54 | 2 | 0 | 56 |
 | Phase 1a: Extraction, window surfaces and CI | 19 | 3 | 0 | 22 |
-| Phase 1b: Memory, layout and caches | 19 | 1 | 0 | 20 |
+| Phase 1b: Memory, layout and caches | 20 | 0 | 0 | 20 |
 | Phase 2: Unmodified 2D | 25 | 0 | 0 | 25 |
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
-| Phase 4: Android lifecycle | 9 | 1 | 2 | 12 |
-| Phase 5: 3D with stock models | 8 | 4 | 0 | 12 |
+| Phase 4: Android lifecycle | 11 | 1 | 0 | 12 |
+| Phase 5: 3D with stock models | 9 | 3 | 0 | 12 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **150** | **11** | **8** | **169** |
+| **All** | **155** | **9** | **5** | **169** |
 ---
 
 ## Core decisions
@@ -29,7 +29,7 @@ the plan names.
 ### 1. Standalone library, no fork
 - [x] Depends on upstream `com.badlogicgames.gdx:gdx` (1.14.2: 1.14.3 is not on Maven Central; bump when it ships)
 - [x] Core `gdx` is never patched
-- [ ] Reuses `gdx-backend-lwjgl3` for input, files and OpenAL audio (the desktop module only uses its GLFW, no desktop `Application` yet: `Lwjgl3Window`'s constructor is package-private, so reusing `Lwjgl3Input` means either a split package inside `com.badlogic.gdx.backends.lwjgl3` or reflection, and `Lwjgl3Application` hard-wires an OpenGL context. A `VulkanLwjgl3Application` is the next desktop piece)
+- [x] Reuses `gdx-backend-lwjgl3` for files, networking, preferences, clipboard, OpenAL audio, GLFW and natives loading; `VulkanDesktopApplication` is the desktop `Application`. Input is the stock key mapping, event queue and polling, **as a generated copy** (`tools/generate_desktop_input.py` turns libGDX's `DefaultLwjgl3Input` into `VulkanDesktopInput`): the stock class needs an `Lwjgl3Window`, whose constructor is package-private and whose graphics object creates an OpenGL context, so it could not be used as it is. `DesktopApplicationTest` runs an application end to end (window, input events, posted runnables, resize, a captured frame, clean shutdown with no validation messages)
 - [x] Reuses `gdx-backend-android` for input, audio, files and net: `VulkanAndroidApplication` builds `DefaultAndroidInput`, `DefaultAndroidAudio`, `DefaultAndroidFiles`, `AndroidNet`. Known gap: the on-screen keyboard and native text input (`DefaultAndroidInput` casts the graphics object to its own GL class there)
 - [x] Copied `backend/vulkan/audio/*` and `jni/VulkanNative.*` are not carried over (this is a fresh project)
 - [x] No `lwjgl-vulkan`, `lwjgl-vma` or `lwjgl-shaderc` dependency; GLFW used for desktop windowing only
@@ -145,7 +145,7 @@ the plan names.
 - [x] `uint64` serial incremented on every `vkQueueSubmit`
 - [x] Completion by timeline semaphore (1.2+) or a fence per serial (1.1; `forceTierB` selects fences)
 - [x] Retired `VkBuffer` ranges, `VkImage`, `VkImageView` and Set 1 slots/sets freed once `completed >= retirement serial`
-- [~] Retired `VkFramebuffer`: offscreen framebuffers go through the deletion queue. Swapchain framebuffers and views are destroyed after `vkDeviceWaitIdle` when the swapchain is rebuilt, which happens on resize only (2-5 ms measured, never per frame). Removing it needs `VK_KHR_swapchain_maintenance1` (below); left as it is
+- [x] Retired `VkFramebuffer`: offscreen framebuffers go through the deletion queue; with `VK_KHR_swapchain_maintenance1` the replaced swapchain, its views, framebuffers and semaphores are parked and destroyed when the fences of its last presents have signalled, so a resize no longer waits for the device (without the extension, or while Swappy paces the swapchain, the old `vkDeviceWaitIdle` remains, 2-5 ms at resize only). Render passes live as long as the presenter
 - [x] Retirement thread-safe: `dispose()` from `create()`, between frames and from loader threads (soak: 4 worker threads)
 - [x] Retirement across multiple windows: `MultiWindowTest` (two windows, two presenters, one context): textures drawn in one window and disposed before the other draws, and a rename while both windows have frames in flight; validation clean in both tiers
 
@@ -250,8 +250,8 @@ the plan names.
 - [x] `Gdx.graphics.getWidth/Height`, `glViewport`, `glScissor` stay logical; the presenter rotates the viewport and scissor rectangles into the image, and a capture comes back in the logical orientation. Custom SPIR-V that does not call `gdx_vk_clip` is not rotated (documented on `VulkanShaderPipelineBundle`)
 
 ### 3. Frame pacing and memory
-- [ ] `VK_KHR_swapchain_maintenance1` where available
-- [ ] Android Frame Pacing (Swappy)
+- [x] `VK_KHR_swapchain_maintenance1` where available (instance: `VK_KHR_surface_maintenance1`, `VK_KHR_get_surface_capabilities2`; device feature `swapchainMaintenance1`): present fences, one per frame slot; `GDXVK_NO_PRESENT_FENCES=1` turns it off. Active on the RTX 5080 and RTX 2080 and the Adreno 840 (the whole desktop suite and the device suite run with it); the Ubuntu and SDK validation layers that predate the extension warn "not a known extension string", which the message counter ignores
+- [x] Android Frame Pacing (Swappy): `androidx.games:games-frame-pacing` through prefab, `gdxvk_swappy.cpp` (device extensions, attach per swapchain, `SwappyVk_queuePresent`), switched on by `VulkanAndroidApplication` when `GdxVkConfig.framePacing` (default) and vsync are on. On the Adreno 840 `framePacingPeriodMicros` reads 16,666 (60 Hz) and the lifecycle stress (rotate/background cycles, surface recreation) passes in both tiers. Swappy replaces present fences on that swapchain. The library is now built against the **shared** C++ STL, which the Swappy prefab package requires
 - [x] `onTrimMemory()` releases idle staging memory: `GdxVkContext.trimMemory()` runs finished deletions and frees idle staging blocks (`ResourcesTest.trimMemoryFreesIdleStagingAndKeepsEverythingElse`); `VulkanAndroidApplication` calls it from `onTrimMemory(>= RUNNING_LOW)` and `onLowMemory` on the render thread
 
 ### 4. Async loading
@@ -278,7 +278,7 @@ the plan names.
 
 ### 3. Lighting and shadows
 - [~] Clustered point-light culling in compute: `light_cull.comp` sorts the point lights into a 16 x 9 x 24 cluster grid (exponential depth slices), the fragment shader reads its cluster (`VulkanGpuInstances`). Every one of the 3,456 cluster lists equals a CPU brute force (`GpuInstancesTest`, and on the phone, 0 mismatches). Spot lights are not done, and the stock `ModelBatch` path still lights per vertex with at most 2 directional and 5 point lights as stock does
-- [~] Shadows: one directional shadow map through stock `DirectionalShadowLight` (stock's packed-depth shader and 4-tap PCF ported), Tier A only: it matches stock GL within 1 pixel and has a lavapipe golden (`gate5_shadows`). Not done: cascades, and point-light cubemap shadow casters (the shim has no cube textures)
+- [x] Shadows: one directional shadow map through stock `DirectionalShadowLight` (stock's packed-depth shader and 4-tap PCF ported), Tier A only: it matches stock GL within 1 pixel and has a lavapipe golden (`gate5_shadows`). **Cascades** (beyond stock): `VulkanCascadedShadowLight`, 2 to 4 maps of one size, the frustum split by a lambda blend of uniform and logarithmic, each slice fitted with a bounding sphere and moved in whole texels so shadows do not shimmer; the fragment shader picks the cascade from `1 / gl_FragCoord.w` (perspective cameras). `gate5_cascades` has a lavapipe golden and a check that shadow shows in both a near and a far band; the phone matches the golden within 1 pixel. Not done: point-light cubemap shadow casters (the GL shim has no cube textures), spot-light shadows (no spot lights)
 
 ### 4. Compute
 - [x] `VulkanComputeShader` with automatic barriers `COMPUTE_SHADER -> COMPUTE_SHADER` between dispatches and `-> DRAW_INDIRECT | VERTEX_ATTRIBUTE_INPUT | VERTEX/FRAGMENT_SHADER` after the last, `DrawIndexedIndirect` and `DrawIndexedInstanced` stream ops, `GdxVkResources.readBuffer` for tests; used by `VulkanGpuInstances` (cull, light cull) and the boids example
