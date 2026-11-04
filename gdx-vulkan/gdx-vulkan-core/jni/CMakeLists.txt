@@ -31,6 +31,7 @@ add_library(gdxvk_core STATIC
     src/gdxvk_rings.cpp
     src/gdxvk_resources.cpp
     src/gdxvk_swappy.cpp
+    src/gdxvk_shader_compiler.cpp
     src/vma_impl.cpp
     src/gdxvk_reflect.cpp
     src/volk_impl.c
@@ -50,6 +51,26 @@ if(NOT MSVC)
     set_source_files_properties(src/vma_impl.cpp PROPERTIES COMPILE_FLAGS "-w")
 endif()
 target_link_libraries(gdxvk_core PUBLIC ${CMAKE_DL_LIBS})
+
+# glslang (Khronos): GLSL to SPIR-V at run time, used by the shader translator (docs/SHADER_COMPILER.md). Vendored in vendor/glslang (16.6.0)
+# with only the front end and the SPIR-V generator: no HLSL, no tools, no tests, no SPIRV-Tools optimizer yet.
+option(GDXVK_GLSLANG "Build glslang for run-time GLSL compilation" ON)
+if(GDXVK_GLSLANG)
+    set(ENABLE_HLSL OFF CACHE BOOL "" FORCE)
+    set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
+    set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+    set(ENABLE_SPVREMAPPER OFF CACHE BOOL "" FORCE)
+    set(ENABLE_GLSLANG_JS OFF CACHE BOOL "" FORCE)
+    set(BUILD_EXTERNAL OFF CACHE BOOL "" FORCE)
+    set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLSLANG_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    set(ENABLE_PCH OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(vendor/glslang EXCLUDE_FROM_ALL)
+    target_compile_definitions(gdxvk_core PUBLIC GDXVK_GLSLANG)
+    target_link_libraries(gdxvk_core PUBLIC glslang glslang-default-resource-limits)
+    target_include_directories(gdxvk_core PRIVATE vendor/glslang)
+endif()
 
 # Android Frame Pacing (Swappy), from the games-frame-pacing AAR through prefab. Off unless the Gradle build asks for it.
 option(GDXVK_SWAPPY "Link Android Frame Pacing (Swappy)" OFF)
@@ -82,5 +103,11 @@ if(GDXVK_BUILD_TESTS AND NOT ANDROID)
     target_link_libraries(smoke PRIVATE gdxvk_core)
     # Needs an ICD (lavapipe in CI). Exit code 2 = no ICD, treated as skip locally.
     add_test(NAME smoke COMMAND smoke --validation)
+
+    if(GDXVK_GLSLANG)
+        add_executable(shader_compiler_test test/shader_compiler_test.cpp)
+        target_link_libraries(shader_compiler_test PRIVATE gdxvk_core)
+        add_test(NAME shader_compiler_test COMMAND shader_compiler_test)
+    endif()
     set_tests_properties(smoke PROPERTIES SKIP_RETURN_CODE 2)
 endif()

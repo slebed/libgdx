@@ -19,11 +19,12 @@ the plan names.
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 11 | 1 | 0 | 12 |
 | Phase 5: 3D with stock models | 9 | 3 | 1 | 13 |
-| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 6 | 0 | 34 | 40 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 7 | 1 | 34 | 42 |
+| Releases and adoption testing | 0 | 0 | 12 | 12 |
 | Demos (to plan once Phase 5 is complete) | 0 | 0 | 7 | 7 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **162** | **8** | **47** | **217** |
+| **All** | **163** | **9** | **59** | **231** |
 ---
 
 ## Core decisions
@@ -297,7 +298,7 @@ the plan names.
 
 Goal: a game's own libGDX shaders (`ShaderProgram`, written in the old `attribute` / `varying` / `uniform` GLSL) run unchanged, and in the end the stock
 `SpriteBatch`, `ShapeRenderer` and `Stage` run without being renamed. Design rule (owner's decision): the translator produces **Vulkan-native** shaders, it
-does not emulate OpenGL. Every item below is judged against that: nothing may cost a GL-style per-call price at draw time (uniform calls, state replay,
+does not emulate OpenGL. Second rule (owner's decision): **base functionality never goes through the translator**. The shaders for the sprite batches, the shape renderer, the model batch (default and shadow-depth), the post-processing effects and the compute work are dedicated Vulkan shaders written for this library and compiled at build time. The translator is for shaders a game supplies itself. Every item below is judged against that: nothing may cost a GL-style per-call price at draw time (uniform calls, state replay,
 descriptor writes), and the Vulkan features the library already uses (bindless textures, push constants, uniform rings, pipeline cache) are the targets.
 
 ### Porting ergonomics (done)
@@ -306,6 +307,10 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [x] `VulkanModelBatch` turns the screen's depth buffer on itself (kept across swapchain replacement); no `setDepth` call
 - [x] `VulkanStage`: the stock `Stage` with a `VulkanSpriteBatch`, same constructors, disposes the batch
 - [x] Creating a stock `SpriteBatch`, `ShaderProgram` or `Stage(viewport)` fails with a message that names the class to use instead
+
+### Built-in shaders (done)
+- [x] Built-in shaders are dedicated Vulkan GLSL, not translations: `sprite.*`, `shape.*`, `mesh_flat.*`, `model_default*` (a port of libGDX's default shader, with the data in a storage buffer and the material and light flags as specialization constants), `model_depth*` (the shadow-map pass), `fx_*`, `gpu_*`, `boids.comp`; compiled with `glslc` at build time to SPIR-V, loaded by name; nothing is compiled or translated at run time for them
+- [ ] A test fails the build if a built-in code path calls the run-time compiler (a counter in the compiler, asserted by the 2D, 3D and framebuffer scene tests), so base functionality cannot start depending on it by accident
 
 ### A. Translating stock GLSL
 - [ ] Dialect: GLSL ES 1.00 / desktop 1.10-1.20 as libGDX ships it: `attribute` to `in`, `varying` to matched `out`/`in` locations across the two stages, `gl_FragColor` and `gl_FragData[n]` to declared outputs, `texture2D`/`textureCube` to `texture`, `#ifdef GL_ES` and `precision` lines
@@ -328,7 +333,7 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 
 ### C. The compiler
 - [x] Choose the compiler: **glslang** used directly behind a `ShaderCompiler` interface, with the reasons and the comparison with shaderc (and with the original backend, which used shaderc through LWJGL) in `docs/SHADER_COMPILER.md`
-- [ ] Vendor a pinned glslang (16.6.0) into the native library and build it for Windows x64, Linux x64 and Android arm64; record the size cost with and without the SPIRV-Tools optimizer
+- [~] Vendor a pinned glslang (16.6.0) into the native library and build it for Windows x64, Linux x64 and Android arm64; record the size cost with and without the SPIRV-Tools optimizer: vendored, built and tested on Windows x64 (1.7 MB, first compile 152 ms, then 0.9 ms; `shader_compiler_test`); Linux (Docker, CI) and Android builds not run yet, the optimizer not added
 - [ ] Existing SPIRV-Reflect validation runs on every translated shader (block layout, vertex inputs, sampler count)
 - [ ] The build still works without the compiler's sources for people who only use precompiled bundles (optional component), or the dependency is vendored
 
@@ -342,7 +347,7 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 ### E. Stock classes with no rename (stretch)
 - [ ] GL shim: `glCreateShader`, `glShaderSource`, `glCompileShader`, `glCreateProgram`, `glAttachShader`, `glLinkProgram`, `glGetProgramiv`/`glGetShaderInfoLog`, `glGetActiveUniform`/`Attrib`, `glGetUniformLocation`, `glUniform*`, `glUseProgram` route to the translator, so the stock `ShaderProgram` works
 - [ ] GL shim: array buffers, `glVertexAttribPointer`, `glEnableVertexAttribArray`, `glDrawElements`, `glDrawArrays` become command-stream draws; the pipeline comes from (program, vertex layout, blend/depth/cull state) with the state cached so equal state costs one lookup
-- [ ] Stock `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `ImmediateModeRenderer20`, `Mesh.render(ShaderProgram)` and `new Stage(viewport)` run unmodified
+- [ ] Stock `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `ImmediateModeRenderer20`, `Mesh.render(ShaderProgram)` and `new Stage(viewport)` run unmodified. Libgdx's own shaders in these classes are **recognised by their source text (a hash of the normalised source) and replaced by the dedicated Vulkan shaders**, so the stock classes run at the speed of the generated ones; only an unknown (custom) shader is translated
 - [ ] Stock `ModelBatch` with libGDX's `DefaultShader` and `DepthShader` GLSL runs unmodified
 - [ ] Gate: the Gate 2, 3 and 5 scenes drawn by the stock classes on the shim match stock OpenGL, and match the generated Vulkan batches
 - [ ] Performance gate: a stock `SpriteBatch` on the shim is within 1.5x of `VulkanSpriteBatch` in Stress test 2 (target to confirm once measured); first-use compile of a typical shader under 50 ms, second launch about 0
@@ -356,6 +361,29 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 
 ---
 
+## Releases and adoption testing
+
+Owner's plan: publish release builds on GitHub, when it is safe, so others can try the library in their own projects; and try the library in several of the
+owner's own projects to prove that moving over is clean, and hopefully faster than stock libGDX. A release is made only when the owner says so.
+
+### Release builds
+- [ ] Release criteria agreed ("safe"): CI green on the tagged commit; no open bug that crashes or corrupts on a supported platform; the known limitations are in the release notes; the licences and `NOTICE` are complete; no personal paths or credentials in the repository
+- [ ] Version scheme: pre-releases first (`v0.1.0-beta.1`), marked as pre-release on GitHub
+- [ ] One jar that carries the native library of every desktop platform (`natives/<os>-<arch>/`); today the jar holds only the platform of the machine that built it
+- [ ] A release workflow that runs on a tag: builds the natives on Windows x64, Linux x64 and (arm64 if wanted), the Android library as an AAR (arm64-v8a and the other ABIs), runs the tests, and attaches the jars, the AAR and their checksums
+- [ ] Release notes written from the checklist (what works, what does not, the known problems) and a "how to try it" page for testers (`docs/RELEASE.md` updated)
+- [ ] Issue template that asks for what is needed to reproduce (GPU, driver, OS, which path it used, the log)
+- [ ] Publishing to a Maven repository (GitHub Packages, JitPack or Maven Central) decided; until then the releases are the download
+
+### Adoption testing in the owner's projects
+- [ ] `docs/ADOPTION.md`: one entry per project: what had to change (class swaps, shaders, configuration), anything unclear or broken, how long it took
+- [ ] Each project builds and runs with gdx-vulkan on the desktop (and on Android where the project has it); output compared with stock OpenGL
+- [ ] Performance compared with stock: the same build can switch between stock and gdx-vulkan (a flag), so one game is measured both ways: frame time on the CPU and the GPU, 1% lows, memory
+- [ ] Everything found becomes a checklist item or an issue; the README's migration section is corrected from the real experience
+- [ ] Custom GLSL in those projects listed, since it decides how much of the shader translator (Phase 5b) each project needs
+
+---
+
 ## Demos (to plan once Phase 5 is complete)
 
 Not started. The owner wants to discuss the list when Phase 5 is complete; these are the requirements stated so far.
@@ -365,7 +393,7 @@ Not started. The owner wants to discuss the list when Phase 5 is complete; these
 - [ ] Where there is no OpenGL equivalent (compute shaders, GPU culling, indirect drawing, clustered lights, cascaded shadows), the demo makes its purpose clear: what it does and why stock libGDX cannot
 - [ ] The demo code is clean, clear and easy to follow: they are the implementation examples users will copy from; short methods, names that explain themselves, comments where the Vulkan side differs from stock
 - [ ] Every demo is visually interesting
-- [ ] Every demo has readable text on screen that says what the demo is about (the wording of this requirement should be confirmed: "at least a little readable text" is the reading used here)
+- [ ] Every demo has easily readable text on screen that says what the demo is about. The text is scaled to the screen: libGDX's Scene2D test text is too small on high-resolution screens, so size it from the display density or the window height, never in fixed pixels, and check it on the desktop and on a phone
 - [ ] The demos are built by CI and listed in the README
 
 ---

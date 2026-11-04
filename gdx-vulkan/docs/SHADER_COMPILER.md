@@ -35,12 +35,20 @@ library, also for Android, and LWJGL has no Android natives. Either compiler has
 
 What shaderc does better, and what we give up: a smaller API and ready-made include handling (we write our own; stock libGDX shaders do not use `#include`).
 
-## What is still to measure (not done yet)
-The build of glslang was not run in the comparison session, so these are open and are tracked in the checklist (section C):
-1. Library size per platform with and without the SPIRV-Tools optimizer.
-2. Time to compile libGDX's stock shaders (the `SpriteBatch` shader, `ShapeRenderer`, `DefaultShader`) with each setting.
-3. Whether the optimizer's output runs faster on the devices we have (Stress test 2 with a translated sprite shader against the precompiled one).
-4. First-launch compile time on the phones, and the second launch with the cache.
+## Measured so far (glslang 16.6.0 vendored, Windows x64, MSVC Release, no optimizer, no HLSL)
+- **Size:** a test program that links the compiler is 1.82 MB, against 0.11 MB for one that does not: about **1.7 MB** for the front end and the SPIR-V generator.
+  (`gdxvk.dll` itself is unchanged until the translator is linked into it.) The static library is 35 MB with debug symbols, which are not in the product.
+- **Time:** the first compile in a process takes **152 ms** (glslang builds its built-in symbol tables on first use); after that a small shader (the
+  sprite vertex shader) compiles in **0.88 ms**. Plan: warm the compiler on a worker thread at startup, and cache the SPIR-V on disk by source hash so a
+  second launch does not compile at all.
+- **Behaviour:** `shader_compiler_test` (a native test, no GPU) checks vertex, fragment and compute compilation, the SPIR-V magic number, and that an error names the
+  shader and the line of the source as given.
+
+## Still to measure
+1. Android arm64 and Linux x64 library sizes (the build is wired for them; not measured).
+2. The cost of adding the SPIRV-Tools optimizer: size, compile time, and whether its output runs faster (Stress test 2 with a translated sprite shader
+   against the precompiled one).
+3. First-launch and cached-launch compile times on the phones.
 
 ## Pinning
 Vendor a pinned glslang release (16.6.0 today) with the SPIRV-Tools and SPIRV-Headers commits that its `known_good.json` names, under `gdx-vulkan-core/jni/vendor`
