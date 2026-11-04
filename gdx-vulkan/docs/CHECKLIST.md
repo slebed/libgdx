@@ -13,16 +13,16 @@ the plan names.
 | Section | Done | Partial | Not started | Total |
 |---|---|---|---|---|
 | Core decisions | 54 | 2 | 0 | 56 |
-| Phase 1a: Extraction, window surfaces and CI | 19 | 3 | 0 | 22 |
+| Phase 1a: Extraction, window surfaces and CI | 20 | 2 | 0 | 22 |
 | Phase 1b: Memory, layout and caches | 20 | 0 | 0 | 20 |
 | Phase 2: Unmodified 2D | 25 | 0 | 0 | 25 |
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 11 | 1 | 0 | 12 |
-| Phase 5: 3D with stock models | 9 | 3 | 0 | 12 |
+| Phase 5: 3D with stock models | 9 | 3 | 1 | 13 |
 | Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 5 | 0 | 34 | 39 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **160** | **9** | **39** | **208** |
+| **All** | **161** | **8** | **40** | **209** |
 ---
 
 ## Core decisions
@@ -90,7 +90,7 @@ the plan names.
 - [x] Tier B flush on texture switch (`SpriteBatchTest.textureChangesFlushOnlyOnTierB`: four textures take four draw calls on Tier B, one on Tier A)
 - [x] `forceTierB` runs Tier B anywhere (`GdxVkConfig.forceTierB`; the plan calls it `VulkanApplicationConfiguration.forceTierB`)
 - [x] CI runs every test in both tiers (`ci/run-checks.sh`; first executed on GitHub on 2026-11-03: workflow run 41735391607 for commit 61b156d58 passed in 2m24s)
-- [~] Device tests: RTX 5080 and RTX 2080 both tiers; Android phone (Adreno 840) both tiers, Phase 1a self-test and the Phase 1b/2 device suite; **no Galaxy S20**
+- [~] Device tests: RTX 5080 and RTX 2080 both tiers; Android phones (Adreno 840 both tiers; Adreno 650 compatibility path) with the Phase 1a self-test and the device suite
 
 ### 8. Test oracle
 - [x] Compatibility reference = stock GL libGDX on llvmpipe (`GlReferenceMain`, `OracleImages`; on CI the GL side is llvmpipe, on a workstation the installed driver)
@@ -128,12 +128,12 @@ the plan names.
 - [x] Every test in Tier A and `forceTierB` with validation and sync validation (lavapipe, Docker)
 - [x] Golden harness: exact lavapipe goldens, plus the GL-vs-Vulkan tolerance comparison
 - [x] Windows (RTX) runs, manual
-- [~] Android run, manual: REDMAGIC NX809J, not the Galaxy S20
+- [x] Android run, manual: REDMAGIC NX809J (Adreno 840) and a Samsung Galaxy S20 FE 5G (SM-G781W, Adreno 650, Android 13)
 
 ### Gate 1a
 - [x] Clear screen and triangle match goldens in both tiers on lavapipe (Docker run of the CI script)
 - [x] Render correctly on the RTX 2080 (real device index 1, goldens within tolerance, both tiers; earlier claims about the 2080 were invalid, see CLAUDE.md)
-- [~] Render correctly on the "Galaxy S20": passed on a REDMAGIC NX809J instead
+- [~] Render correctly on the "Galaxy S20": the plan's device was not available; the S20 FE 5G (Adreno 650, Vulkan 1.1 driver, so the compatibility path only) runs the 2D, framebuffer, compute, instancing, soak and lifecycle checks (24 of 25 suite checks pass; lifecycle stress 8 cycles, 0 failures, 13 ms surface recreation, Swappy on at 60 Hz). **Fails:** every `VulkanModelBatch` pipeline (3D) with `VK_ERROR_INITIALIZATION_FAILED` and `Adreno-GSL: GPUOBJ_ALLOC Invalid argument` in logcat. Narrowed down: a stub vertex shader that only writes `gl_Position` and one output builds; adding one dynamic storage-buffer read (`gdx_data[push constant]`) fails once the fragment shader consumes any vertex output; a fragment shader that consumes none builds. Not the fragment shader code, light loops, cascades, the flat instance varying (int or uint) or the varying count. Open: find the trigger or work around it
 
 ---
 
@@ -287,6 +287,7 @@ the plan names.
 ### Gate 5 and stress test 5
 - [x] Animated `knight.g3db` via unmodified `G3dModelLoader` + a `ModelBuilder` scene, normal mapping, skeletal animation, directional shadows: `gate5_models`, `gate5_knight`, `gate5_fog` match stock `ModelBatch` on OpenGL with 0 differing pixels and `gate5_shadows` with 1 (all within tolerance), `gate5_textures` exactly; `gate5_normalmap` has no stock equivalent and has its own lavapipe golden and a check that the mapped box shows far more detail than the plain one. All have lavapipe goldens; on the Adreno 840 they match them in both tiers (the Tier A-only scenes in Tier A)
 - [x] 250,000 instanced textured meshes moved by compute boids, 500 point lights culled in compute: `Stress5Main` (`gradlew :gdx-vulkan-desktop:stress5`), `boids.comp` (grid-based boids), `gpu_cull.comp`, `light_cull.comp`, `gpu_lit.vert/.frag`
+- [ ] `VulkanModelBatch` pipelines build on the Adreno 650 (Galaxy S20 FE): fails today, see "Render correctly on the Galaxy S20" above
 - [~] Pass: 60+ fps on the RTX 2080 (495 fps average, 1% low 259, both tiers; RTX 5080 957-988 fps), 50,000 instances and 64 lights at 60 fps on a phone (Adreno 840, 1216x2688, vsync off: 781 fps in Tier A, 785 in Tier B; 250,000 instances and 500 lights: 52 fps; **not the Galaxy S20**), zero Java allocations per frame (0.6-1.2 bytes per frame measured over 12 s, the rest is noise in the measurement; found and removed: JDK 18+ reflection allocation in `StockMeshAccess`, now JNI field reads)
 
 ---

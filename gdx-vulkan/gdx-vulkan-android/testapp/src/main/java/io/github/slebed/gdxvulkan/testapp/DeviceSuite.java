@@ -110,12 +110,14 @@ final class DeviceSuite {
         final int size = Gate5Scenes.SIZE;
         com.badlogic.gdx.files.FileHandle data = Gdx.files.internal("data");
         presenter.setDepth(GdxVkPresenter.DEPTH);
+        final java.util.List<String> failures = new java.util.ArrayList<String>();
         try {
             for (final Gate5Scenes.Scene scene : Gate5Scenes.all()) {
                 if (!tierA && !scene.runsOnTierB()) {
                     TestLog.i(TAG, scene.name() + ": needs a second texture per draw, Tier A only");
                     continue;
                 }
+                try { // one scene failing must not hide how the others do
                 scene.prepare(data);
                 gfxW = gfxH = size;
                 Gate5Scenes.ModelApi api = null;
@@ -140,12 +142,20 @@ final class DeviceSuite {
                     Gdx.gl.glViewport(0, 0, W, H);
                     scene.dispose();
                 }
+                TestLog.i(TAG, "gate5 scene ok: " + scene.name());
+                } catch (Throwable t) {
+                    closeOpenFrame();
+                    failures.add(scene.name() + ": " + t);
+                    TestLog.e(TAG, "gate5 scene failed: " + scene.name(), t);
+                }
             }
         } finally {
             presenter.setDepth(GdxVkPresenter.DEPTH_NONE);
+            closeOpenFrame(); // a scene that failed mid-frame left it open; do not let begin() replace the real error
             beginFrame(0, 0, 0);
             frame.end(); // the swapchain loses its depth buffer at the next frame
         }
+        require(failures.isEmpty(), "gate5 scenes failed: " + failures);
     }
 
     /** The GPU's frustum cull and light clustering against the same computed on the CPU (the desktop GpuInstancesTest, on the phone's driver). */
@@ -368,6 +378,14 @@ final class DeviceSuite {
         } catch (Throwable t) {
             failed++;
             TestLog.e(TAG, "FAIL " + name, t);
+            closeOpenFrame(); // the next check starts with no frame open
+        }
+    }
+
+    private void closeOpenFrame() {
+        try {
+            if (frame != null && frame.isOpen()) frame.end();
+        } catch (Throwable ignored) {
         }
     }
 
