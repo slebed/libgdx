@@ -29,6 +29,7 @@ struct ContextHandles {
     VmaAllocator allocator = VK_NULL_HANDLE;
     bool tierA = false;            // Tier A: dynamic rendering, bindless table. Tier B: VkRenderPass, per-texture sets.
     bool swapchainEnabled = false; // VK_KHR_swapchain (and the instance surface extensions) are enabled
+    bool presentFences = false;    // VK_KHR_swapchain_maintenance1: a present can be given a fence, so a retired swapchain needs no device wait
     uint32_t effectiveApi = 0;
     VkPhysicalDeviceLimits limits{};
     bool debugUtils = false;       // VK_EXT_debug_utils is enabled: objects get names and passes get labels, for RenderDoc and AGI

@@ -121,6 +121,69 @@ struct Presenter::Impl {
     bool vsync = true;
     bool dirty = true; // swapchain needs (re)creation before the next frame
 
+    // VK_KHR_swapchain_maintenance1: every present carries a fence (one per frame slot) that signals when the presentation engine is done
+    // with the swapchain's images and semaphores. A swapchain that was replaced is parked here, with the fences of its last presents,
+    // and destroyed when they have all signalled: resizing then never waits for the device.
+    VkFence slotFence[kFramesInFlight] = {};
+    bool slotFencePending[kFramesInFlight] = {};
+    struct RetiredSwap {
+        VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+        std::vector<VkImageView> views;
+        std::vector<VkFramebuffer> framebuffers;
+        std::vector<VkSemaphore> semaphores;
+        std::vector<VkFence> fences; // owned: signalled when the last present of this swapchain has finished
+    };
+    std::vector<RetiredSwap> retiredSwaps;
+
+    void destroyRetired(RetiredSwap& r) {
+        for (VkFramebuffer f : r.framebuffers) vkDestroyFramebuffer(h.device, f, nullptr);
+        for (VkImageView v : r.views) vkDestroyImageView(h.device, v, nullptr);
+        for (VkSemaphore s : r.semaphores) vkDestroySemaphore(h.device, s, nullptr);
+        for (VkFence f : r.fences) vkDestroyFence(h.device, f, nullptr);
+        if (r.swapchain != VK_NULL_HANDLE) vkDestroySwapchainKHR(h.device, r.swapchain, nullptr);
+        r = RetiredSwap();
+    }
+
+    // Destroys the parked swapchains whose fences have signalled (all of them with `force`, after a device wait).
+    void collectRetired(bool force) {
+        for (size_t i = 0; i < retiredSwaps.size();) {
+            bool done = true;
+            for (VkFence f : retiredSwaps[i].fences) {
+                if (!force && vkGetFenceStatus(h.device, f) != VK_SUCCESS) { done = false; break; }
+            }
+            if (done) {
+                destroyRetired(retiredSwaps[i]);
+                retiredSwaps.erase(retiredSwaps.begin() + static_cast<std::ptrdiff_t>(i));
+            } else {
+                ++i;
+            }
+        }
+    }
+
+    // Moves the current swapchain and its per-image objects into the parked list. The fences of the last presents go with it.
+    void parkSwapchain() {
+        // A slot with no pending present fence means the last frame of that slot is not covered (a present that failed, or too few frames
+        // since the swapchain was built): fall back to waiting for the device.
+        bool covered = true;
+        for (uint32_t i = 0; i < kFramesInFlight; ++i) covered = covered && slotFencePending[i];
+        if (!covered) vkDeviceWaitIdle(h.device);
+        RetiredSwap r;
+        r.swapchain = swapchain;
+        r.views.swap(views);
+        r.framebuffers.swap(framebuffers);
+        r.semaphores.swap(renderDone);
+        for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+            if (slotFence[i] == VK_NULL_HANDLE) continue;
+            if (slotFencePending[i]) r.fences.push_back(slotFence[i]);
+            else vkDestroyFence(h.device, slotFence[i], nullptr);
+            slotFence[i] = VK_NULL_HANDLE;
+            slotFencePending[i] = false;
+        }
+        images.clear();
+        swapchain = VK_NULL_HANDLE;
+        retiredSwaps.push_back(std::move(r));
+    }
+
     std::vector<VkImage> images;
     std::vector<VkImageView> views;
     std::vector<VkSemaphore> renderDone; // one per swapchain image, signalled by submit, waited by present
@@ -987,6 +1050,11 @@ struct Presenter::Impl {
                          prof[7] / n);
         }
         vkDeviceWaitIdle(h.device);
+        collectRetired(true);
+        for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+            if (slotFence[i] != VK_NULL_HANDLE) vkDestroyFence(h.device, slotFence[i], nullptr);
+            slotFence[i] = VK_NULL_HANDLE;
+        }
         destroySwapchainViews();
         if (swapDepthId >= 0) h.resources->destroyDepthImage(swapDepthId);
         swapDepthId = -1;
@@ -1095,7 +1163,9 @@ struct Presenter::Impl {
 
     // (Re)builds the swapchain for the current surface size. Returns Skipped when the surface has zero area.
     FrameStatus recreateSwapchain() {
-        vkDeviceWaitIdle(h.device);
+        const bool parked = h.presentFences && swapchain != VK_NULL_HANDLE;
+        if (!parked) vkDeviceWaitIdle(h.device);
+        else collectRetired(false);
 
         VkSurfaceCapabilitiesKHR caps;
         VkResult r = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(h.physical, surface, &caps);
@@ -1199,9 +1269,13 @@ struct Presenter::Impl {
 
         VkSwapchainKHR fresh = VK_NULL_HANDLE;
         r = vkCreateSwapchainKHR(h.device, &sci, nullptr, &fresh);
-        destroySwapchainViews(); // old views/framebuffers go before the old swapchain they point into
-        if (swapchain != VK_NULL_HANDLE) vkDestroySwapchainKHR(h.device, swapchain, nullptr);
-        swapchain = VK_NULL_HANDLE;
+        if (parked) {
+            parkSwapchain(); // destroyed once its last presents have finished
+        } else {
+            destroySwapchainViews(); // old views/framebuffers go before the old swapchain they point into
+            if (swapchain != VK_NULL_HANDLE) vkDestroySwapchainKHR(h.device, swapchain, nullptr);
+            swapchain = VK_NULL_HANDLE;
+        }
         if (r != VK_SUCCESS) return mapResult(r) == FrameStatus::Error ? fail("vkCreateSwapchainKHR failed (VkResult " + std::to_string(r) + ")") : mapResult(r);
         swapchain = fresh;
         extent = ext;
@@ -1356,6 +1430,7 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
         FrameStatus st = s.recreateSwapchain();
         if (st != FrameStatus::Ok) return st;
     }
+    if (!s.retiredSwaps.empty()) s.collectRetired(false);
 
     s.profStart();
     Frame& f = s.frames[s.frameIndex];
@@ -1512,11 +1587,33 @@ FrameStatus Presenter::endFrame(bool capture) {
     pi.swapchainCount = 1;
     pi.pSwapchains = &s.swapchain;
     pi.pImageIndices = &s.imageIndex;
+    const uint32_t slot = s.frameIndex;
+    VkSwapchainPresentFenceInfoKHR presentFence{VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_FENCE_INFO_KHR};
+    if (h.presentFences) {
+        if (s.slotFence[slot] == VK_NULL_HANDLE) {
+            VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+            if (vkCreateFence(h.device, &fi, nullptr, &s.slotFence[slot]) != VK_SUCCESS) s.slotFence[slot] = VK_NULL_HANDLE;
+        } else if (s.slotFencePending[slot]) { // the present from kFramesInFlight frames ago: long finished, the wait is a formality
+            vkWaitForFences(h.device, 1, &s.slotFence[slot], VK_TRUE, UINT64_MAX);
+            vkResetFences(h.device, 1, &s.slotFence[slot]);
+            s.slotFencePending[slot] = false;
+        }
+        if (s.slotFence[slot] != VK_NULL_HANDLE) {
+            presentFence.swapchainCount = 1;
+            presentFence.pFences = &s.slotFence[slot];
+            pi.pNext = &presentFence;
+        }
+    }
     {
         std::lock_guard<std::mutex> queueLock(h.queueMutex);
         r = vkQueuePresentKHR(h.graphicsQueue, &pi);
     }
     s.profLap(7);
+    if (pi.pNext && (r == VK_SUCCESS || r == VK_SUBOPTIMAL_KHR)) s.slotFencePending[slot] = true;
+    else if (pi.pNext) { // the present did not happen: the fence will never signal
+        vkDestroyFence(h.device, s.slotFence[slot], nullptr);
+        s.slotFence[slot] = VK_NULL_HANDLE;
+    }
     ++s.profFrames;
     s.frameIndex = (s.frameIndex + 1) % kFramesInFlight;
     FrameStatus result = FrameStatus::Ok;

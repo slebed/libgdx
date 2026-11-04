@@ -30,8 +30,10 @@ namespace {
 VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                              VkDebugUtilsMessageTypeFlagsEXT, const VkDebugUtilsMessengerCallbackDataEXT* data,
                                              void* user) {
+    // An older validation layer does not know a newer extension and says so when it is enabled; that is not a defect of ours.
+    const bool unknownExtension = std::strstr(data->pMessage, "is not a known extension string") != nullptr;
     // Warnings and errors are counted so tests can assert zero; Phase 1b routes the text to a Java-visible sink.
-    static_cast<std::atomic<uint32_t>*>(user)->fetch_add(1);
+    if (!unknownExtension) static_cast<std::atomic<uint32_t>*>(user)->fetch_add(1);
     const char* tag = (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)     ? "ERROR"
                       : (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) ? "WARN"
                                                                                        : "INFO";
@@ -119,7 +121,7 @@ std::unique_ptr<Context> Context::create(const ContextConfig& cfg, std::string& 
     if (debugUtils) enabledExts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     // Surface extensions, when the loader has them, so the swapchain device extension below is valid.
     // The platform extension is the one that matches the window-system handle Java passes to createSurface.
-    bool surfaceExts = false;
+    bool surfaceExts = false, surfaceMaint = false;
     if (hasExt(instExts, VK_KHR_SURFACE_EXTENSION_NAME)) {
 #if defined(VK_USE_PLATFORM_WIN32_KHR)
         const char* platformSurface = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
@@ -134,6 +136,12 @@ std::unique_ptr<Context> Context::create(const ContextConfig& cfg, std::string& 
             enabledExts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
             enabledExts.push_back(platformSurface);
             surfaceExts = true;
+            // Present fences (swapchain_maintenance1) need these two on the instance.
+            if (hasExt(instExts, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME) && hasExt(instExts, VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME)) {
+                enabledExts.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+                enabledExts.push_back(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+                surfaceMaint = true;
+            }
         }
     }
     // Portability enumeration is needed for MoltenVK (Phase 6); harmless elsewhere when present.
@@ -311,6 +319,20 @@ std::unique_ptr<Context> Context::create(const ContextConfig& cfg, std::string& 
     std::vector<const char*> enabledDevExts;
     if (surfaceExts && hasExt(devExts, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) enabledDevExts.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     if (hasExt(devExts, "VK_KHR_portability_subset")) enabledDevExts.push_back("VK_KHR_portability_subset"); // required when exposed
+    VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR maint1{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR};
+    bool presentFences = false;
+    if (surfaceMaint && surfaceExts && hasExt(devExts, VK_KHR_SWAPCHAIN_EXTENSION_NAME) && hasExt(devExts, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME) &&
+        !std::getenv("GDXVK_NO_PRESENT_FENCES")) {
+        VkPhysicalDeviceFeatures2 q{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+        q.pNext = &maint1;
+        vkGetPhysicalDeviceFeatures2(s.physical, &q);
+        if (maint1.swapchainMaintenance1) {
+            maint1.pNext = enFeats.pNext;
+            enFeats.pNext = &maint1;
+            enabledDevExts.push_back(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+            presentFences = true;
+        }
+    }
 
     VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     dci.pNext = &enFeats;
@@ -328,6 +350,7 @@ std::unique_ptr<Context> Context::create(const ContextConfig& cfg, std::string& 
     s.graphicsQueueFamily = static_cast<uint32_t>(gfx);
     s.tierA = tier.tier == Tier::A;
     s.swapchainEnabled = surfaceExts && hasExt(devExts, VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    s.presentFences = presentFences;
 
     // ---- VMA ---------------------------------------------------------------------------------
     VmaVulkanFunctions fns{};
