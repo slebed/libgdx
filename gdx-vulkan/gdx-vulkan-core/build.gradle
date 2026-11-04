@@ -18,6 +18,7 @@ tasks.register('cmakeConfigure', Exec) {
 }
 tasks.register('buildNatives', Exec) {
     dependsOn 'cmakeConfigure'
+    inputs.file('jni/CMakeLists.txt') // a changed compiler setting must rebuild the library
     inputs.dir('jni/src')
     inputs.dir('jni/vendor')
     inputs.dir('jni/test')

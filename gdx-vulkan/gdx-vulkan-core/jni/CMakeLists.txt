@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 project(gdxvulkan LANGUAGES C CXX)
 
+# Windows: link the C++ runtime into the library instead of using msvcp140.dll. Whichever msvcp140.dll the JVM's folder holds is the one Windows loads: Android
+# Studio's bundled Java ships an old one, and a library built with a newer Visual C++ crashes in it the first time it creates a std::mutex.
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
