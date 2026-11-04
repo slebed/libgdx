@@ -17,7 +17,7 @@ android {
         ndk { abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64' }
         externalNativeBuild {
             cmake {
-                arguments '-DANDROID_STL=c++_static', '-DGDXVK_BUILD_TESTS=OFF'
+                arguments '-DANDROID_STL=c++_shared', '-DGDXVK_BUILD_TESTS=OFF', '-DGDXVK_SWAPPY=ON'
                 cppFlags ''
             }
         }
@@ -32,6 +32,9 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    buildFeatures {
+        prefab true // the Swappy static library comes from the games-frame-pacing AAR
+    }
     sourceSets.main {
         java.srcDir '../../gdx-vulkan-core/src/main/java'
         resources.srcDir shaderGen
@@ -40,6 +43,7 @@ android {
 
 dependencies {
     api "com.badlogicgames.gdx:gdx:${gdxVersion}"
+    implementation 'androidx.games:games-frame-pacing:2.1.0'
     api "com.badlogicgames.gdx:gdx-backend-android:${gdxVersion}" // VulkanAndroidApplication reuses its input, audio and files
 }
 

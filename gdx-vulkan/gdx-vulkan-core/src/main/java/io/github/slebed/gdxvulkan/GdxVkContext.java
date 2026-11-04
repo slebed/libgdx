@@ -61,6 +61,19 @@ public final class GdxVkContext implements AutoCloseable {
     }
 
     /**
+     * Android Frame Pacing (Swappy): hands over the activity Swappy reads the display's refresh rates from. Call it before the context is
+     * created and when the activity goes away ({@code null}); presenters made with vsync on then pace their frames through Swappy.
+     *
+     * @return whether this build of the native library has Swappy
+     */
+    public static boolean setFramePacingActivity(Object activity) {
+        GdxVk.loadNatives();
+        if (!GdxVkNative.nativeFramePacingAvailable()) return false;
+        GdxVkNative.nativeSetFramePacingActivity(activity);
+        return true;
+    }
+
+    /**
      * Android: creates a surface and swapchain for a {@code SurfaceView}'s surface. Destroy the presenter in
      * {@code surfaceDestroyed}; the context, and everything else created from it, can stay alive across that.
      *

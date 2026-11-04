@@ -232,6 +232,12 @@ public final class GdxVkPresenter implements AutoCloseable {
     /** Quarter turns clockwise the swapchain image is pre-rotated by: 0 when the compositor does the rotating (and always on desktop). */
     public int rotation() { check(); return GdxVkNative.nativePresenterInfo(handle)[4]; }
 
+    /** The display's refresh period in microseconds while Swappy (Android Frame Pacing) paces this presenter's frames, otherwise 0. */
+    public int framePacingPeriodMicros() { check(); return GdxVkNative.nativePresenterInfo(handle)[5]; }
+
+    /** Whether presents carry fences ({@code VK_KHR_swapchain_maintenance1}): a resize then never waits for the device. */
+    public boolean presentFencesActive() { check(); return GdxVkNative.nativePresenterInfo(handle)[6] != 0; }
+
     public int imageCount() { check(); return GdxVkNative.nativePresenterInfo(handle)[3]; }
 
 

@@ -30,6 +30,7 @@ add_library(gdxvk_core STATIC
     src/gdxvk_staging.cpp
     src/gdxvk_rings.cpp
     src/gdxvk_resources.cpp
+    src/gdxvk_swappy.cpp
     src/vma_impl.cpp
     src/gdxvk_reflect.cpp
     src/volk_impl.c
@@ -49,6 +50,14 @@ if(NOT MSVC)
     set_source_files_properties(src/vma_impl.cpp PROPERTIES COMPILE_FLAGS "-w")
 endif()
 target_link_libraries(gdxvk_core PUBLIC ${CMAKE_DL_LIBS})
+
+# Android Frame Pacing (Swappy), from the games-frame-pacing AAR through prefab. Off unless the Gradle build asks for it.
+option(GDXVK_SWAPPY "Link Android Frame Pacing (Swappy)" OFF)
+if(GDXVK_SWAPPY AND ANDROID)
+    find_package(games-frame-pacing REQUIRED CONFIG)
+    target_compile_definitions(gdxvk_core PUBLIC GDXVK_SWAPPY)
+    target_link_libraries(gdxvk_core PUBLIC games-frame-pacing::swappy_static)
+endif()
 
 if(GDXVK_BUILD_JNI)
     if(NOT ANDROID) # the NDK sysroot already carries jni.h

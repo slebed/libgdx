@@ -4,6 +4,7 @@
 #ifdef __ANDROID__
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
+#include "gdxvk_swappy.h"
 #endif
 
 #include <memory>
@@ -160,6 +161,15 @@ JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreate
 }
 
 #ifdef __ANDROID__
+// The activity Swappy reads the display's refresh rates from; null forgets it. Call before the context is created.
+JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeSetFramePacingActivity(JNIEnv* env, jclass, jobject activity) {
+    gdxvk::swappy::setActivity(env, activity);
+}
+
+JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeFramePacingAvailable(JNIEnv*, jclass) {
+    return gdxvk::swappy::available() ? JNI_TRUE : JNI_FALSE;
+}
+
 // `surface` is an android.view.Surface. The ANativeWindow reference taken here is released when the presenter is destroyed.
 JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreatePresenterAndroid(JNIEnv* env, jclass, jlong ctx,
                                                                                                   jobject surface, jint width,
@@ -281,10 +291,11 @@ JNIEXPORT jbyteArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeC
 // [width, height, VkFormat, imageCount]
 JNIEXPORT jintArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativePresenterInfo(JNIEnv* env, jclass, jlong handle) {
     const gdxvk::Presenter* p = reinterpret_cast<gdxvk::Presenter*>(handle);
-    const jint v[5] = {static_cast<jint>(p->width()), static_cast<jint>(p->height()), static_cast<jint>(p->swapchainFormat()),
-                       static_cast<jint>(p->imageCount()), static_cast<jint>(p->rotation())};
-    jintArray out = env->NewIntArray(5);
-    env->SetIntArrayRegion(out, 0, 5, v);
+    const jint v[7] = {static_cast<jint>(p->width()), static_cast<jint>(p->height()), static_cast<jint>(p->swapchainFormat()),
+                       static_cast<jint>(p->imageCount()), static_cast<jint>(p->rotation()), static_cast<jint>(p->framePacingPeriodMicros()),
+                       p->presentFencesActive() ? 1 : 0};
+    jintArray out = env->NewIntArray(7);
+    env->SetIntArrayRegion(out, 0, 7, v);
     return out;
 }
 

@@ -42,6 +42,7 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.SnapshotArray;
 
 import io.github.slebed.gdxvulkan.GdxVkConfig;
+import io.github.slebed.gdxvulkan.GdxVkContext;
 
 /**
  * An {@link Application} for Android that renders with Vulkan. Use it like {@code AndroidApplication}:
@@ -96,6 +97,7 @@ public class VulkanAndroidApplication extends Activity implements AndroidApplica
         if (getVersion() < MINIMUM_SDK) throw new GdxRuntimeException("libGDX requires Android API Level " + MINIMUM_SDK + " or later.");
         config.nativeLoader.load();
         setApplicationLogger(new AndroidApplicationLogger());
+        if (vkConfig.framePacing) GdxVkContext.setFramePacingActivity(this); // before the context exists: Swappy asks for a device extension
         graphics = new VulkanAndroidGraphics(this, listener, vkConfig, vsync);
         input = (DefaultAndroidInput)createInput(this, this, graphics.view, config);
         audio = createAudio(this, config);
@@ -159,6 +161,7 @@ public class VulkanAndroidApplication extends Activity implements AndroidApplica
     }
 
     @Override protected void onDestroy() {
+        GdxVkContext.setFramePacingActivity(null);
         if (!isFinishing()) graphics.destroy();
         super.onDestroy();
     }

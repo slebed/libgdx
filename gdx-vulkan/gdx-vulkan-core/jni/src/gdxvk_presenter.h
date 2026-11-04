@@ -135,6 +135,10 @@ public:
     uint32_t imageCount() const;
     // Quarter turns clockwise the swapchain image is pre-rotated by (0 when the compositor rotates).
     uint32_t rotation() const;
+    // The display's refresh period in microseconds while Swappy paces this swapchain's frames, otherwise 0.
+    uint32_t framePacingPeriodMicros() const;
+    // Whether presents carry a fence (VK_KHR_swapchain_maintenance1), so resizing needs no device wait.
+    bool presentFencesActive() const;
     const std::string& lastError() const;
 
 private:

@@ -26,6 +26,8 @@ final class GdxVkNative {
     static native Object nativeGetObjectField(Object o, long id);
     static native void nativeSetDepth(long presenter, int mode);
     static native void nativeDebugForceRotation(long presenter, int quarterTurns);
+    static native void nativeSetFramePacingActivity(Object activity);
+    static native boolean nativeFramePacingAvailable();
     static native long nativeCreatePresenterAndroid(long ctx, Object surface, int width, int height, boolean vsync, boolean preRotate);
 
     static native int nativeCreateBuffer(long ctx, long size);

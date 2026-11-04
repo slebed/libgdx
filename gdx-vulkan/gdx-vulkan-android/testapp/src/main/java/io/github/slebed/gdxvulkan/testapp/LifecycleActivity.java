@@ -104,7 +104,9 @@ public class LifecycleActivity extends VulkanAndroidApplication {
 
         @Override public void resize(int width, int height) {
             resizes++;
-            TestLog.i(TAG, "resize " + width + "x" + height + " preRotation=" + getVulkanGraphics().getPresenter().rotation() * 90 + " deg");
+            TestLog.i(TAG, "resize " + width + "x" + height + " preRotation=" + getVulkanGraphics().getPresenter().rotation() * 90 + " deg"
+                + " framePacingPeriodUs=" + getVulkanGraphics().getPresenter().framePacingPeriodMicros()
+                + " presentFences=" + getVulkanGraphics().getPresenter().presentFencesActive());
         }
 
         @Override public void pause() { pauses++; TestLog.i(TAG, "pause()"); }

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "gdxvk_swappy.h"
 #include "gdxvk_internal.h"
 
 #include "gdxvk_caches.h"
@@ -74,7 +75,10 @@ Context::~Context() {
     delete impl_->pipelineCache; // saves the cache file
     delete impl_->timeline;
     if (impl_->allocator != VK_NULL_HANDLE) vmaDestroyAllocator(impl_->allocator);
-    if (impl_->device != VK_NULL_HANDLE) vkDestroyDevice(impl_->device, nullptr);
+    if (impl_->device != VK_NULL_HANDLE) {
+        swappy::destroyDevice(impl_->device);
+        vkDestroyDevice(impl_->device, nullptr);
+    }
     if (impl_->messenger != VK_NULL_HANDLE) vkDestroyDebugUtilsMessengerEXT(impl_->instance, impl_->messenger, nullptr);
     if (impl_->instance != VK_NULL_HANDLE) vkDestroyInstance(impl_->instance, nullptr);
 }
@@ -319,6 +323,13 @@ std::unique_ptr<Context> Context::create(const ContextConfig& cfg, std::string& 
     std::vector<const char*> enabledDevExts;
     if (surfaceExts && hasExt(devExts, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) enabledDevExts.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     if (hasExt(devExts, "VK_KHR_portability_subset")) enabledDevExts.push_back("VK_KHR_portability_subset"); // required when exposed
+    std::vector<std::string> swappyExts; // storage for the names below until vkCreateDevice
+    if (surfaceExts && hasExt(devExts, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
+        swappy::deviceExtensions(s.physical, devExts, swappyExts); // VK_GOOGLE_display_timing, when built with Swappy
+        for (const std::string& e : swappyExts) {
+            if (hasExt(devExts, e.c_str())) enabledDevExts.push_back(e.c_str());
+        }
+    }
     VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR maint1{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_KHR};
     bool presentFences = false;
     if (surfaceMaint && surfaceExts && hasExt(devExts, VK_KHR_SWAPCHAIN_EXTENSION_NAME) && hasExt(devExts, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME) &&

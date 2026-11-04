@@ -8,6 +8,9 @@ public class GdxVkConfig {
     public boolean forceTierB = false;
     /** Android: build the swapchain with the display rotation (no compositor rotation pass). Default on in {@code VulkanAndroidApplication}. */
     public boolean preRotate = true;
+
+    /** Android: pace frames with Swappy when the library was built with it and vsync is on. Default on in {@code VulkanAndroidApplication}. */
+    public boolean framePacing = true;
     /** Index into the physical device list, or -1 to pick the best (discrete > integrated > virtual > cpu). */
     public int preferredDeviceIndex = -1;
     /** Highest Vulkan 1.x minor version to request (1..4). The effective version is min(device, this). */
