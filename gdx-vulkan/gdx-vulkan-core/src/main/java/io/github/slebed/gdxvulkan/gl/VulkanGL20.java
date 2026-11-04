@@ -373,6 +373,20 @@ public class VulkanGL20 extends VulkanGL20Base {
         for (int i = 0; i < n; i++) glDeleteTexture(textures.get(textures.position() + i));
     }
 
+    /**
+     * Stock libGDX reaches this by constructing a {@code SpriteBatch}, {@code ShapeRenderer}, {@code ShaderProgram} or {@code new Stage(viewport)}:
+     * say which class to use instead of just naming the GL call.
+     */
+    @Override public int glCreateShader (int type) {
+        throw new GdxRuntimeException("gdx-vulkan: glCreateShader is not supported, which means a stock class that compiles GLSL was created. "
+            + "Use VulkanSpriteBatch instead of SpriteBatch, VulkanPolygonSpriteBatch, VulkanShapeRenderer, VulkanModelBatch (or ModelBatch's shader provider), "
+            + "and VulkanStage instead of new Stage(...). Custom shaders are SPIR-V bundles (VulkanShaderPipelineBundle).");
+    }
+
+    @Override public int glCreateProgram () {
+        return glCreateShader(0);
+    }
+
     @Override public void glActiveTexture (int texture) {
         activeUnit = texture - GL_TEXTURE0;
         if (activeUnit < 0 || activeUnit >= boundTexture.length) throw new GdxRuntimeException("gdx-vulkan: texture unit out of range: " + activeUnit);

@@ -162,6 +162,7 @@ public class VulkanModelBatch implements Disposable {
         this.gl = frame.gl();
         this.tierA = frame.isTierA();
         this.depthPass = depthPass;
+        if (!depthPass) frame.requireDepth(io.github.slebed.gdxvulkan.GdxVkPresenter.DEPTH); // stock's GL context has a depth buffer; so does this screen
         this.meshes = new StockMeshAccess(gl);
         this.sorter = sorter;
         this.config = config;

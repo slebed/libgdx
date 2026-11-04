@@ -113,10 +113,23 @@ public final class GdxVkFrame {
      */
     public void replacePresenter(GdxVkPresenter p) {
         presenter = p;
+        if (wantedDepth != GdxVkPresenter.DEPTH_NONE) p.setDepth(wantedDepth); // a new swapchain keeps the depth buffer the application asked for
         pipelines.clear();
         java.util.Arrays.fill(blockCache, null);
         cachedFrame = -1;
         open = false;
+    }
+
+    private int wantedDepth = GdxVkPresenter.DEPTH_NONE;
+
+    /**
+     * Makes sure the screen has a depth buffer (at least {@code mode}); 3D batches call it so stock-style code needs no setup call. Kept across a
+     * replaced swapchain. Takes effect at the next frame, so create the 3D batch in {@code create()}.
+     */
+    public void requireDepth(int mode) {
+        if (mode <= wantedDepth) return;
+        wantedDepth = mode;
+        presenter.setDepth(mode);
     }
 
     public GdxVkContext context() { return context; }

@@ -213,7 +213,13 @@ public final class GdxVkPresenter implements AutoCloseable {
     public void setDepth(int mode) {
         check();
         GdxVkNative.nativeSetDepth(handle, mode);
+        depthMode = mode;
     }
+
+    private int depthMode = DEPTH_NONE;
+
+    /** The depth choice last made with {@link #setDepth} ({@link #DEPTH_NONE} by default). */
+    public int depthMode() { return depthMode; }
 
     /** Tells the presenter the window size changed. The swapchain is rebuilt on the next {@link #beginFrame}. */
     public void resize(int width, int height) {

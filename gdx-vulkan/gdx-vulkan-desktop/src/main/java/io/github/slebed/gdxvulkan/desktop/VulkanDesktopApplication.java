@@ -87,6 +87,16 @@ public class VulkanDesktopApplication implements Application {
     private volatile boolean captureWanted;
     private GLFWErrorCallback errorCallback;
 
+    /** For a game that already has a stock {@code Lwjgl3ApplicationConfiguration}: its window, vsync, audio and preferences settings are used. */
+    public VulkanDesktopApplication (ApplicationListener listener, Lwjgl3ApplicationConfiguration config) {
+        this(listener, com.badlogic.gdx.backends.lwjgl3.VulkanConfigurations.from(config));
+    }
+
+    /** Creates the window with the defaults of {@link VulkanDesktopConfiguration} and runs the application until it closes. */
+    public VulkanDesktopApplication (ApplicationListener listener) {
+        this(listener, new VulkanDesktopConfiguration());
+    }
+
     /** Creates the window and runs the application until it closes. */
     public VulkanDesktopApplication (ApplicationListener listener, VulkanDesktopConfiguration config) {
         this.listener = listener;

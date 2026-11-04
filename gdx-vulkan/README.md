@@ -142,12 +142,15 @@ public class MyGame extends ApplicationAdapter {
 }
 
 public static void main(String[] args) {
-    new VulkanDesktopApplication(new MyGame(), new VulkanDesktopConfiguration());   // was Lwjgl3Application
+    new VulkanDesktopApplication(new MyGame(), new Lwjgl3ApplicationConfiguration());   // was Lwjgl3Application; the configuration is unchanged
 }
 ```
 
-`VulkanSpriteBatch` implements the stock `Batch` interface, so anything that takes a `Batch` takes it: `Stage`, `BitmapFont.draw`, `ParticleEffect.draw`,
-`Image`, and so on. `VulkanDesktopConfiguration` takes the settings you would give `Lwjgl3ApplicationConfiguration` (`title`, `width`, `height`, `vsync`, `resizable`, ...), all optional. (`new Stage(viewport)` makes a stock `SpriteBatch` for itself, so write `new Stage(viewport, new VulkanSpriteBatch())`.)
+`VulkanSpriteBatch` implements the stock `Batch` interface, so anything that takes a `Batch` takes it: `BitmapFont.draw`, `ParticleEffect.draw`, `Image`, and
+so on. The exception is `new Stage(viewport)`, which makes a stock `SpriteBatch` for itself and cannot run here; use `new VulkanStage(viewport)`, the same `Stage`.
+
+A game's existing `Lwjgl3ApplicationConfiguration` is used as it is: window size and title, vsync, resizable, fullscreen, audio and preferences settings (the
+OpenGL context settings are ignored). `VulkanDesktopConfiguration` holds the same settings in a class of ours, all optional.
 
 The batches find the running application's frame through `Gdx.graphics`, so create them in `create()` or later, as you would stock ones. If you build the
 Vulkan context yourself (a test, a tool), pass the frame explicitly: `new VulkanSpriteBatch(frame)`.
@@ -162,7 +165,8 @@ Vulkan context yourself (a test, a tool), pass the frame explicitly: `new Vulkan
 | `PolygonSpriteBatch` | `VulkanPolygonSpriteBatch` | |
 | `ShapeRenderer` | `VulkanShapeRenderer` | |
 | `ModelBatch` | `VulkanModelBatch` | same `begin / render(instances, environment) / end` |
-| `Texture`, `Pixmap`, `TextureAtlas`, `FrameBuffer`, `Mesh`, `BitmapFont`, `Stage`, `AssetManager`, `Model`, `Environment`, `Camera` | **unchanged** | these run on the shim as they are |
+| `Stage` | `VulkanStage` | the stock `Stage` with a `VulkanSpriteBatch`; same constructors |
+| `Texture`, `Pixmap`, `TextureAtlas`, `FrameBuffer`, `Mesh`, `BitmapFont`, `Skin`, `AssetManager`, `Model`, `Environment`, `Camera` and the Scene2D actors | **unchanged** | these run on the shim as they are |
 | `ShaderProgram` (GLSL source) | SPIR-V shader bundle (`VulkanShaderPipelineBundle`) | write GLSL as before, compile it with `glslc` at build time; the batches' own shaders in `gdx-vulkan-core/src/main/shaders` are the examples |
 | `Gdx.gl.glDrawArrays`, `glUseProgram`, ... | not supported | use the batches, or a compute shader |
 
@@ -201,7 +205,7 @@ batch.begin(camera);
 batch.render(instances, env);                                      // ModelInstance, Environment, animation: as stock
 batch.end();
 ```
-Ask for a depth buffer once with `presenter.setDepth(GdxVkPresenter.DEPTH)` (the desktop application's `getPresenter()`). Shadows use the stock
+The screen gets a depth buffer when the first `VulkanModelBatch` is created (create it in `create()`), so there is no setup call. Shadows use the stock
 `DirectionalShadowLight`, or `VulkanCascadedShadowLight` for several shadow maps over distance.
 
 ### Compute and GPU-driven rendering
