@@ -125,6 +125,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             } catch (Throwable t) {
                 TestLog.e(TAG, "DEVICESUITE FAIL (setup)", t);
             }
+            // The run is over: leave the screen, so whoever holds the phone sees that it is done (the log has the result).
+            runOnUiThread(new Runnable() {
+                @Override public void run() { finish(); }
+            });
             return;
         }
         startNanos = System.nanoTime();

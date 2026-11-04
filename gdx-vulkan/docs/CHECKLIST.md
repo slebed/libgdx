@@ -19,12 +19,12 @@ the plan names.
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 12 | 1 | 0 | 13 |
 | Phase 5: 3D with stock models | 9 | 3 | 1 | 13 |
-| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 14 | 9 | 19 | 42 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 16 | 9 | 17 | 42 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
 | Demos (to plan once Phase 5 is complete) | 0 | 0 | 7 | 7 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **171** | **17** | **44** | **232** |
+| **All** | **173** | **17** | **42** | **232** |
 ---
 
 ## Core decisions
@@ -330,13 +330,13 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [ ] Precision qualifiers are mapped to `RelaxedPrecision` where the device benefits (mobile)
 - [ ] SPIR-V goes through an optimisation pass (spirv-opt performance recipe, debug info stripped); a benchmark shows the effect, or the pass is dropped
 - [x] Compiled SPIR-V is cached on disk by a hash of (source, prepend text, code path, translator and compiler versions): `ShaderCache` keeps both modules and the translation tables, so a program found in the cache is created without the preprocessor, the translator or the compiler (`VulkanShaderProgram.cacheDirectory`, default `gdxvk-shader-cache` in local storage; `ShaderProgramTest` checks the compiler is not called, the cached program draws the same picture, and a damaged file is ignored and replaced). The existing pipeline cache keeps handling pipelines
-- [ ] Compilation can run off the render thread; pipelines are still built lazily at first use
+- [x] Compilation can run off the render thread; pipelines are still built lazily at first use: `VulkanShaderProgram.prepareAsync(vertex, fragment)` translates and compiles on a worker thread and returns a future (the log: empty when it compiled); the constructor then takes the prepared result and calls neither the translator nor the compiler (`preparedHits`, `GlslCompiler.callCount()` in `ShaderProgramTest`); a shader that fails reports why through the future and is not kept. `warmUp()` compiles a tiny shader early so glslang's 150 ms first-use start-up is not paid by the first real program
 - [x] Measured: a translated stock shader is not slower than the built-in one (`gradlew :gdx-vulkan-desktop:stressShaders`, 20,000 sprites from one texture, vsync off, three shaders in turn, twice): RTX 5080 0.990x (modern path) and 0.973x (compatibility path), RTX 2080 0.998x; a custom shader with a push-constant tint and a uniform-block palette 0.98x to 1.01x. The test is CPU-bound by design (the shaders are trivial), so it shows that the translation, the uniform handling and the pipeline add no cost; it does not show shader arithmetic differences. On the Galaxy S20 FE (Adreno 650, compatibility path, display at 120 Hz, vsync off) the three shaders agree within 2% while the phone's clocks stay in one state (cool: 721, 713 and 719 fps; throttled: 520, 511 and 512 fps); the phone steps between those states during a run, so an average across rounds is not meaningful and the figure to trust is the comparison inside a state. Not yet run on the REDMAGIC.
 
 ### C. The compiler
 - [x] Choose the compiler: **glslang** used directly behind a `ShaderCompiler` interface, with the reasons and the comparison with shaderc (and with the original backend, which used shaderc through LWJGL) in `docs/SHADER_COMPILER.md`
 - [~] Vendor a pinned glslang (16.6.0) into the native library and build it for Windows x64, Linux x64 and Android arm64; record the size cost with and without the SPIRV-Tools optimizer: vendored, built and tested on Windows x64 (1.7 MB, first compile 152 ms, then 0.9 ms; `shader_compiler_test`); Linux (Docker, CI) and Android builds not run yet, the optimizer not added
-- [ ] Existing SPIRV-Reflect validation runs on every translated shader (block layout, vertex inputs, sampler count)
+- [x] Existing SPIRV-Reflect validation runs on every translated shader: creating a pipeline validates both modules against the library's pipeline layout, and it already caught a real translation bug (a texture table declared in a stage that never reads it, which glslang sized to one element); nothing extra is needed
 - [ ] The build still works without the compiler's sources for people who only use precompiled bundles (optional component), or the dependency is vendored
 
 ### D. `VulkanShaderProgram` API

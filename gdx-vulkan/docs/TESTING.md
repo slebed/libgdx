@@ -54,7 +54,11 @@ gradlew :testapp:assembleDebug && adb install -r testapp/build/outputs/apk/debug
 adb shell am start -n io.github.slebed.gdxvulkan.testapp/.MainActivity --ez suite true [--ez forceTierB true] [--ez vsync false]
 adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # look for "DEVICESUITE PASS"
 tools/stress4.sh [cycles=50] [--tier-b] [--no-prerotate] [--no-stream]             # rotate + background/foreground while textures stream
+tools/device-suite.sh <adb serial> [--es only stress2,shaderPrograms]              # the device suite on one phone, or only the checks whose names contain those words
 ```
+Both scripts end the same way: the test app is stopped and the phone goes back to its home screen, so whoever holds the phone can see the test is over, also after a
+failure or a timeout. Phones need about six seconds to settle (the JIT compiles the draw path, the GPU clock rises), so the benchmarks warm up for six seconds; read a
+comparison between two shaders inside one clock state, and alternate their order, as the shader benchmark does.
 `docs/RELEASE.md` is the checklist of manual runs (real GPUs, the phone) that CI cannot do.
 
 ## Runtime options

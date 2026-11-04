@@ -359,6 +359,44 @@ class ShaderProgramTest {
         }
     }
 
+    @Test void aProgramPreparedInTheBackgroundIsTakenWithoutCompilingOnTheRenderThread () throws Exception {
+        VulkanShaderProgram.setCacheDirectory(null); // the memory path, not the disk one
+        final String source = CUSTOM_FRAG + "// prepared ahead\n";
+        final java.util.concurrent.Future<String> warm = VulkanShaderProgram.warmUp(frame);
+        final java.util.concurrent.Future<String> future = VulkanShaderProgram.prepareAsync(frame, SPRITE_VERT, source);
+        assertEquals("", warm.get(60, java.util.concurrent.TimeUnit.SECONDS), "the warm-up compiles");
+        assertEquals("", future.get(60, java.util.concurrent.TimeUnit.SECONDS), "the program compiled in the background");
+
+        final int calls = io.github.slebed.gdxvulkan.GlslCompiler.callCount();
+        final int hits = VulkanShaderProgram.preparedHits;
+        final VulkanShaderProgram program = new VulkanShaderProgram(frame, SPRITE_VERT, source);
+        assertTrue(program.isCompiled(), program.getLog());
+        assertEquals(hits + 1, VulkanShaderProgram.preparedHits, "the constructor took the prepared result");
+        assertEquals(calls, io.github.slebed.gdxvulkan.GlslCompiler.callCount(), "and did not call the compiler");
+
+        program.setUniformf("u_tint", 0.5f, 0.5f, 0.5f, 1f);
+        program.setUniform4fv("u_palette", new float[] {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, 0, 16);
+        program.setUniformi("u_index", 0);
+        program.setUniformi("u_invert", 0);
+        final Texture white = solid(1, 1, 1);
+        final byte[] f = render(b -> {
+            b.setShaderProgram(program);
+            b.begin();
+            b.draw(white, 0, 0, S, S);
+            b.end();
+        });
+        assertPx(f, 32, 32, 128, 128, 128, "the prepared program draws");
+        white.dispose();
+
+        // A shader that does not compile reports why through the future, and is not kept.
+        final String bad = "varying vec2 v_texCoords;\nvoid main() { gl_FragColor = vec4(oops); }\n";
+        final String log = VulkanShaderProgram.prepareAsync(frame, SPRITE_VERT, bad).get(60, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue(log.contains("oops"), log);
+        final int hitsBefore = VulkanShaderProgram.preparedHits;
+        assertFalse(new VulkanShaderProgram(frame, SPRITE_VERT, bad).isCompiled());
+        assertEquals(hitsBefore, VulkanShaderProgram.preparedHits, "a failure is not kept as a prepared program");
+    }
+
     @Test void theLibrarysOwnShadersNeverUseTheRunTimeCompiler () {
         final Texture t = solid(0.5f, 0.5f, 0.5f);
         final float[] square = {0, 0, 16, 0, 16, 16, 0, 16};

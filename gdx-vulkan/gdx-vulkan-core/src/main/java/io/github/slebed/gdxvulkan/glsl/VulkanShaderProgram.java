@@ -102,40 +102,107 @@ public class VulkanShaderProgram implements Disposable {
         if (vertexShader == null) throw new IllegalArgumentException("vertex shader must not be null");
         if (fragmentShader == null) throw new IllegalArgumentException("fragment shader must not be null");
         this.frame = frame;
-        Translation translation = null;
-        byte[] vert = null, frag = null;
-        String message = "";
-        boolean ok = false;
-        final File cache = cacheDirectory();
-        final String cacheKey = cache == null ? null : ShaderCache.key(frame.isTierA(), prependVertexCode, vertexShader, prependFragmentCode, fragmentShader);
-        final ShaderCache.Entry cached = cache == null ? null : ShaderCache.load(cache, cacheKey);
-        if (cached != null) {
-            cacheHits++;
-            translation = cached.translation;
-            vert = cached.vertex;
-            frag = cached.fragment;
-            ok = true;
-        } else try {
-            translation = GlslTranslator.translate("program" + id, vertexShader, fragmentShader, prependVertexCode, prependFragmentCode, frame.isTierA());
-            final GlslCompiler.Result v = GlslCompiler.compile(GlslCompiler.Stage.VERTEX, "vertex shader", translation.vertex);
-            final GlslCompiler.Result f = GlslCompiler.compile(GlslCompiler.Stage.FRAGMENT, "fragment shader", translation.fragment);
-            message = (v.ok() ? "" : "Vertex shader failed to compile:\n" + v.log + "\n") + (f.ok() ? "" : "Fragment shader failed to compile:\n" + f.log + "\n");
-            if (v.ok() && f.ok()) {
-                vert = bytes(v.spirv);
-                frag = bytes(f.spirv);
-                ok = true;
-                if (cache != null) ShaderCache.save(cache, cacheKey, translation, vert, frag);
-            }
-        } catch (GlslTranslationException e) {
-            message = e.getMessage() + "\n";
-        }
-        t = translation != null ? translation : new Translation();
-        vertexSpirv = vert;
-        fragmentSpirv = frag;
-        compiled = ok;
-        log = message;
+        final Built built = obtain(frame.isTierA(), "program" + id, vertexShader, fragmentShader, prependVertexCode, prependFragmentCode, false);
+        t = built.translation != null ? built.translation : new Translation();
+        vertexSpirv = built.vertex;
+        fragmentSpirv = built.fragment;
+        compiled = built.ok;
+        log = built.log;
         ringWords = new int[Math.max(1, t.blockBytes / 4)];
         samplerUnit = new int[t.samplers.size()];
+    }
+
+    /** What building a program produces: the translation and both SPIR-V modules, or the reason there are none. */
+    private static final class Built {
+        Translation translation;
+        byte[] vertex, fragment;
+        String log = "";
+        boolean ok;
+    }
+
+    /** Programs made ahead of time by {@link #prepareAsync}, by cache key: taken by the constructor when the same source is asked for. */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Built> prepared = new java.util.concurrent.ConcurrentHashMap<String, Built>();
+    /** How many programs were created from a {@link #prepareAsync} result (for tests and diagnostics). */
+    public static volatile int preparedHits;
+    private static java.util.concurrent.ExecutorService worker;
+
+    /**
+     * Translates and compiles in the background, so a program that is needed later (the next level's shaders, for instance) does not cost a frame when it is
+     * created: the constructor then finds the result and takes it. Safe to call from any thread; the work runs on one worker thread. The future's value is the
+     * log, empty when the program compiled, otherwise the reason it did not. The sources and the {@code prepend...Code} statics are read now, not later.
+     */
+    public static java.util.concurrent.Future<String> prepareAsync (String vertexShader, String fragmentShader) {
+        return prepareAsync(GdxVkFrame.current(), vertexShader, fragmentShader);
+    }
+
+    public static synchronized java.util.concurrent.Future<String> prepareAsync (final GdxVkFrame frame, final String vertexShader, final String fragmentShader) {
+        if (vertexShader == null || fragmentShader == null) throw new IllegalArgumentException("shaders must not be null");
+        final boolean bindless = frame.isTierA();
+        final String prependV = prependVertexCode, prependF = prependFragmentCode;
+        if (worker == null) {
+            worker = java.util.concurrent.Executors.newSingleThreadExecutor(new java.util.concurrent.ThreadFactory() {
+                @Override public Thread newThread (Runnable r) {
+                    final Thread thread = new Thread(r, "gdxvk-shader-compiler");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
+        }
+        return worker.submit(new java.util.concurrent.Callable<String>() {
+            @Override public String call () {
+                return obtain(bindless, "prepared", vertexShader, fragmentShader, prependV, prependF, true).log;
+            }
+        });
+    }
+
+    /**
+     * Starts the compiler on the background thread with a tiny shader, so its first use (about 150 ms of start-up inside glslang) is not paid by the first real
+     * program. Call it early, at the start of {@code create()}.
+     */
+    public static java.util.concurrent.Future<String> warmUp () {
+        return warmUp(GdxVkFrame.current());
+    }
+
+    public static java.util.concurrent.Future<String> warmUp (GdxVkFrame frame) {
+        return prepareAsync(frame, "attribute vec4 a_position;\nvoid main() { gl_Position = a_position; }\n",
+            "#ifdef GL_ES\nprecision mediump float;\n#endif\nvoid main() { gl_FragColor = vec4(1.0); }\n");
+    }
+
+    /** The result for this source: from memory (prepared ahead), from the disk cache, or built now. {@code keep} remembers a success for the constructor. */
+    private static Built obtain (boolean bindless, String name, String vertexShader, String fragmentShader, String prependV, String prependF, boolean keep) {
+        final String key = ShaderCache.key(bindless, prependV, vertexShader, prependF, fragmentShader);
+        final Built ready = keep ? prepared.get(key) : prepared.remove(key);
+        if (ready != null) {
+            if (!keep) preparedHits++;
+            return ready;
+        }
+        final File cache = cacheDirectory();
+        final ShaderCache.Entry cached = cache == null ? null : ShaderCache.load(cache, key);
+        final Built built = new Built();
+        if (cached != null) {
+            cacheHits++;
+            built.translation = cached.translation;
+            built.vertex = cached.vertex;
+            built.fragment = cached.fragment;
+            built.ok = true;
+        } else {
+            try {
+                built.translation = GlslTranslator.translate(name, vertexShader, fragmentShader, prependV, prependF, bindless);
+                final GlslCompiler.Result v = GlslCompiler.compile(GlslCompiler.Stage.VERTEX, "vertex shader", built.translation.vertex);
+                final GlslCompiler.Result f = GlslCompiler.compile(GlslCompiler.Stage.FRAGMENT, "fragment shader", built.translation.fragment);
+                built.log = (v.ok() ? "" : "Vertex shader failed to compile:\n" + v.log + "\n") + (f.ok() ? "" : "Fragment shader failed to compile:\n" + f.log + "\n");
+                if (v.ok() && f.ok()) {
+                    built.vertex = bytes(v.spirv);
+                    built.fragment = bytes(f.spirv);
+                    built.ok = true;
+                    if (cache != null) ShaderCache.save(cache, key, built.translation, built.vertex, built.fragment);
+                }
+            } catch (GlslTranslationException e) {
+                built.log = e.getMessage() + "\n";
+            }
+        }
+        if (keep && built.ok) prepared.put(key, built);
+        return built;
     }
 
     private static byte[] bytes (int[] words) {

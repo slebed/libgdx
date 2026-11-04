@@ -25,6 +25,13 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 APK="$HERE/../gdx-vulkan-android/testapp/build/outputs/apk/debug/testapp-debug.apk"
 
 adb get-state >/dev/null 2>&1 || { echo "no adb device connected" >&2; exit 2; }
+
+# However this ends, send the phone back to its home screen and stop the test app, so the person holding it can see the test is over.
+go_home() {
+  adb shell am force-stop "$PKG" >/dev/null 2>&1
+  adb shell input keyevent KEYCODE_HOME >/dev/null 2>&1
+}
+trap go_home EXIT
 [ -f "$APK" ] || (cd "$HERE/../gdx-vulkan-android" && ./gradlew :testapp:assembleDebug)
 adb install -r "$APK" >/dev/null
 adb shell run-as "$PKG" rm -f files/gdxvk-test.log
