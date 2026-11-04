@@ -45,32 +45,77 @@ Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Andro
 
 ## Performance
 
-Measured against stock libGDX 1.14.2 on OpenGL, on the same machine, same sprites, vsync off, 800x600. Reproduce with the commands in
-[`docs/TESTING.md`](docs/TESTING.md).
+Every number below was measured with this repository's benchmark programs (commands in [`docs/TESTING.md`](docs/TESTING.md)), against stock libGDX 1.14.2 on
+OpenGL where a stock equivalent exists, on the same machine with the same sprites and vsync off. Results are in frames per second (higher is better) unless the
+table says otherwise. More devices will be added over time: see [Adding a device](#adding-a-device).
 
-| Test | Stock libGDX (OpenGL) | gdx-vulkan | |
-|---|---|---|---|
-| 20,000 sprites, each from one of **128 separate textures** (no atlas), RTX 5080 | 17.5 fps | 423 fps | **24x** |
-| 20,000 sprites, 128 separate textures, on drivers limited to Vulkan 1.1 | 17.5 fps | 61-70 fps | 3.5-4x |
-| 20,000 sprites, **one texture** (an atlas), RTX 5080 | 1,064 fps | 1,306 fps | 1.2x |
-| 1,000,000 sprites moved by a compute shader, RTX 2080 | not possible | 722 fps | |
-| 1,000,000 sprites moved by a compute shader, RTX 5080 / Adreno 840 phone | not possible | 1,879 fps / 208-225 fps | |
-| 250,000 instanced 3D meshes moved by compute, culled on the GPU, 500 point lights, RTX 2080 | not possible | 495 fps (1% low: 259) | |
-| The same on the phone, 1216x2688 | not possible | 52 fps; 781 fps with 50,000 meshes and 64 lights | |
+### Devices
+
+| ID | Device | OS | GPU | CPU | Vulkan version of the driver | Which code path it runs |
+|---|---|---|---|---|---|---|
+| PC-5080 | Desktop PC | Windows 10 Pro 22H2 | NVIDIA GeForce RTX 5080 (driver 610.62) | Intel Core i7-6900K, 128 GB RAM | 1.4 (1.4.341) | modern (forced to the compatibility path for one row) |
+| PC-2080 | the same desktop PC | Windows 10 Pro 22H2 | NVIDIA GeForce RTX 2080 (driver 610.62) | Intel Core i7-6900K, 128 GB RAM | 1.4 (1.4.341) | modern |
+| RM-11P | REDMAGIC Pro 11 (NX809J) | Android 16 | Qualcomm Adreno 840 | Qualcomm Snapdragon (model not recorded) | 1.4 | modern, and compatibility when forced |
+| S20-FE | Samsung Galaxy S20 FE 5G (SM-G781W) | Android 13 | Qualcomm Adreno 650 | Snapdragon 865 (SM8250) | 1.1 (1.1.128) | compatibility only (3D models do not run yet: see Known limitations) |
+| CI | GitHub Actions runner | Ubuntu 24.04 | lavapipe (software, Mesa 25.2) | | 1.3 or newer | modern and compatibility; used for correctness, not speed |
+
+The modern path needs a Vulkan 1.3 driver; the compatibility path needs Vulkan 1.1 and is slower with many textures. The library picks the best one the device
+supports. Stock OpenGL runs on the display GPU, so on the two-GPU PC only PC-5080 has a fair stock comparison.
+
+### The tests
+
+| ID | What it draws | What it measures |
+|---|---|---|
+| T1 | 20,000 sprites per frame, all from **one texture** (what a texture atlas gives you), 800x600 on the PC and full screen on a phone | the normal case for a 2D game: `SpriteBatch` against `VulkanSpriteBatch` |
+| T2 | the same 20,000 sprites, each taken from one of **128 separate textures** (no atlas) | the worst case for OpenGL: every sprite changes texture |
+| T3 | **1,000,000 sprites** moved every frame by a compute shader | how much the GPU can do on its own; stock libGDX cannot run it |
+| T4 | **250,000 lit 3D meshes** moved by a compute shader, culled on the GPU and drawn with one indirect call, with **500 point lights**, 1280x720 on the PC and full screen on a phone | the GPU-driven path; stock libGDX cannot run it |
+| T5 | T4 at a mobile load: 50,000 meshes and 64 lights | the same on phone-sized work |
+
+### Results
+
+Higher is better. "Stock" is libGDX 1.14.2 on OpenGL; a dash means the test has no stock equivalent, and *not run* means it has not been measured on that device yet.
+
+| Test | Device | Stock libGDX (OpenGL) | gdx-vulkan | Difference |
+|---|---|---|---|---|
+| T1 one texture | PC-5080 | 1,064 fps | 1,306 fps | 1.2x |
+| T1 one texture | RM-11P | not run | 548 fps (modern), 1,428 fps (compatibility) | |
+| T1 one texture | S20-FE | not run | 59 fps (held at the display's refresh rate) | |
+| T2 128 textures | PC-5080 | 17.5 fps | 423 fps (modern), 61-70 fps (compatibility) | **24x**, 3.5-4x |
+| T2 128 textures | RM-11P | not run | 38 fps (modern), 8.6 fps (compatibility) | |
+| T2 128 textures | S20-FE | not run | 11 fps (compatibility) | |
+| T3 1M sprites by compute | PC-5080 | - | 1,879 fps | |
+| T3 1M sprites by compute | PC-2080 | - | 722 fps | |
+| T3 1M sprites by compute | RM-11P | - | 208-225 fps | |
+| T4 250,000 meshes, 500 lights | PC-5080 | - | 957-988 fps | |
+| T4 250,000 meshes, 500 lights | PC-2080 | - | 495 fps (1% low: 259) | |
+| T4 250,000 meshes, 500 lights | RM-11P | - | 52 fps | |
+| T4 250,000 meshes, 500 lights | S20-FE | - | 7.5 fps | |
+| T5 50,000 meshes, 64 lights | RM-11P | - | 781 fps | |
+| T5 50,000 meshes, 64 lights | S20-FE | - | held at 59 fps by the display (a faster figure was not measured) | |
+
+Two more results that are not about a single device:
+- **Java layer:** recording 100,000 draws through the Java API costs 1.0 to 1.3 times a hand-written C++ loop on both PCs and the phones, and the 3D benchmark
+  allocates about 1 byte of Java garbage per frame.
+- **Android lifecycle (RM-11P):** 50 rotate and background/foreground cycles with textures streaming in and out: 0 failures, the surface comes back in 2 ms on
+  average (5 ms worst), memory flat. On S20-FE: 8 cycles, 0 failures, 13 ms.
 
 How to read these:
-- The first row is the case Vulkan helps most: every sprite switches texture. A game that packs its art into atlases is closer to the third row, about 1.2x.
-  The renderer started out slower than stock OpenGL on that row (0.91x) until vertex data got a copy in GPU memory.
-- Stock OpenGL cannot run the compute rows at all, so there is nothing to compare; they show what the extra control buys.
-- The Java layer is not the bottleneck: recording 100,000 draws through the Java API costs 1.0-1.3x a hand-written C++ loop, and the 3D benchmark allocates about 1
-  byte of Java garbage per frame.
-- The phone numbers are gdx-vulkan only. The same sprite test on the phone runs at 548 fps with one texture and 38 fps with 128; a stock OpenGL run on the phone
-  has not been done yet.
-- Android lifecycle: 50 rotate and background/foreground cycles with textures streaming in and out, 0 failures, surface recreation 2 ms on average (5 ms worst),
-  memory flat.
+- T2 is the case Vulkan helps most. A game that packs its art into atlases is closer to T1, about 1.2x. The renderer started out slower than stock on T1
+  (0.91x) until vertex data got a copy in GPU memory.
+- Stock OpenGL cannot run T3 to T5, so there is nothing to compare; they show what the extra control buys.
+- No phone has a stock OpenGL number yet; those cells will be filled in as the stock-against-Vulkan demo runs on phones.
 
 Rendering matches stock libGDX: the test scenes are drawn by stock OpenGL and by gdx-vulkan and compared pixel by pixel. The framebuffer scenes are identical;
 the 2D and 3D scenes differ in at most 0.2% of pixels, at the ends of lines and edges.
+
+### Adding a device
+
+1. Run the tests on the device (`docs/TESTING.md` has the commands for the PC and for Android) and note: the device name and model, the OS and its version, the
+   GPU and its driver version, the CPU, and the Vulkan version the driver reports (the test log prints it, with the code path it used).
+2. Add one row to the **Devices** table with a short ID (`PC-xxxx`, `RM-xxx`, ...).
+3. Add one row per test to the **Results** table, with the device's ID. Put stock OpenGL's number next to it if the device ran the stock program too; if a test
+   was not run, write *not run* rather than leaving it out.
 
 ## Getting it
 
@@ -247,6 +292,7 @@ side allocates almost nothing. The validation layers, a stock-OpenGL comparison 
 - 3D draws with the port of libGDX's default shader (plus normal maps). Custom 3D `Shader` and `ShaderProvider` classes are not accepted.
 - A few features need a driver with Vulkan 1.3: shadow maps and specular, emissive and normal-map textures. On a Vulkan 1.1 driver they are skipped.
 - On Android, the on-screen keyboard through `Gdx.input` does not work yet.
+- On the Samsung Galaxy S20 FE (Adreno 650, Vulkan 1.1 driver) 3D models do not run yet: its driver refuses to build the model shaders. 2D, framebuffers, compute and instancing work there.
 - Natives are built for Windows x64, Linux x64 and Android arm64. Android armeabi-v7a and x86_64 compile but have never been run.
 - Offscreen framebuffer passes recorded after a draw to the screen keep their order: a framebuffer pass in the middle of a frame interrupts the main pass.
 
