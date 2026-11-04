@@ -92,6 +92,8 @@ final class DeviceSuite {
         s.check("frameBufferColor", s::frameBufferColor);
         s.check("frameBufferDepthAndStencil", s::frameBufferDepthAndStencil);
         s.check("multiTargetFrameBuffer", s::multiTargetFrameBuffer);
+        s.check("gpuTimestamps", s::gpuTimestamps);
+        s.check("shaderCompileTime", s::shaderCompileTime);
         s.check("gate3Scenes", s::gate3);
         s.check("stockClassesOnTheShim", s::stockClasses);
         s.check("gate3StockClassesOnTheShim", s::gate3Stock);
@@ -916,6 +918,59 @@ final class DeviceSuite {
 
     // ------------------------------------------------------------------------------------------------------- stock classes on the GL shim
 
+    /**
+     * How long a translated shader takes to become a program on this device: the first one (it starts the compiler), the next, and the same source again from the disk
+     * cache. The times are logged; the check only requires that the programs build.
+     */
+    private void shaderCompileTime() {
+        final java.io.File saved = VulkanShaderProgram.cacheDirectory;
+        final java.io.File dir = new java.io.File(app.getCacheDir(), "gdxvk-compile-time-" + System.nanoTime());
+        final String vert = "attribute vec4 a_position;\nattribute vec4 a_color;\nattribute vec2 a_texCoord0;\nuniform mat4 u_projTrans;\n"
+            + "varying vec4 v_color;\nvarying vec2 v_texCoords;\nvoid main() {\n   v_color = a_color;\n   v_texCoords = a_texCoord0;\n   gl_Position = u_projTrans * a_position;\n}\n";
+        final String[] frag = new String[4];
+        for (int k = 0; k < frag.length; k++) {
+            frag[k] = "#ifdef GL_ES\nprecision mediump float;\n#endif\nvarying vec4 v_color;\nvarying vec2 v_texCoords;\nuniform sampler2D u_texture;\nuniform vec4 u_tint;\n"
+                + "void main() {\n  gl_FragColor = v_color * texture2D(u_texture, v_texCoords) * u_tint * " + (k + 1) + ".0;\n}\n";
+        }
+        final double[] ms = new double[4];
+        try {
+            VulkanShaderProgram.setCacheDirectory(null); // no disk cache for the first two
+            ms[0] = timeProgram(vert, frag[0]);
+            ms[1] = timeProgram(vert, frag[1]);
+            VulkanShaderProgram.setCacheDirectory(dir);
+            ms[2] = timeProgram(vert, frag[2]); // not in the cache yet: built and saved
+            ms[3] = timeProgram(vert, frag[2]); // the same source again: from the disk cache
+        } finally {
+            VulkanShaderProgram.setCacheDirectory(saved);
+            final java.io.File[] files = dir.listFiles();
+            if (files != null) for (java.io.File f : files) f.delete();
+            dir.delete();
+        }
+        TestLog.i(TAG, String.format("shaderCompileTime: first program (starts the compiler) %.1f ms, second %.1f ms, third (built and saved) %.1f ms, the same source from the disk cache %.1f ms",
+            ms[0], ms[1], ms[2], ms[3]));
+    }
+
+    private double timeProgram(String vert, String frag) {
+        final long t0 = System.nanoTime();
+        final VulkanShaderProgram p = new VulkanShaderProgram(frame, vert, frag);
+        final double elapsed = (System.nanoTime() - t0) / 1e6;
+        require(p.isCompiled(), "the shader built: " + p.getLog());
+        p.dispose();
+        return elapsed;
+    }
+
+    /** The device's GPU timestamps work: frames that clear the screen report a plausible GPU time (a frame or two behind). */
+    private void gpuTimestamps() {
+        for (int i = 0; i < 30; i++) {
+            beginFrame(0.1f, 0.2f, 0.3f);
+            frame.end();
+        }
+        final long ns = presenter.gpuFrameNanos();
+        TestLog.i(TAG, "gpuTimestamps: the GPU took " + ns / 1e6 + " ms for the last frame (an empty one: a clear and a present)");
+        require(ns > 0, "the device reports GPU time (timestamps are supported on this queue)");
+        require(ns < 500_000_000L, "an empty frame does not take half a second of GPU time: " + ns);
+    }
+
     /** At most {@code fraction} of the pixels may differ by more than {@code tolerance} in a colour channel. */
     private static void requireSimilar(String what, byte[] expected, byte[] actual, int tolerance, double fraction) {
         require(expected.length == actual.length, what + ": picture sizes");
@@ -1128,6 +1183,7 @@ final class DeviceSuite {
                     }
                 }
                 fps[c] += frames / ((System.nanoTime() - measureStart) / 1e9) / rounds;
+                if (round == rounds - 1) TestLog.i(TAG, (c == 0 ? "VulkanSpriteBatch" : "stock SpriteBatch") + ": GPU " + presenter.gpuFrameNanos() / 1e6 + " ms per frame");
             }
         }
         for (com.badlogic.gdx.graphics.g2d.Batch b : batches) b.dispose();

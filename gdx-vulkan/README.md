@@ -41,7 +41,7 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Spot lights, point-light shadows in `VulkanModelBatch` | libGDX's own default shader has neither. Stock `ModelBatch` through the shim compiled and drew a spot light without error, but no picture of it has been compared with OpenGL |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (187 of 238 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (188 of 238 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). **Known problem:** on the Adreno 650 everything works except 3D models
@@ -75,7 +75,7 @@ supports. Stock OpenGL runs on the display GPU, so on the two-GPU PC only PC-508
 | T3 | **1,000,000 sprites** moved every frame by a compute shader | how much the GPU can do on its own; stock libGDX cannot run it |
 | T4 | **250,000 lit 3D meshes** moved by a compute shader, culled on the GPU and drawn with one indirect call, with **500 point lights**, 1280x720 on the PC and full screen on a phone | the GPU-driven path; stock libGDX cannot run it |
 | T5 | T4 at a mobile load: 50,000 meshes and 64 lights | the same on phone-sized work |
-| T6 | T1 drawn with **libGDX's own sprite shader, translated at run time** (`VulkanShaderProgram`), against the batch's built-in shader | what a game's own shader costs compared with a built-in one |
+| T6 | T1 drawn with a shader **translated at run time** (`VulkanShaderProgram`), against the batch's built-in shader. Until 2026-11-04 the translated shader was libGDX's own sprite shader; since libGDX's own shaders are now recognised and replaced by the dedicated ones, the "translated stock shader" rows below that predate it are historical and the custom shader is the live measurement | what a game's own shader costs compared with a built-in one |
 | T7 | T1 drawn by **libGDX's own `SpriteBatch`, unmodified, through the GL shim**, against `VulkanSpriteBatch` (`gradlew :gdx-vulkan-desktop:stressShim`) | what running stock code unchanged costs compared with the renamed classes |
 
 ### Results
@@ -103,9 +103,11 @@ Higher is better. "Stock" is libGDX 1.14.2 on OpenGL; a dash means the test has 
 | T6 translated stock sprite shader | PC-2080 | built-in shader 1,275 fps | 1,273 fps | 1.00x |
 | T6 translated stock sprite shader | RM-11P (144 Hz, vsync off) | built-in shader 1,545 fps | 1,457 fps | 0.94x (rounds 1 to 3 within 2% of each other; round 4 was noisy) |
 | T6 translated stock sprite shader | S20-FE (120 Hz, vsync off) | built-in shader 721 fps (cool), 518 fps (throttled) | 713 fps (cool), 511 fps (throttled) | 0.99x in either state |
+| T6 translated custom shader (push-constant tint, uniform-block palette), re-run 2026-11-04 | RM-11P (144 Hz, vsync off) | built-in shader, rounds 3 and 4 (one clock state): 1,244 and 1,243 fps | 1,239 and 1,233 fps (modern); 0.94x on average over four rounds on the compatibility path | 1.00x within a clock state |
 | T7 stock `SpriteBatch` on the shim, one texture | PC-5080 | - | 928 fps (modern), 879 fps (compatibility) against 1,227 fps for `VulkanSpriteBatch` | 0.76x, 0.72x |
 | T7 stock `SpriteBatch` on the shim, one texture | PC-2080 | - | 1,205 fps against 1,256 fps | 0.96x |
 | T7 stock `SpriteBatch` on the shim, one texture | S20-FE (120 Hz, vsync off) | - | 499 fps against 563 fps | 0.89x |
+| T7 stock `SpriteBatch` on the shim, one texture | RM-11P (144 Hz, vsync off) | - | 1,092 fps (modern), 1,098 fps (compatibility) against 1,236 and 1,230 fps | 0.88x, 0.89x |
 | T7 stock `SpriteBatch` on the shim, eight textures | PC-5080, PC-2080 | - | 1.23x and 1.28x of `VulkanSpriteBatch` (modern), 0.78x (PC-5080 compatibility) | the stock batch flushes at each texture change; on a desktop GPU that is not always slower |
 
 Two more results that are not about a single device:
@@ -123,7 +125,9 @@ How to read these:
 - The RM-11P one-texture number was 548 fps until a shader was fixed: the sprite batch's single-texture shader got its texture slot through a varying, which the
   Adreno compiler could not tell was the same for every pixel, so it took its slow path for indexing the bindless texture table. Reading the slot from the push
   constants in the fragment shader made it 2.6 times faster on that phone. The desktop GPUs were not affected (that test is CPU-bound there).
+- The phone stepped from about 2,000 fps to about 1,240 fps between rounds 2 and 3 of the T6 run (a clock or thermal state), which is why the comparison is read inside one state.
 - T7 is the cost of not renaming: libGDX's own batch, with the shader replaced by the dedicated one, runs at about three quarters of the speed of `VulkanSpriteBatch` on the RTX 5080 (a CPU-bound test: the shim records one draw per flush, the generated batch writes straight into GPU-visible memory) and at 0.9x to 1.0x on the RTX 2080 and the phone.
+- The whole device suite was re-run on RM-11P on 2026-11-04 on the current code (32 checks, both code paths, all passed, no validation messages: the layers are not on the device): T1 1,462 fps (modern) and 1,230 (compatibility), T2 37.3 and 10.4 fps, T3 208 fps on both, T4 48.5 and 47.9 fps, T5 791 and 733 fps; GPU time per frame (timestamp queries) for the T7 sprites 0.62 ms (`VulkanSpriteBatch`) and 0.69 ms (stock `SpriteBatch` on the shim).
 - No phone has a stock OpenGL number yet; those cells will be filled in as the stock-against-Vulkan demo runs on phones.
 
 Rendering matches stock libGDX: the test scenes are drawn by stock OpenGL and by gdx-vulkan and compared pixel by pixel. The framebuffer scenes are identical;
@@ -340,7 +344,7 @@ Stock classes run unchanged because the same shim also serves what they use to d
   [`RELEASE.md`](docs/RELEASE.md) the manual checks before a release
 
 ## Known limitations
-- libGDX GLSL is translated at run time (the first use of a shader costs a compile, not yet measured, and is cached on disk afterwards; `VulkanShaderProgram.prepareAsync` does it on a worker thread). A hand-written SPIR-V shader that rotates its own output must call `gdx_vk_clip()` like the bundled ones, for Android pre-rotation.
+- libGDX GLSL is translated at run time (measured on the phones: the first program of a run takes 0.6 s on the Adreno 840 and 1.1 s on the Adreno 650, because it starts the compiler; each further shader takes 10 to 25 ms, and a cached one 0.2 to 0.8 ms. Call `VulkanShaderProgram.warmUp()` at the start, or `prepareAsync` for the shaders a level needs, to keep that off the render thread). A hand-written SPIR-V shader that rotates its own output must call `gdx_vk_clip()` like the bundled ones, for Android pre-rotation.
 - `VulkanModelBatch` draws with the port of libGDX's default shader (plus normal maps) and does not accept custom 3D `Shader` or `ShaderProvider` classes. Stock `ModelBatch` through the shim accepts them (any stock `Shader`, `BaseShader`, `ShaderProvider`), at the cost of the shim's CPU time.
 - The GL shim draws from one vertex buffer per draw (or from vertex data in memory), with float and normalised-byte attributes; `glVertexAttrib*` constants for attributes a mesh lacks are ignored (a draw that reads such an attribute gets undefined values).
 - On the first run, a shader outside the set compiled with the library (everything but libGDX's own sprite, shape and default and depth model shaders for common materials and lights) is translated and compiled at run time.

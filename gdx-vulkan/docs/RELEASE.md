@@ -29,7 +29,7 @@ Index 0 and 1 depend on the machine; the soak prints the device name it used.
 cd gdx-vulkan-android
 gradlew :testapp:assembleDebug && adb install -r testapp/build/outputs/apk/debug/testapp-debug.apk
 adb shell am start -n io.github.slebed.gdxvulkan.testapp/.MainActivity --ez suite true [--ez forceTierB true]
-adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # DEVICESUITE PASS, 30 checks (on a phone whose 3D shaders do not build, skip the 3D checks with `--es only`)
+adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # DEVICESUITE PASS, 32 checks (on a phone whose 3D shaders do not build, skip the 3D checks with `--es only`)
 adb shell am start -n io.github.slebed.gdxvulkan.testapp/.LifecycleActivity --ei cycles 100 [--ez forceTierB true]
 adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # LIFECYCLE PASS
 ```

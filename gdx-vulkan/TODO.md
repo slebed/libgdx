@@ -17,7 +17,7 @@ Legend: **[bug]** something is wrong today, **[verify]** built but not checked o
   there. Deferred by the owner ("deal with it along with the other outstanding bugs"). Next step: find the trigger or work around it (for example reading the blob
   through a uniform buffer or vertex attributes on this driver); decide whether stock `ModelBatch` on the shim (a different shader layout) works on the phone, which would be a fallback.
   Checklist: Gate 1a "Render correctly on the Galaxy S20", Gate 5 "pipelines build on the Adreno 650".
-- **[bug] Adreno 840 (REDMAGIC), modern path, 128 separate textures: 38 fps** (compatibility path 8.6 fps). The one-texture case was fixed (bindless index from
+- **[bug] Adreno 840 (REDMAGIC), modern path, 128 separate textures: 37 fps** (compatibility path 10.4 fps; re-measured 2026-11-04). The one-texture case was fixed (bindless index from
   push constants instead of a varying); the many-texture case was not investigated. Optional, but it is the weak spot of the modern path on that GPU.
 - **[bug] Android: the on-screen keyboard through `Gdx.input` does not work.**
 - **[bug] The GL shim ignores `glVertexAttrib*` constants**, so a draw that reads an attribute the mesh does not have gets undefined values (OpenGL gives the
@@ -31,21 +31,22 @@ Legend: **[bug]** something is wrong today, **[verify]** built but not checked o
 
 ## 2. Built but not verified where it matters
 
-- **[verify] The REDMAGIC has not run any of this session's work.** It was only connected over wireless, and the rule is USB only. Needs, over USB: the device suite
-  in both tiers (it grew from 21 to 30 checks), including `stockClassesOnTheShim`, `gate3StockClassesOnTheShim`, `gate5StockModelBatchOnTheShim`,
-  `stockSpriteBatchAgainstGenerated`, and `shaderProgramsAgainstBuiltIn` after the sprite shader fix (the earlier full re-run was never done).
-- **[verify] GPU timestamps (`GdxVkPresenter.gpuFrameNanos`) on Android and Linux arm64.** Tested on Windows (RTX 5080) and in CI (lavapipe). Check a phone returns plausible
-  GPU times and that always submitting the upload command buffer costs nothing measurable there.
-- **[verify] The demos on a phone** (they are desktop only: see section 4) and the **stock `ModelBatch` on any phone** (only the S20 ran the 2D stock checks).
-- **[verify] Stock `ModelBatch` with point and spot lights, textures in `DefaultShader`, skinned models**: they draw without error (the bundle recorder runs them) but only
+Done 2026-11-04 (REDMAGIC over wireless, allowed by the owner for that run; S20 over USB): the whole device suite, 32 checks, passes in both code paths on the REDMAGIC with the
+stock classes on the shim (0 pixels differ from the Vulkan classes, including the stock `ModelBatch` scenes), GPU timestamps work on both phones (an empty frame reports 0.14 to
+0.35 ms), the stock `SpriteBatch` on the shim reaches 0.88x to 0.89x of `VulkanSpriteBatch` on both phones, and the first-use shader costs are measured (first program of a run 0.6 s
+on the Adreno 840 and 1.1 s on the Adreno 650, each further shader 10 to 25 ms, cached 0.2 to 0.8 ms). Results are in `README.md` and `docs/CHECKLIST.md`.
+
+- **[bug] The first translated shader of a run takes 0.6 to 1.1 s on the phones** (it starts glslang). `VulkanShaderProgram.warmUp()` moves it off the render thread; make sure demos and the
+  documentation call it at start-up, and consider starting it by itself when the first program is created asynchronously.
+- **[verify] Demos on a phone**: they are desktop only (section 4).
+- **[verify] Stock `ModelBatch` with point and spot lights, textures in `DefaultShader`, skinned models** on the desktop: they draw without error (the bundle recorder runs them) but only
   the directional-light scenes and Gate 5 are compared with a picture. Add scenes with point and spot lights against OpenGL.
-- **[verify] Not measured:** the first-use compile time of a translated shader (target under 50 ms; glslang's own start-up is about 150 ms, `warmUp()` hides it), the
-  second launch with a warm disk cache, the translator's compile time on a phone, the glslang size cost with and without the SPIRV-Tools optimizer.
 - **[verify] Android GPU Inspector capture** of the pre-rotated swapchain (AGI is not installed; the presenter's `rotation()` and the logs are the evidence now).
 - **[verify] Android armeabi-v7a and x86_64** compile and link but have never been run (needs an emulator or a second phone). **Linux arm64:** natives are built and
-  their native tests run in CI (`arm64-natives`); the Java suite does not run there.
+  their native tests run in CI (`arm64-natives`); the Java suite does not run there, so GPU timestamps are unchecked on that platform.
 - **[verify] The 10-minute soak on the RTX 2080, compatibility path** was never run (every other GPU/path combination was).
 - **[verify] Validation message count in the demo smoke tests** is not asserted (the layers run, a message prints, but it does not fail `DemosSmokeTest`).
+- **[verify] The glslang size cost with and without the SPIRV-Tools optimizer** is not recorded (the library grew from 2.1 MB to 2.5 MB on Windows when the runtime became static).
 
 ## 3. Features not built
 
