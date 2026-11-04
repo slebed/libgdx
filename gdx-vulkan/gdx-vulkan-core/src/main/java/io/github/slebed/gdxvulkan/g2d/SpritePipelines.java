@@ -61,7 +61,7 @@ final class SpritePipelines {
         }
         if (program != null) return program.pipeline(key.substring(("sprite:" + program.key() + "|").length()), d);
         if (bundle != null) return frame.pipeline(key, "sprite:" + bundle.key(), bundle, d);
-        if (single) return frame.pipeline(key, "sprite1", "sprite_single.vert", "sprite.frag", d);
+        if (single) return frame.pipeline(key, "sprite1", "sprite_single.vert", "sprite_single.frag", d);
         return frame.pipeline(key, "sprite", "sprite.vert", "sprite.frag", d);
     }
 }

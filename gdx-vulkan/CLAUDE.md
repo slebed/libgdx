@@ -100,7 +100,7 @@ second-GPU Vulkan comparison is capped by presentation and means nothing.
   `adb shell dumpsys dropbox --print data_app_native_crash`. No validation layer on the device.
   The device found a bug desktop never showed: `DeletionQueue::collect()` self-moved a `std::function` (empty on the NDK's libc++).
   Adreno 840 throughput, 20,000 sprites at 1216x2688, vsync off: Tier A 548 fps with 1 texture but 38 fps with 128; Tier B 1,428 and 8.6 fps.
-  Tier A 1-texture being 2.6x slower than Tier B is not investigated (suspect the bindless table on Adreno).
+  The Tier A 1-texture gap (548 fps against Tier B's 1,428) was the sprite batch's single-texture fragment shader indexing the bindless table with a slot that came through a flat varying: the Adreno compiler cannot prove such an index is uniform. `sprite_single.frag` now reads the slot from the push constants, and the phone measures 1,402 to 1,545 fps in steady state. Rule: a bindless index that is the same for the whole draw must come from the push constants (or another uniform), never through a varying. Phones also need about six seconds to settle (JIT, GPU clock): measure after that, and alternate the order when comparing.
 - Validation-layer caveat: sync validation cost grows with the number of barrier commands (batching image-upload barriers took the Tier A soak from 0.1 fps back to 60 fps), and with fence completion sync validation slows super-linearly under the soak load (60 fps -> <5 fps) although the
   same run with validation off is perfect, so `soakTest` turns sync validation off when `forceTierB` is set. Ubuntu's older layer also needs
   an explicit dependency between consecutive captures (added to the capture path).

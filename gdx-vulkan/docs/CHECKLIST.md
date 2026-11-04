@@ -17,14 +17,14 @@ the plan names.
 | Phase 1b: Memory, layout and caches | 20 | 0 | 0 | 20 |
 | Phase 2: Unmodified 2D | 25 | 0 | 0 | 25 |
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
-| Phase 4: Android lifecycle | 11 | 1 | 0 | 12 |
+| Phase 4: Android lifecycle | 12 | 1 | 0 | 13 |
 | Phase 5: 3D with stock models | 9 | 3 | 1 | 13 |
 | Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 14 | 9 | 19 | 42 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
 | Demos (to plan once Phase 5 is complete) | 0 | 0 | 7 | 7 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **170** | **17** | **44** | **231** |
+| **All** | **171** | **17** | **44** | **232** |
 ---
 
 ## Core decisions
@@ -242,6 +242,8 @@ the plan names.
 ---
 
 ## Phase 4: Android lifecycle
+
+- [x] Adreno one-texture sprite speed: the single-texture fragment shader reads its bindless slot from the push constants instead of a flat varying (`sprite_single.frag`), which the Adreno compiler can treat as uniform: the REDMAGIC (Adreno 840, modern path) runs the 20,000-sprite test at 1,402 to 1,545 fps in steady state instead of 548; the picture is unchanged (exact goldens and the stock-OpenGL comparison pass on both code paths)
 
 ### 1. `VulkanAndroidApplication`
 - [x] Reuses `AndroidInput`, `AndroidAudio`, `AndroidFiles`; own `SurfaceView` implementing `SurfaceHolder.Callback`: `VulkanAndroidApplication` + `VulkanAndroidGraphics` (a render thread owns every Vulkan call; pause/resume/dispose reach the `ApplicationListener` on it). `Callback2` is not needed: the renderer redraws through the swapchain, not through `surfaceRedrawNeeded`

@@ -37,7 +37,7 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Spot lights, point-light shadows | libGDX's own default shader has neither |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (170 of 231 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (171 of 232 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). **Known problem:** on the Adreno 650 everything works except 3D models
@@ -55,7 +55,7 @@ table says otherwise. More devices will be added over time: see [Adding a device
 |---|---|---|---|---|---|---|
 | PC-5080 | Desktop PC | Windows 10 Pro 22H2 | NVIDIA GeForce RTX 5080 (driver 610.62) | Intel Core i7-6900K, 128 GB RAM | 1.4 (1.4.341) | modern (forced to the compatibility path for one row) |
 | PC-2080 | the same desktop PC | Windows 10 Pro 22H2 | NVIDIA GeForce RTX 2080 (driver 610.62) | Intel Core i7-6900K, 128 GB RAM | 1.4 (1.4.341) | modern |
-| RM-11P | REDMAGIC Pro 11 (NX809J) | Android 16 | Qualcomm Adreno 840 | Qualcomm Snapdragon (model not recorded) | 1.4 | modern, and compatibility when forced |
+| RM-11P | REDMAGIC Pro 11 (NX809J), display set to 144 Hz; tested over wireless debugging | Android 16 | Qualcomm Adreno 840 | Qualcomm Snapdragon (model not recorded) | 1.4 | modern, and compatibility when forced |
 | S20-FE | Samsung Galaxy S20 FE 5G (SM-G781W), display set to 120 Hz | Android 13 | Qualcomm Adreno 650 | Snapdragon 865 (SM8250) | 1.1 (1.1.128) | compatibility only (3D models do not run yet: see Known limitations) |
 | CI | GitHub Actions runner | Ubuntu 24.04 | lavapipe (software, Mesa 25.2) | | 1.3 or newer | modern and compatibility; used for correctness, not speed |
 
@@ -80,7 +80,7 @@ Higher is better. "Stock" is libGDX 1.14.2 on OpenGL; a dash means the test has 
 | Test | Device | Stock libGDX (OpenGL) | gdx-vulkan | Difference |
 |---|---|---|---|---|
 | T1 one texture | PC-5080 | 1,064 fps | 1,306 fps | 1.2x |
-| T1 one texture | RM-11P | not run | 548 fps (modern), 1,428 fps (compatibility) | |
+| T1 one texture | RM-11P (144 Hz, vsync off) | not run | 1,402 fps (modern, steady state; it was 548 before a shader fix, see below), 1,428 fps (compatibility, earlier run) | |
 | T1 one texture | S20-FE (120 Hz, vsync off) | not run | 717 fps | |
 | T2 128 textures | PC-5080 | 17.5 fps | 423 fps (modern), 61-70 fps (compatibility) | **24x**, 3.5-4x |
 | T2 128 textures | RM-11P | not run | 38 fps (modern), 8.6 fps (compatibility) | |
@@ -96,6 +96,7 @@ Higher is better. "Stock" is libGDX 1.14.2 on OpenGL; a dash means the test has 
 | T5 50,000 meshes, 64 lights | S20-FE | - | held at 59 fps by the display (a faster figure was not measured) | |
 | T6 translated stock sprite shader | PC-5080 | built-in shader 1,332 fps (modern path), 1,323 fps (compatibility) | 1,319 fps (modern), 1,288 fps (compatibility) | 0.99x, 0.97x |
 | T6 translated stock sprite shader | PC-2080 | built-in shader 1,275 fps | 1,273 fps | 1.00x |
+| T6 translated stock sprite shader | RM-11P (144 Hz, vsync off) | built-in shader 1,545 fps | 1,457 fps | 0.94x (rounds 1 to 3 within 2% of each other; round 4 was noisy) |
 | T6 translated stock sprite shader | S20-FE (120 Hz, vsync off) | built-in shader 721 fps (cool), 518 fps (throttled) | 713 fps (cool), 511 fps (throttled) | 0.99x in either state |
 
 Two more results that are not about a single device:
@@ -108,6 +109,11 @@ How to read these:
 - T2 is the case Vulkan helps most. A game that packs its art into atlases is closer to T1, about 1.2x. The renderer started out slower than stock on T1
   (0.91x) until vertex data got a copy in GPU memory.
 - Stock OpenGL cannot run T3 to T5, so there is nothing to compare; they show what the extra control buys.
+- Phones need about six seconds to settle (the JIT compiles the draw path, the GPU clock rises), and a phone can step between two clock speeds during a long run.
+  The phone numbers are measured after a six-second warm-up, and the shader comparison alternates the order of the shaders and is read inside one clock state.
+- The RM-11P one-texture number was 548 fps until a shader was fixed: the sprite batch's single-texture shader got its texture slot through a varying, which the
+  Adreno compiler could not tell was the same for every pixel, so it took its slow path for indexing the bindless texture table. Reading the slot from the push
+  constants in the fragment shader made it 2.6 times faster on that phone. The desktop GPUs were not affected (that test is CPU-bound there).
 - No phone has a stock OpenGL number yet; those cells will be filled in as the stock-against-Vulkan demo runs on phones.
 
 Rendering matches stock libGDX: the test scenes are drawn by stock OpenGL and by gdx-vulkan and compared pixel by pixel. The framebuffer scenes are identical;

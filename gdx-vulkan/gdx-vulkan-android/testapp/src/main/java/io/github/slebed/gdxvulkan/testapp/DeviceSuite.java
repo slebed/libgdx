@@ -1090,7 +1090,7 @@ final class DeviceSuite {
         Texture[] tex = new Texture[textures];
         for (int i = 0; i < textures; i++) {
             Pixmap pm = new Pixmap(16, 16, Pixmap.Format.RGBA8888);
-            pm.setColor(((i * 37) & 255) / 255f, ((i * 91) & 255) / 255f, ((i * 53) & 255) / 255f, 1f);
+            pm.setColor(0.2f + ((i * 37) & 127) / 255f, 0.2f + ((i * 91) & 127) / 255f, 0.2f + ((i * 53) & 127) / 255f, 1f); // never black
             pm.fill();
             tex[i] = new Texture(pm);
             pm.dispose();
@@ -1104,8 +1104,10 @@ final class DeviceSuite {
             y[i] = r.nextFloat() * (H - size);
         }
         VulkanSpriteBatch b = new VulkanSpriteBatch(frame, 8191);
-        long warmEnd = System.nanoTime() + 1_000_000_000L, end = 0;
-        long frames = 0, measureStart = 0;
+        // A phone needs about six seconds to settle (the JIT compiles the draw path, the GPU clock rises): measure after that, not during it.
+        long warmEnd = System.nanoTime() + 6_000_000_000L, end = 0;
+        long frames = 0, measureStart = 0, lastReport = System.nanoTime(), lastFrames = 0;
+        int second = 0;
         while (true) {
             if (!frame.begin(0.1f, 0.1f, 0.1f, 1f)) continue;
             b.getProjectionMatrix().setToOrtho2D(0, 0, W, H);
@@ -1121,6 +1123,11 @@ final class DeviceSuite {
                 }
             } else {
                 frames++;
+                if (now - lastReport >= 1_000_000_000L) { // per second, to see whether the speed changes during the run
+                    TestLog.i(TAG, String.format("stress2 %d textures, second %d: %.1f fps", textures, ++second, (frames - lastFrames) / ((now - lastReport) / 1e9)));
+                    lastReport = now;
+                    lastFrames = frames;
+                }
                 if (now >= end) break;
             }
         }
@@ -1166,6 +1173,15 @@ final class DeviceSuite {
         }
         final VulkanSpriteBatch b = new VulkanSpriteBatch(frame, 8191);
         final VulkanShaderProgram[] programs = {null, stock, custom};
+        // Settle first: the first seconds of a run are slower (JIT, GPU clock) and would count against whichever shader happens to run first.
+        for (long settleEnd = System.nanoTime() + 6_000_000_000L; System.nanoTime() < settleEnd; ) {
+            if (!frame.begin(0.1f, 0.1f, 0.1f, 1f)) continue;
+            b.getProjectionMatrix().setToOrtho2D(0, 0, W, H);
+            b.begin();
+            for (int i = 0; i < sprites; i++) b.draw(texture, x[i], y[i], size, size);
+            b.end();
+            frame.end();
+        }
         final String[] names = {"built-in shader", "translated stock shader", "translated custom shader"};
         final double[] sum = new double[3];
         final int rounds = 4;
