@@ -88,8 +88,7 @@ public final class CascadedShadowsDemo implements Demo {
         modelBatch.render(world.instances, environment);
         modelBatch.end();
 
-        hud.draw(title(), summary(), notes(), Backend.name, Gdx.graphics.getFramesPerSecond() + " fps",
-            "shadow maps: " + CASCADES + " x " + MAP_SIZE + " x " + MAP_SIZE);
+        hud.draw(title(), summary(), notes(), "shadow maps: " + CASCADES + " x " + MAP_SIZE + " x " + MAP_SIZE);
     }
 
     @Override public void pause () {}

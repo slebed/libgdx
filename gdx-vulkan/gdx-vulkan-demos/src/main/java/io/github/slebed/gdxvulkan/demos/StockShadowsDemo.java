@@ -83,7 +83,7 @@ public final class StockShadowsDemo implements Demo {
         modelBatch.render(world.instances, environment);
         modelBatch.end();
 
-        hud.draw(title(), summary(), notes(), Backend.name, Gdx.graphics.getFramesPerSecond() + " fps", "shadow map: 1 x " + MAP_SIZE + " x " + MAP_SIZE);
+        hud.draw(title(), summary(), notes(), "shadow map: 1 x " + MAP_SIZE + " x " + MAP_SIZE);
     }
 
     @Override public void pause () {}

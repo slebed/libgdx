@@ -395,7 +395,7 @@ Decisions of the owner, 2026-11-04: each demo is **one class written against sto
 
 - [~] Demos showcase what the library can do, and run on the desktop and on Android: three demos on the desktop (stock shadow recipe, cascaded shadows, GPU boids); not on Android yet
 - [x] Where a stock libGDX equivalent exists, the demo shows it next to the Vulkan version: the stock shadow demo is the same class on OpenGL and on gdx-vulkan; the boids demo has an OpenGL 4.3 version with a compute shader written with `Gdx.gl31`; C starts the OpenGL window beside the Vulkan one, same size
-- [x] Where there is no OpenGL equivalent (cascaded shadow maps, GPU culling, indirect drawing, clustered lights), the demo says so on screen: what it does and what stock libGDX has instead
+- [x] Where libGDX has no class for what a demo does (cascaded shadow maps, GPU culling, indirect drawing, clustered lights), the demo says so on screen and what stock libGDX offers instead; the boids demo has an OpenGL 4.3 version with the same culling and indirect draw, written with raw `Gdx.gl31` calls
 - [~] The demo code is clean, clear and easy to follow: short classes, one concern each, comments where Vulkan differs from stock (the owner reviews)
 - [~] Every demo is visually interesting (the owner judges)
 - [x] Every demo has easily readable text that says what it is about; the size follows the window height (`Hud`: body text is a 36th of the height, regenerated with FreeType when the window changes), plain libGDX (SpriteBatch, ShapeRenderer, FreeType) so it is the same on both backends
@@ -404,7 +404,22 @@ Decisions of the owner, 2026-11-04: each demo is **one class written against sto
 - [ ] More demos: sprite storm (100k+ sprites, stock against Vulkan), post-processing over a Scene2D UI
 - [ ] The demo app on Android
 
-Measured (RTX 5080, window 1280 x 720, vsync off, steady state): the stock shadow code 1,238 fps on gdx-vulkan against 1,686 on OpenGL (0.73x, through the GL shim); cascaded shadows 960 fps; boids 250,000: gdx-vulkan 656 fps with 500 clustered lights and 710 without, OpenGL 667 fps with one directional light and no culling. The first run of the cascaded demo measured 133 fps and found a real bug: `VulkanModelBatch` recomputed every mesh part's bounds on every `render()` (96% of the frame); it is now measured once, as stock libGDX does.
+Both backends show the same fields on screen (`Backend`, `Hud`, `FrameStats`): API and version, device, driver, code path; frame time; CPU time per frame for the whole process (every thread, the driver's included) and for the render thread; GPU time per frame (gdx-vulkan: timestamp queries, `GdxVkPresenter.gpuFrameNanos()`; OpenGL: a timer query in `GlTimer`); then the demo's own lines. The OpenGL boids demo does what the gdx-vulkan one does apart from the lights: compute simulation, compute culling, indirect draw (an earlier version drew every boid, and the text said stock libGDX "has no GPU culling or indirect drawing", which was wrong: libGDX has no class for it, but `Gdx.gl31` has the calls).
+
+Measured (RTX 5080, window 1280 x 720, vsync off, 4,000 frames, the numbers on screen):
+
+| | frame | CPU per frame, all threads | render thread | GPU per frame |
+|---|---|---|---|---|
+| Stock shadow code, gdx-vulkan (GL shim) | 0.86 ms | 0.96 ms (1.1 cores) | 0.83 ms | 0.06 ms |
+| Stock shadow code, OpenGL | 0.55 ms | 0.97 ms (1.7 cores) | 0.33 ms | 0.04 ms |
+| Cascaded shadows, gdx-vulkan | 1.11 ms | 1.35 ms (1.2 cores) | 1.10 ms | 0.10 ms |
+| Boids, gdx-vulkan, 500 lights | 1.51 ms | 0.52 ms (0.3 cores) | 0.52 ms | 1.39 ms |
+| Boids, gdx-vulkan, no lights | 1.40 ms | 0.52 ms (0.4 cores) | 0.48 ms | 1.27 ms |
+| Boids, OpenGL (simulation, culling, indirect draw, one light) | 2.03 ms | 2.53 ms (1.2 cores) | 0.57 ms | 1.73 ms |
+
+What it shows. **CPU:** with the same GPU work (boids), gdx-vulkan spends about a fifth of the CPU (0.5 ms against 2.5 ms a frame); the render thread costs the same (0.5 ms), the difference is the OpenGL driver's own threads, which part-time spin and wait, so some of it is waiting, not work. Stock libGDX code on the shim does **not** use less CPU than on OpenGL (0.96 against 0.97 ms in total, and 0.83 against 0.33 ms on the render thread): the less-CPU claim holds for gdx-vulkan's own classes and the GPU-driven path, not for the shim. **GPU:** the boids take 1.27 ms of GPU time on gdx-vulkan against 1.73 ms on OpenGL, but the two versions run different shader code (the OpenGL one was written for this demo), so that is not a measure of the API; the shadow demos are CPU-bound (the GPU is idle 90% of the frame). The frame-time difference in the boids demo (1.40 against 2.03 ms) is mostly that GPU difference.
+
+An earlier cascaded-shadows run found a real bug: `VulkanModelBatch` recomputed every mesh part's bounds on every `render()` (96% of the frame); it is now measured once, as stock libGDX does.
 
 ---
 

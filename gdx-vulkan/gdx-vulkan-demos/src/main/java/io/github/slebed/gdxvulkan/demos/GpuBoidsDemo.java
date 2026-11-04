@@ -17,8 +17,8 @@ import io.github.slebed.gdxvulkan.g3d.VulkanGpuInstances;
  * A swarm of boids that lives on the GPU. A compute shader moves them, a second one removes the ones outside the view, a third sorts 500 point lights into
  * screen clusters, and one indirect draw call draws what is left. The CPU's work for a frame is a few dispatches and one draw: the boids are never read back.
  *
- * <p>Stock libGDX can run the same simulation with compute shaders of its own on OpenGL 4.3 ({@link GpuBoidsOpenGlDemo}), but it has no GPU culling, no indirect
- * drawing and no clustered lights, so that version draws every boid with a single directional light.
+ * <p>libGDX has no class for this, but OpenGL 4.3 can do the simulation, the culling and the indirect draw with compute shaders, and {@link GpuBoidsOpenGlDemo} does,
+ * through {@code Gdx.gl31}. It has no clustered lights: it is lit by a single directional light.
  */
 public final class GpuBoidsDemo implements Demo {
     private static final int LIGHTS = 500;
@@ -42,12 +42,12 @@ public final class GpuBoidsDemo implements Demo {
     }
 
     @Override public String summary () {
-        return count + " boids are simulated, culled and drawn on the GPU, lit by " + LIGHTS + " coloured point lights. The CPU records a few dispatches and one draw call.";
+        return count + " boids are simulated, culled and drawn on the GPU, lit by " + LIGHTS + " coloured point lights sorted into clusters. The CPU records a few dispatches and one draw call.";
     }
 
     @Override public String[] notes () {
-        return new String[] {"No stock libGDX class does this: it has no GPU culling, indirect drawing or clustered lights.",
-            "Press C for the OpenGL 4.3 version: the same simulation, every boid drawn, one light.", "L switches the point lights on and off, Space pauses."};
+        return new String[] {"libGDX has no class for this. On OpenGL you write it yourself: press C for a version with the same simulation, culling and indirect draw.",
+            "What it adds is the 500 clustered lights, and the CPU time the work takes.", "L switches the point lights on and off, Space pauses."};
     }
 
     @Override public String openGlCounterpart () {
@@ -140,8 +140,8 @@ public final class GpuBoidsDemo implements Demo {
         swarm.render(camera, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
 
         if (frames++ % 30 == 0) visible = swarm.readVisibleCount(); // the one read back, twice a second, for the number on screen
-        hud.draw(title(), summary(), notes(), Backend.name, Gdx.graphics.getFramesPerSecond() + " fps",
-            "boids: " + count + ", drawn after GPU culling: " + visible, "point lights: " + (lit ? LIGHTS : 0));
+        hud.draw(title(), summary(), notes(), "boids: " + count + ", drawn after GPU culling: " + visible,
+            lit ? "lights: " + LIGHTS + " clustered point lights" : "lights: none (L turns them on)");
     }
 
     @Override public void pause () {}

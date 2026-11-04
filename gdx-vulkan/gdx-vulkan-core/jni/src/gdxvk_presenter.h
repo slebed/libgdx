@@ -108,6 +108,10 @@ public:
     // frame's offscreen passes all came before its first swapchain draw (pass scheduling), 2 or more when they interrupted it.
     void lastPassCounts(uint32_t out[2]) const;
 
+    // How long the GPU worked on the last frame whose timestamps could be read (a frame or two behind), in nanoseconds: from the first command of
+    // its submit (staged uploads, compute) to the last (the frame's draws). 0 when the device cannot take timestamps.
+    uint64_t gpuFrameNanos() const;
+
     // Stress test 3 (plan, Phase 3): the cost of recording `draws` indexed draws, each with a state change (the cull mode, alternating) and
     // a full 128-byte push-constant block, as one plain C++ loop straight into the frame's command buffer. This is the floor the command
     // stream is compared with. Needs an open frame and a bound index buffer (`indexBuffer` is a resource buffer id of u16 indices, at

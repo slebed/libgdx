@@ -81,7 +81,7 @@ public final class DemoMenu implements ApplicationListener {
         final String[] lines = new String[DEMOS.length + 1];
         for (int i = 0; i < DEMOS.length; i++) lines[i] = (i + 1) + "   " + listed[i].title();
         lines[DEMOS.length] = "Esc leaves.";
-        hud.draw("gdx-vulkan demos", "Press the number of a demo. In a demo, Esc comes back here and C starts the stock OpenGL version beside it.", lines, Backend.name);
+        hud.draw("gdx-vulkan demos", "Press the number of a demo. In a demo, Esc comes back here and C starts the stock OpenGL version beside it.", lines);
     }
 
     @Override public void pause () {

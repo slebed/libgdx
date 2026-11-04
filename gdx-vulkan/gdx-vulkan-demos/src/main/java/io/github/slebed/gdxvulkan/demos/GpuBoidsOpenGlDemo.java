@@ -1,5 +1,7 @@
 package io.github.slebed.gdxvulkan.demos;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 
@@ -13,29 +15,37 @@ import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.math.Plane;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
 /**
- * The boids of {@link GpuBoidsDemo} on stock libGDX and OpenGL 4.3: the same simulation in a compute shader, through {@code Gdx.gl31}. The boids stay in a
- * shader storage buffer; the vertex shader reads them from there and one instanced draw call draws all of them, so nothing travels to the CPU.
+ * The boids of {@link GpuBoidsDemo} on stock libGDX and OpenGL 4.3, doing the same work: the same simulation in a compute shader, a second compute shader that culls
+ * the boids against the camera's frustum, and one indirect draw call whose instance count comes from the GPU. Everything goes through {@code Gdx.gl31}; libGDX has
+ * no class for any of it, so the compute programs are made with raw GL calls ({@code ShaderProgram} takes only vertex and fragment shaders) and the buffers are
+ * plain GL buffers. The one thing this version does not have is the 500 clustered point lights: it is lit by a single directional light.
  *
- * <p>What stock libGDX does not give you is visible in the code: a compute program is made with raw GL calls (libGDX's {@code ShaderProgram} takes only vertex
- * and fragment shaders), there is no culling on the GPU, so every boid is drawn, and no clustered lights, so there is one directional light.
- * Needs OpenGL 4.3, which {@link GlDemos} asks the window for.
+ * <p>Needs OpenGL 4.3, which {@link GlDemos} asks the window for.
  */
 public final class GpuBoidsOpenGlDemo implements Demo {
-    private static final int GL_COMPUTE_SHADER = 0x91B9; // libGDX's GL31 has the bit but not this constant
+    private static final int GL_COMPUTE_SHADER = 0x91B9;        // libGDX's GL31 has the bit but not this constant
+    private static final int GL_DRAW_INDIRECT_BUFFER = 0x8F3F;
+    private static final int GL_COMMAND_BARRIER_BIT = 0x40;
+    private static final float BOID_RADIUS = 2.4f;              // bounding radius of the cone, before a boid's scale
 
     private final int count = BoidSwarm.count();
     private Model cone;
     private Texture texture;
     private Mesh mesh;
     private ShaderProgram drawShader;
-    private int computeProgram, boidBuffer, gridBuffer;
-    private int uMode, uCount, uDt, uHalf, uMaxSpeed, uParams;
+    private int simulate, cull;
+    private int simMode, simCount, simDt, simHalf, simMaxSpeed, simParams;
+    private int cullMode, cullCount, cullIndexCount, cullRadius, cullPlanes;
+    private int boidBuffer, gridBuffer, visibleBuffer;
+    private final FloatBuffer planes = BufferUtils.newFloatBuffer(24);
     private boolean paused;
     private float time;
+    private int frames, visible;
     private PerspectiveCamera camera;
     private Hud hud;
 
@@ -44,11 +54,13 @@ public final class GpuBoidsOpenGlDemo implements Demo {
     }
 
     @Override public String summary () {
-        return count + " boids simulated by an OpenGL compute shader and drawn with one instanced draw call. stock libGDX, no gdx-vulkan classes.";
+        return count + " boids simulated, culled and drawn on the GPU with OpenGL 4.3 compute shaders and one indirect draw call. libGDX has no class for this: "
+            + "it is raw Gdx.gl31 code.";
     }
 
     @Override public String[] notes () {
-        return new String[] {"Every boid is drawn, with no culling on the GPU.", "One directional light: libGDX has no clustered lights.", "Space pauses."};
+        return new String[] {"The same work as the gdx-vulkan version: simulation, GPU culling, indirect draw.", "One directional light; the gdx-vulkan version has 500 clustered point lights.",
+            "Space pauses."};
     }
 
     @Override public String openGlCounterpart () {
@@ -62,7 +74,7 @@ public final class GpuBoidsOpenGlDemo implements Demo {
         mesh = cone.meshes.first();
         texture = BoidSwarm.checkerboard();
 
-        // The boids and the simulation's grid are two shader storage buffers.
+        // Three shader storage buffers: the boids, the simulation's grid, and the list of boids that are inside the view (headed by the indirect draw command).
         final float[] state = BoidSwarm.initialState(count);
         final FloatBuffer data = BufferUtils.newFloatBuffer(state.length);
         data.put(state).flip();
@@ -72,16 +84,26 @@ public final class GpuBoidsOpenGlDemo implements Demo {
         gridBuffer = gl.glGenBuffer();
         gl.glBindBuffer(GL31.GL_SHADER_STORAGE_BUFFER, gridBuffer);
         gl.glBufferData(GL31.GL_SHADER_STORAGE_BUFFER, BoidSwarm.GRID * BoidSwarm.GRID * BoidSwarm.GRID * 8 * 4, null, GL20.GL_DYNAMIC_DRAW);
+        visibleBuffer = gl.glGenBuffer();
+        gl.glBindBuffer(GL31.GL_SHADER_STORAGE_BUFFER, visibleBuffer);
+        gl.glBufferData(GL31.GL_SHADER_STORAGE_BUFFER, (5 + count) * 4, null, GL20.GL_DYNAMIC_DRAW);
         gl.glBindBufferBase(GL31.GL_SHADER_STORAGE_BUFFER, 0, boidBuffer);
         gl.glBindBufferBase(GL31.GL_SHADER_STORAGE_BUFFER, 1, gridBuffer);
+        gl.glBindBufferBase(GL31.GL_SHADER_STORAGE_BUFFER, 2, visibleBuffer);
 
-        computeProgram = linkCompute(gl, Gdx.files.classpath("demos/boids.comp").readString());
-        uMode = gl.glGetUniformLocation(computeProgram, "u_mode");
-        uCount = gl.glGetUniformLocation(computeProgram, "u_count");
-        uDt = gl.glGetUniformLocation(computeProgram, "u_dt");
-        uHalf = gl.glGetUniformLocation(computeProgram, "u_half");
-        uMaxSpeed = gl.glGetUniformLocation(computeProgram, "u_maxSpeed");
-        uParams = gl.glGetUniformLocation(computeProgram, "u_params");
+        simulate = linkCompute(gl, Gdx.files.classpath("demos/boids.comp").readString());
+        simMode = gl.glGetUniformLocation(simulate, "u_mode");
+        simCount = gl.glGetUniformLocation(simulate, "u_count");
+        simDt = gl.glGetUniformLocation(simulate, "u_dt");
+        simHalf = gl.glGetUniformLocation(simulate, "u_half");
+        simMaxSpeed = gl.glGetUniformLocation(simulate, "u_maxSpeed");
+        simParams = gl.glGetUniformLocation(simulate, "u_params");
+        cull = linkCompute(gl, Gdx.files.classpath("demos/boids_cull.comp").readString());
+        cullMode = gl.glGetUniformLocation(cull, "u_mode");
+        cullCount = gl.glGetUniformLocation(cull, "u_count");
+        cullIndexCount = gl.glGetUniformLocation(cull, "u_indexCount");
+        cullRadius = gl.glGetUniformLocation(cull, "u_radius");
+        cullPlanes = gl.glGetUniformLocation(cull, "u_planes");
 
         drawShader = new ShaderProgram(Gdx.files.classpath("demos/boids.vert"), Gdx.files.classpath("demos/boids.frag"));
         if (!drawShader.isCompiled()) throw new GdxRuntimeException("the draw shader did not compile:\n" + drawShader.getLog());
@@ -122,28 +144,44 @@ public final class GpuBoidsOpenGlDemo implements Demo {
         final float dt = paused ? 0f : delta;
         time += dt;
 
-        // The simulation: three dispatches, each waiting for the one before (a barrier on the storage buffers).
-        gl.glUseProgram(computeProgram);
-        gl.glUniform1i(uCount, count);
-        gl.glUniform1f(uDt, dt);
-        gl.glUniform1f(uHalf, BoidSwarm.HALF);
-        gl.glUniform1f(uMaxSpeed, BoidSwarm.MAX_SPEED);
-        gl.glUniform4f(uParams, BoidSwarm.COHESION, BoidSwarm.ALIGNMENT, BoidSwarm.SEPARATION, BoidSwarm.SWIRL);
-        final int gridUints = BoidSwarm.GRID * BoidSwarm.GRID * BoidSwarm.GRID * 8;
-        gl.glUniform1i(uMode, 0);
-        gl.glDispatchCompute((gridUints + 255) / 256, 1, 1);
-        gl.glMemoryBarrier(GL31.GL_SHADER_STORAGE_BARRIER_BIT);
-        gl.glUniform1i(uMode, 1);
-        gl.glDispatchCompute((count + 255) / 256, 1, 1);
-        gl.glMemoryBarrier(GL31.GL_SHADER_STORAGE_BARRIER_BIT);
-        gl.glUniform1i(uMode, 2);
-        gl.glDispatchCompute((count + 255) / 256, 1, 1);
-        gl.glMemoryBarrier(GL31.GL_SHADER_STORAGE_BARRIER_BIT);
-
         final float angle = time * 0.25f;
         camera.position.set((float)Math.cos(angle) * BoidSwarm.HALF * 1.25f, BoidSwarm.HALF * 0.35f, (float)Math.sin(angle) * BoidSwarm.HALF * 1.25f);
         camera.lookAt(0f, 0f, 0f);
         camera.update();
+
+        // The simulation: three dispatches, each waiting for the one before (a barrier on the storage buffers).
+        gl.glUseProgram(simulate);
+        gl.glUniform1i(simCount, count);
+        gl.glUniform1f(simDt, dt);
+        gl.glUniform1f(simHalf, BoidSwarm.HALF);
+        gl.glUniform1f(simMaxSpeed, BoidSwarm.MAX_SPEED);
+        gl.glUniform4f(simParams, BoidSwarm.COHESION, BoidSwarm.ALIGNMENT, BoidSwarm.SEPARATION, BoidSwarm.SWIRL);
+        final int gridUints = BoidSwarm.GRID * BoidSwarm.GRID * BoidSwarm.GRID * 8;
+        gl.glUniform1i(simMode, 0);
+        gl.glDispatchCompute((gridUints + 255) / 256, 1, 1);
+        gl.glMemoryBarrier(GL31.GL_SHADER_STORAGE_BARRIER_BIT);
+        gl.glUniform1i(simMode, 1);
+        gl.glDispatchCompute((count + 255) / 256, 1, 1);
+        gl.glMemoryBarrier(GL31.GL_SHADER_STORAGE_BARRIER_BIT);
+        gl.glUniform1i(simMode, 2);
+        gl.glDispatchCompute((count + 255) / 256, 1, 1);
+        gl.glMemoryBarrier(GL31.GL_SHADER_STORAGE_BARRIER_BIT);
+
+        // The culling: clear the draw command, then append every boid inside the frustum to the list.
+        planes.clear();
+        for (Plane plane : camera.frustum.planes) planes.put(plane.normal.x).put(plane.normal.y).put(plane.normal.z).put(plane.d);
+        planes.flip();
+        gl.glUseProgram(cull);
+        gl.glUniform1i(cullCount, count);
+        gl.glUniform1i(cullIndexCount, mesh.getNumIndices());
+        gl.glUniform1f(cullRadius, BOID_RADIUS);
+        gl.glUniform4fv(cullPlanes, 6, planes);
+        gl.glUniform1i(cullMode, 0);
+        gl.glDispatchCompute(1, 1, 1);
+        gl.glMemoryBarrier(GL31.GL_SHADER_STORAGE_BARRIER_BIT);
+        gl.glUniform1i(cullMode, 1);
+        gl.glDispatchCompute((count + 255) / 256, 1, 1);
+        gl.glMemoryBarrier(GL31.GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT);
 
         Gdx.gl.glClearColor(0.02f, 0.03f, 0.06f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
@@ -154,11 +192,23 @@ public final class GpuBoidsOpenGlDemo implements Demo {
         texture.bind(0);
         drawShader.setUniformi("u_texture", 0);
         mesh.bind(drawShader);
-        Gdx.gl30.glDrawElementsInstanced(GL20.GL_TRIANGLES, mesh.getNumIndices(), GL20.GL_UNSIGNED_SHORT, 0, count);
+        gl.glBindBuffer(GL_DRAW_INDIRECT_BUFFER, visibleBuffer);
+        gl.glDrawElementsIndirect(GL20.GL_TRIANGLES, GL20.GL_UNSIGNED_SHORT, 0); // the instance count is in the buffer, written by the culling shader
+        gl.glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
         mesh.unbind(drawShader);
         Gdx.gl.glDisable(GL20.GL_CULL_FACE);
 
-        hud.draw(title(), summary(), notes(), Backend.name, Gdx.graphics.getFramesPerSecond() + " fps", "boids: " + count + ", all drawn", "lights: 1 directional");
+        if (frames++ % 30 == 0) visible = readVisibleCount(gl); // the one read back, twice a second, for the number on screen
+        hud.draw(title(), summary(), notes(), "boids: " + count + ", drawn after GPU culling: " + visible, "lights: 1 directional");
+    }
+
+    /** The instance count the culling shader wrote into the draw command. */
+    private int readVisibleCount (GL31 gl) {
+        gl.glBindBuffer(GL31.GL_SHADER_STORAGE_BUFFER, visibleBuffer);
+        final ByteBuffer mapped = (ByteBuffer)gl.glMapBufferRange(GL31.GL_SHADER_STORAGE_BUFFER, 4, 4, GL30.GL_MAP_READ_BIT);
+        final int n = mapped.order(ByteOrder.nativeOrder()).getInt(0);
+        gl.glUnmapBuffer(GL31.GL_SHADER_STORAGE_BUFFER);
+        return n;
     }
 
     @Override public void pause () {}
@@ -169,9 +219,11 @@ public final class GpuBoidsOpenGlDemo implements Demo {
         final GL31 gl = Gdx.gl31;
         hud.dispose();
         drawShader.dispose();
-        gl.glDeleteProgram(computeProgram);
+        gl.glDeleteProgram(simulate);
+        gl.glDeleteProgram(cull);
         gl.glDeleteBuffer(boidBuffer);
         gl.glDeleteBuffer(gridBuffer);
+        gl.glDeleteBuffer(visibleBuffer);
         cone.dispose();
         texture.dispose();
     }

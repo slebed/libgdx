@@ -36,7 +36,14 @@ public final class GlDemos {
         config.setBackBufferConfig(8, 8, 8, 8, 24, 0, 0);
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override public void create () {
-                Backend.name = "stock libGDX, " + Gdx.gl.glGetString(GL20.GL_RENDERER) + ", OpenGL " + Gdx.gl.glGetString(GL20.GL_VERSION).split(" ")[0];
+                // The same four fields as the gdx-vulkan main shows. The driver adds "/PCIe/SSE2" to the card's name (the bus the card is on and the CPU instruction set its
+                // software paths use); the Vulkan device name has no such suffix, so the name is cut there to read the same.
+                final String renderer = Gdx.gl.glGetString(GL20.GL_RENDERER);
+                Backend.lines = new String[] {"OpenGL " + Gdx.gl.glGetString(GL20.GL_VERSION) + ", stock libGDX", renderer.split("/")[0],
+                    "driver " + Gdx.gl.glGetString(GL20.GL_VENDOR) + ", GLSL " + Gdx.gl.glGetString(GL20.GL_SHADING_LANGUAGE_VERSION),
+                    "core profile through libGDX's GL31 interface"};
+                timer = new GlTimer();
+                Backend.gpuNanos = timer::nanos;
                 demo.create();
                 demo.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             }
@@ -46,23 +53,27 @@ public final class GlDemos {
             }
 
             private int frames;
+            private GlTimer timer;
 
             @Override public void render () {
                 if (Gdx.input.isKeyJustPressed(com.badlogic.gdx.Input.Keys.ESCAPE)) {
                     Gdx.app.exit();
                     return;
                 }
+                timer.begin();
                 demo.render();
+                timer.end();
                 if (Screenshot.file() != null && ++frames == Screenshot.frames()) {
                     final int w = Gdx.graphics.getBackBufferWidth(), h = Gdx.graphics.getBackBufferHeight();
                     Screenshot.write(com.badlogic.gdx.utils.ScreenUtils.getFrameBufferPixels(0, 0, w, h, true), w, h, Screenshot.file());
-                    System.out.println("[demo] " + Backend.name + ": " + Gdx.graphics.getFramesPerSecond() + " fps");
+                    System.out.println("[demo] " + Backend.lines[0] + " | " + String.join(" | ", FrameStats.latest));
                     Gdx.app.exit();
                 }
             }
 
             @Override public void dispose () {
                 demo.dispose();
+                timer.dispose();
             }
         }, config);
     }

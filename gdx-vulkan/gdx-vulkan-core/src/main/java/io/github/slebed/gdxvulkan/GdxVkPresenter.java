@@ -125,6 +125,16 @@ public final class GdxVkPresenter implements AutoCloseable {
         return GdxVkNative.nativeLastPassCounts(handle);
     }
 
+    /**
+     * How long the GPU worked on the last frame whose timestamps could be read, in nanoseconds: from the first command of the frame's submit (staged
+     * uploads, compute dispatches) to the last (the draws). A frame or two behind; 0 when the device cannot take timestamps. Read it for a number on
+     * screen or a log, not for pacing.
+     */
+    public long gpuFrameNanos() {
+        check();
+        return GdxVkNative.nativeGpuFrameNanos(handle);
+    }
+
     /** Stress test 3 floor: see {@code Presenter::benchmarkRecord}. Inside an open frame; returns nanoseconds. */
     public long benchmarkRecord(int pipeline, int indexBuffer, int draws, float[] push) {
         check();

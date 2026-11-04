@@ -7,6 +7,7 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 
 import io.github.slebed.gdxvulkan.GdxVkFrame;
+import io.github.slebed.gdxvulkan.VulkanCaps;
 import io.github.slebed.gdxvulkan.desktop.VulkanDesktopApplication;
 import io.github.slebed.gdxvulkan.desktop.VulkanDesktopConfiguration;
 
@@ -38,7 +39,11 @@ public final class VulkanDemos {
             private int frames;
 
             @Override public void create () {
-                Backend.name = "gdx-vulkan on " + GdxVkFrame.current().context().caps().deviceName;
+                final VulkanCaps caps = GdxVkFrame.current().context().caps();
+                Backend.lines = new String[] {"Vulkan " + Backend.vulkanVersion(caps.deviceApiVersion) + ", gdx-vulkan", caps.deviceName,
+                    "driver " + (caps.driverInfo == null || caps.driverInfo.isEmpty() ? "(not reported)" : caps.driverInfo),
+                    caps.tier == VulkanCaps.Tier.A ? "modern code path: bindless textures, dynamic rendering" : "compatibility code path: " + caps.tierReason};
+                Backend.gpuNanos = () -> GdxVkFrame.current().presenter().gpuFrameNanos();
                 menu.create();
                 final int start = Integer.getInteger("demo.start", 0); // -Ddemo.start=2 opens the second demo at once
                 if (start > 0) menu.start(start - 1);
@@ -55,7 +60,7 @@ public final class VulkanDemos {
                 if (++frames == Screenshot.frames()) app.requestCapture();
                 else if (frames == Screenshot.frames() + 1) {
                     Screenshot.write(app.capturedFrame(), Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight(), Screenshot.file());
-                    System.out.println("[demo] " + Backend.name + ": " + Gdx.graphics.getFramesPerSecond() + " fps");
+                    System.out.println("[demo] " + Backend.lines[0] + " | " + String.join(" | ", FrameStats.latest));
                     Gdx.app.exit();
                 }
             }

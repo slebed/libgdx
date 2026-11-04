@@ -76,6 +76,8 @@ final class GdxVkNative {
     /** Render passes begun in the last finished frame: {on the swapchain, on offscreen targets}. */
     static native int[] nativeLastPassCounts(long handle);
 
+    static native long nativeGpuFrameNanos(long handle);
+
     /** Stress test 3: nanoseconds to record `draws` state-change + push-constants + indexed-draw triples as a plain C++ loop; -1 on error. */
     static native long nativeBenchmarkRecord(long handle, int pipeline, int indexBuffer, int draws, float[] push);
 

@@ -29,6 +29,7 @@ public final class Hud implements Disposable {
     private final ShapeRenderer shapes = new ShapeRenderer();
     private final FreeTypeFontGenerator generator = new FreeTypeFontGenerator(Gdx.files.classpath("data/lsans.ttf"));
     private final GlyphLayout layout = new GlyphLayout();
+    private final FrameStats frameStats = new FrameStats();
     private BitmapFont bodyFont, titleFont;
     private int fontsForHeight = -1;
 
@@ -51,8 +52,16 @@ public final class Hud implements Disposable {
         titleFont = generator.generateFont(p);
     }
 
-    /** Draws the description panel at the top left and the live numbers at the bottom left. Call it after the scene, with nothing bound. */
-    public void draw (String title, String summary, String[] notes, String... stats) {
+    /**
+     * Draws the description panel at the top left and the live numbers at the bottom left. Call it after the scene, with nothing bound, once per frame.
+     * The numbers are the same on every backend: what it runs on ({@link Backend#lines}), the frame, CPU and GPU time ({@link FrameStats}), then {@code demoStats}.
+     */
+    public void draw (String title, String summary, String[] notes, String... demoStats) {
+        frameStats.frame();
+        final String[] stats = new String[Backend.lines.length + frameStats.lines().length + demoStats.length];
+        System.arraycopy(Backend.lines, 0, stats, 0, Backend.lines.length);
+        System.arraycopy(frameStats.lines(), 0, stats, Backend.lines.length, frameStats.lines().length);
+        System.arraycopy(demoStats, 0, stats, Backend.lines.length + frameStats.lines().length, demoStats.length);
         final int w = Gdx.graphics.getWidth(), h = Gdx.graphics.getHeight();
         makeFonts(h);
         final float margin = bodyFont.getLineHeight() * 0.8f;

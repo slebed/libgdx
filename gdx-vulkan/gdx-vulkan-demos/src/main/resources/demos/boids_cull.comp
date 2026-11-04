@@ -1,0 +1,40 @@
+#version 430
+// Culling on the GPU, for the OpenGL demo: every boid is tested against the camera's six frustum planes and the ones inside are appended to a list. The list's
+// head is a DrawElementsIndirectCommand, so the draw call that follows takes its instance count from the GPU: nothing is read back to decide what to draw.
+//   u_mode 0  clear the command (one invocation)
+//   u_mode 1  one invocation per boid: test it, append its index when it is inside
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer Boids { uint b[]; };
+layout(std430, binding = 2) buffer Visible {
+    uint command[5]; // count, instanceCount, firstIndex, baseVertex, baseInstance
+    uint index[];
+};
+
+uniform int u_mode;
+uniform int u_count;
+uniform int u_indexCount;
+uniform float u_radius;   // the bounding radius of the mesh, before the boid's scale
+uniform vec4 u_planes[6]; // the frustum, normals pointing in
+
+void main() {
+    const uint i = gl_GlobalInvocationID.x;
+    if (u_mode == 0) {
+        if (i == 0u) {
+            command[0] = uint(u_indexCount);
+            command[1] = 0u;
+            command[2] = 0u;
+            command[3] = 0u;
+            command[4] = 0u;
+        }
+        return;
+    }
+    if (i >= uint(u_count)) return;
+    const uint base = i * 12u;
+    const vec3 p = vec3(uintBitsToFloat(b[base]), uintBitsToFloat(b[base + 1u]), uintBitsToFloat(b[base + 2u]));
+    const float r = u_radius * uintBitsToFloat(b[base + 3u]);
+    for (int k = 0; k < 6; k++) {
+        if (dot(u_planes[k].xyz, p) + u_planes[k].w < -r) return;
+    }
+    index[atomicAdd(command[1], 1u)] = i;
+}

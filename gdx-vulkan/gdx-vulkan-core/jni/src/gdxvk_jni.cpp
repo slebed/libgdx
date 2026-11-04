@@ -328,6 +328,10 @@ JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeBenchm
     return static_cast<jlong>(reinterpret_cast<gdxvk::Presenter*>(handle)->benchmarkRecord(pipeline, indexBuffer, static_cast<uint32_t>(draws), block));
 }
 
+JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeGpuFrameNanos(JNIEnv*, jclass, jlong handle) {
+    return static_cast<jlong>(reinterpret_cast<gdxvk::Presenter*>(handle)->gpuFrameNanos());
+}
+
 JNIEXPORT jintArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeLastPassCounts(JNIEnv* env, jclass, jlong handle) {
     uint32_t c[2];
     reinterpret_cast<gdxvk::Presenter*>(handle)->lastPassCounts(c);

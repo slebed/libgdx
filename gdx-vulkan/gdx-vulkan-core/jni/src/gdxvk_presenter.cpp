@@ -12,6 +12,7 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <utility>
@@ -76,6 +77,8 @@ struct Frame {
     VkCommandBuffer uploadCmd = VK_NULL_HANDLE; // staged uploads, recorded at endFrame, submitted ahead of `cmd`
     VkSemaphore acquired = VK_NULL_HANDLE;
     uint64_t serial = 0; // submit serial of the last frame recorded in this slot; 0 = never submitted
+    VkQueryPool timestamps = VK_NULL_HANDLE; // two GPU timestamps: the start of the frame's work and its end (when the device supports them)
+    bool timestampsPending = false; // the last submit wrote them and nobody has read them yet
 };
 
 void imageBarrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from, VkImageLayout to, VkPipelineStageFlags srcStage,
@@ -130,6 +133,10 @@ struct Presenter::Impl {
     bool fencesOn() const { return h.presentFences && !swappyOn; }
     VkFence slotFence[kFramesInFlight] = {};
     bool slotFencePending[kFramesInFlight] = {};
+    // GPU time of the last frame whose timestamps could be read: from the first command of its submit to the last, in nanoseconds (0: not measured).
+    bool gpuTiming = false;
+    uint32_t timestampValidBits = 0;
+    std::atomic<uint64_t> gpuFrameNs{0};
     struct RetiredSwap {
         VkSwapchainKHR swapchain = VK_NULL_HANDLE;
         std::vector<VkImageView> views;
@@ -1096,6 +1103,7 @@ struct Presenter::Impl {
         swappyOn = false;
         for (Frame& f : frames) {
             if (f.acquired != VK_NULL_HANDLE) vkDestroySemaphore(h.device, f.acquired, nullptr);
+            if (f.timestamps != VK_NULL_HANDLE) vkDestroyQueryPool(h.device, f.timestamps, nullptr);
             if (f.pool != VK_NULL_HANDLE) vkDestroyCommandPool(h.device, f.pool, nullptr);
             f = Frame();
         }
@@ -1107,6 +1115,12 @@ struct Presenter::Impl {
 
     bool createFrames() {
         for (auto& r : rings) r.reset(new FrameRing(h));
+        uint32_t families = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(h.physical, &families, nullptr);
+        std::vector<VkQueueFamilyProperties> props(families);
+        vkGetPhysicalDeviceQueueFamilyProperties(h.physical, &families, props.data());
+        timestampValidBits = h.graphicsQueueFamily < families ? props[h.graphicsQueueFamily].timestampValidBits : 0;
+        gpuTiming = timestampValidBits > 0 && h.limits.timestampPeriod > 0.0f;
         for (Frame& f : frames) {
             VkCommandPoolCreateInfo pi{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
             pi.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
@@ -1118,6 +1132,12 @@ struct Presenter::Impl {
             ai.commandBufferCount = 1;
             if (vkAllocateCommandBuffers(h.device, &ai, &f.cmd) != VK_SUCCESS) return false;
             if (vkAllocateCommandBuffers(h.device, &ai, &f.uploadCmd) != VK_SUCCESS) return false;
+            if (gpuTiming) {
+                VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+                qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+                qi.queryCount = 2;
+                if (vkCreateQueryPool(h.device, &qi, nullptr, &f.timestamps) != VK_SUCCESS) f.timestamps = VK_NULL_HANDLE; // the frame goes on unmeasured
+            }
             const std::string idx = std::to_string(&f - frames);
             nameObject(h, VK_OBJECT_TYPE_COMMAND_BUFFER, reinterpret_cast<uint64_t>(f.cmd), ("gdx frame " + idx).c_str());
             nameObject(h, VK_OBJECT_TYPE_COMMAND_BUFFER, reinterpret_cast<uint64_t>(f.uploadCmd), ("gdx uploads and compute " + idx).c_str());
@@ -1465,6 +1485,15 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
     VkResult r = h.timeline->waitSerial(f.serial);
     s.profLap(0);
     if (r != VK_SUCCESS) return mapResult(r);
+    if (f.timestampsPending) { // this slot's previous frame has completed: its two timestamps are there
+        uint64_t t[2] = {0, 0};
+        if (vkGetQueryPoolResults(h.device, f.timestamps, 0, 2, sizeof t, t, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
+            const uint64_t mask = s.timestampValidBits >= 64 ? ~0ull : ((1ull << s.timestampValidBits) - 1ull);
+            const uint64_t ticks = ((t[1] & mask) - (t[0] & mask)) & mask;
+            s.gpuFrameNs.store(static_cast<uint64_t>(static_cast<double>(ticks) * h.limits.timestampPeriod), std::memory_order_relaxed);
+        }
+        f.timestampsPending = false;
+    }
     h.deletion->collect(); // the GPU has finished with everything retired before the frames that are now complete
     h.staging->collect(h.timeline->completed());
     s.rings[s.frameIndex]->reset(); // this slot's previous frame has completed
@@ -1576,6 +1605,7 @@ FrameStatus Presenter::endFrame(bool capture) {
         imageBarrier(f.cmd, image, layout, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0);
     }
+    if (f.timestamps != VK_NULL_HANDLE) vkCmdWriteTimestamp(f.cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, f.timestamps, 1);
     vkEndCommandBuffer(f.cmd);
     s.profLap(4);
 
@@ -1590,6 +1620,10 @@ FrameStatus Presenter::endFrame(bool capture) {
     VkCommandBufferBeginInfo ubi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     ubi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(f.uploadCmd, &ubi);
+    if (f.timestamps != VK_NULL_HANDLE) { // the frame's GPU time starts with the first command of the submit
+        vkCmdResetQueryPool(f.uploadCmd, f.timestamps, 0, 2);
+        vkCmdWriteTimestamp(f.uploadCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, f.timestamps, 0);
+    }
     beginLabel(h, f.uploadCmd, "gdx: staged uploads", 0.5f, 0.8f, 0.4f);
     s.stagingRecorded = h.staging->recordPending(f.uploadCmd);
     endLabel(h, f.uploadCmd);
@@ -1597,7 +1631,7 @@ FrameStatus Presenter::endFrame(bool capture) {
     const bool computed = s.recordCompute(f.uploadCmd);
     vkEndCommandBuffer(f.uploadCmd);
     s.profLap(5);
-    const bool preCmd = s.stagingRecorded || computed || mirrored; // the upload command buffer has something in it
+    const bool preCmd = s.stagingRecorded || computed || mirrored || f.timestamps != VK_NULL_HANDLE; // the upload command buffer has something in it
     VkCommandBuffer cmds[2] = {f.uploadCmd, f.cmd};
     si.commandBufferCount = preCmd ? 2 : 1;
     si.pCommandBuffers = preCmd ? cmds : &f.cmd;
@@ -1605,6 +1639,7 @@ FrameStatus Presenter::endFrame(bool capture) {
     si.pSignalSemaphores = &s.renderDone[s.imageIndex];
     VkResult r = h.timeline->submit(si, &f.serial);
     s.profLap(6);
+    if (r == VK_SUCCESS && f.timestamps != VK_NULL_HANDLE) f.timestampsPending = true;
     if (r == VK_SUCCESS && s.stagingRecorded) h.staging->markSubmitted(f.serial);
     s.stagingRecorded = false;
     if (r != VK_SUCCESS) return mapResult(r) == FrameStatus::Error ? s.fail("vkQueueSubmit failed (VkResult " + std::to_string(r) + ")") : mapResult(r);
@@ -2154,6 +2189,8 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
     }
     return FrameStatus::Ok;
 }
+
+uint64_t Presenter::gpuFrameNanos() const { return impl_->gpuFrameNs.load(std::memory_order_relaxed); }
 
 void Presenter::lastPassCounts(uint32_t out[2]) const {
     out[0] = impl_->lastPassCount[0];
