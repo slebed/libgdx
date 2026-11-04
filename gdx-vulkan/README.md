@@ -41,7 +41,7 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Spot lights, point-light shadows in `VulkanModelBatch` | libGDX's own default shader has neither. Stock `ModelBatch` through the shim compiled and drew a spot light without error, but no picture of it has been compared with OpenGL |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (190 of 238 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (191 of 239 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). Both phones pass the whole device suite (32 checks, 3D included); what each GPU needed is in [`docs/DRIVER_NOTES.md`](docs/DRIVER_NOTES.md). Other GPUs and drivers should work but have not been tried.
@@ -117,6 +117,7 @@ Two more results that are not about a single device:
   average (5 ms worst), memory flat. On S20-FE: 8 cycles, 0 failures, 13 ms.
 
 How to read these:
+- T2 gives every sprite a random one of 128 textures, so neighbouring sprites always differ: the worst case, and the reason it is slow on phones (a divergent texture lookup per quad on the modern path, 20,000 draws a frame on the compatibility path). A game that draws layer by layer, or packs atlases, is far from it.
 - T2 is the case Vulkan helps most. A game that packs its art into atlases is closer to T1, about 1.2x. The renderer started out slower than stock on T1
   (0.91x) until vertex data got a copy in GPU memory.
 - Stock OpenGL cannot run T3 to T5, so there is nothing to compare; they show what the extra control buys.
@@ -345,7 +346,7 @@ Stock classes run unchanged because the same shim also serves what they use to d
   [`RELEASE.md`](docs/RELEASE.md) the manual checks before a release
 
 ## Known limitations
-- libGDX GLSL is translated at run time (measured on the phones: the first program of a run takes 0.6 s on the Adreno 840 and 1.1 s on the Adreno 650, because it starts the compiler; each further shader takes 10 to 25 ms, and a cached one 0.2 to 0.8 ms. Call `VulkanShaderProgram.warmUp()` at the start, or `prepareAsync` for the shaders a level needs, to keep that off the render thread). A hand-written SPIR-V shader that rotates its own output must call `gdx_vk_clip()` like the bundled ones, for Android pre-rotation.
+- libGDX GLSL is translated at run time (measured on the phones: glslang's start-up takes 0.6 s on the Adreno 840 and 1.1 s on the Adreno 650; the library does it on a background thread when the frame is created, so a shader created a second or two later takes 40 ms for the first and 10 to 25 ms for each further one, and a cached one 0.2 to 0.8 ms. `VulkanShaderProgram.prepareAsync` builds the shaders of a level on a worker thread). A hand-written SPIR-V shader that rotates its own output must call `gdx_vk_clip()` like the bundled ones, for Android pre-rotation.
 - `VulkanModelBatch` draws with the port of libGDX's default shader (plus normal maps) and does not accept custom 3D `Shader` or `ShaderProvider` classes. Stock `ModelBatch` through the shim accepts them (any stock `Shader`, `BaseShader`, `ShaderProvider`), at the cost of the shim's CPU time.
 - The GL shim draws from one vertex buffer per draw (or from vertex data in memory), with float and normalised-byte attributes; `glVertexAttrib*` constants for attributes a mesh lacks are ignored (a draw that reads such an attribute gets undefined values).
 - On the first run, a shader outside the set compiled with the library (everything but libGDX's own sprite, shape and default and depth model shaders for common materials and lights) is translated and compiled at run time.

@@ -180,6 +180,7 @@ def bundleDir = rootProject.file('gdx-vulkan-core/src/main/resources/shaders/bun
         systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
         systemProperty 'gdxvulkan.validation', 'false'
         systemProperty 'gdxvulkan.recordShaders', bundleDir.absolutePath
+        systemProperty 'gdxvulkan.assetsDir', System.getProperty('gdxvulkan.assetsDir') ?: file('../test-assets').absolutePath
         systemProperty 'gdxvulkan.forceTierB', tier == 'B' ? 'true' : 'false'
         System.properties.each { k, v -> if (k.toString().startsWith('gdxvulkan.') && !k.toString().equals('gdxvulkan.forceTierB')) systemProperty k.toString(), v.toString() }
         if (tier == 'A') doFirst { bundleDir.deleteDir() }

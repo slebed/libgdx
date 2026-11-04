@@ -49,6 +49,7 @@ public final class GdxVkFrame {
     }
 
     public GdxVkFrame(GdxVkContext context, GdxVkPresenter presenter, VulkanGL20 gl) {
+        GlslCompiler.warmUp(); // glslang's start-up happens now, off the render thread, not at the first translated shader
         this.context = context;
         this.presenter = presenter;
         this.gl = gl;

@@ -83,6 +83,6 @@ comparison between two shaders inside one clock state, and alternate their order
 `docs/RELEASE.md` is the checklist of manual runs (real GPUs, the phone) that CI cannot do.
 
 ## Runtime options
-System properties: `gdxvulkan.validation`, `gdxvulkan.forceTierB`, `gdxvulkan.device` (index), `gdxvulkan.pipelineCache` (file), `gdxvulkan.native.path`
+System properties: `gdxvulkan.shaderWarmUp` (false turns off the compiler's background start-up), `gdxvulkan.validation`, `gdxvulkan.forceTierB`, `gdxvulkan.device` (index), `gdxvulkan.pipelineCache` (file), `gdxvulkan.native.path`
 (directory or file of the built `gdxvk` library). Environment: `GDXVK_COMPLETION=fence|timeline` (GPU completion tracking), `GDXVK_PRESENT=immediate|mailbox`,
 `GDXVK_PROFILE=1` (per-frame CPU time), `GDXVK_NO_PRESENT_FENCES=1`, `GDXVK_NO_SWAPPY=1`.

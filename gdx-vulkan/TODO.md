@@ -12,15 +12,13 @@ Legend: **[bug]** something is wrong today, **[verify]** built but not checked o
 ## 1. Known bugs and problems
 
 - **[fixed 2026-11-04] Samsung Galaxy S20 FE (Adreno 650): every `VulkanModelBatch` pipeline failed.** The driver refuses a vertex shader whose buffer reads are addressed from a push constant; the model shaders now find their record from `gl_InstanceIndex` (the draw's first instance). The S20 passes the whole device suite, 3D included. Cause, measurements and rule: `docs/DRIVER_NOTES.md`; kept out of the shaders by `DriverRulesTest`.
-- **[bug] Adreno 840 (REDMAGIC), modern path, 128 separate textures: 37 fps** (compatibility path 10.4 fps; re-measured 2026-11-04). The one-texture case was fixed (bindless index from
-  push constants instead of a varying); the many-texture case was not investigated. Optional, but it is the weak spot of the modern path on that GPU.
+- **[not a bug, measure more] Adreno 840 (REDMAGIC), modern path, 128 separate textures: 37 fps** (compatibility path 10.4 fps). The benchmark gives every sprite a random one of the 128 textures, so neighbouring sprites always differ: the modern path then indexes the bindless table with a different value per quad (a divergent lookup, slow on Adreno) and the compatibility path makes 20,000 draws a frame. It is the deliberate worst case ("no atlas"). Still to do, on the REDMAGIC over USB: the same 20,000 sprites sorted by texture (what a game that does not use an atlas but draws layer by layer sends), to put a number on the case between T1 and T2.
 - **[bug] Android: the on-screen keyboard through `Gdx.input` does not work.**
 - **[bug] The GL shim ignores `glVertexAttrib*` constants**, so a draw that reads an attribute the mesh does not have gets undefined values (OpenGL gives the
   constant). Stock `DefaultShader` sets such constants for bone weights "in case a mesh has missing attributes". Vulkan has no constant attributes; options: a second
   vertex binding with stride 0 (native change) or a translator rewrite of the attribute to a uniform when the draw leaves it disabled.
-- **[bug, minor] The shader bundle covers a matrix of common variants only** (no skinned models, for example), so other `DefaultShader` variants are translated and
-  compiled at run time on first use (cached on disk afterwards). Extend the matrix in `RecordShaderBundleMain` (bones, more lights, more material attributes) once real
-  projects show which variants they use.
+- **[minor] The shader bundle covers a matrix of common variants only** (57 programs per code path: vertex layouts, materials, lights, fog, spot lights, and the skinned knight with every environment); other `DefaultShader` variants are translated and
+  compiled at run time on first use (cached on disk afterwards). Extend the matrix in `RecordShaderBundleMain` once real projects show which variants they use.
 - **[bug, minor] The `msvcp140.dll` crash is fixed on Windows** (runtime linked statically); nothing else is open there. Keep an eye on the Linux and Android runtimes
   if a similar mismatch shows up (libstdc++ / libc++ versions).
 
@@ -31,8 +29,7 @@ stock classes on the shim (0 pixels differ from the Vulkan classes, including th
 0.35 ms), the stock `SpriteBatch` on the shim reaches 0.88x to 0.89x of `VulkanSpriteBatch` on both phones, and the first-use shader costs are measured (first program of a run 0.6 s
 on the Adreno 840 and 1.1 s on the Adreno 650, each further shader 10 to 25 ms, cached 0.2 to 0.8 ms). Results are in `README.md` and `docs/CHECKLIST.md`.
 
-- **[bug] The first translated shader of a run takes 0.6 to 1.1 s on the phones** (it starts glslang). `VulkanShaderProgram.warmUp()` moves it off the render thread; make sure demos and the
-  documentation call it at start-up, and consider starting it by itself when the first program is created asynchronously.
+- **[fixed 2026-11-04] The first translated shader of a run took 0.6 to 1.1 s on the phones.** glslang now starts up on a background thread when the frame is created (`GlslCompiler.warmUp()`, off with `-Dgdxvulkan.shaderWarmUp=false`): on the Galaxy S20 the first program 2 s after start takes 40 ms instead of 0.86 to 1.09 s, the next ones 18 ms. A shader created in the very first moments (before the warm-up finishes) still waits for what is left of it.
 - **[verify] Demos on a phone**: they are desktop only (section 4).
 - **[verify] Stock `ModelBatch` with point and spot lights, textures in `DefaultShader`, skinned models** on the desktop: they draw without error (the bundle recorder runs them) but only
   the directional-light scenes and Gate 5 are compared with a picture. Add scenes with point and spot lights against OpenGL.

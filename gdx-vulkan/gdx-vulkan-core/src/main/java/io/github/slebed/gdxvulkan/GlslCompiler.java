@@ -17,6 +17,31 @@ public final class GlslCompiler {
         return calls.get();
     }
 
+    private static final java.util.concurrent.atomic.AtomicBoolean warmingUp = new java.util.concurrent.atomic.AtomicBoolean();
+
+    /**
+     * Starts the compiler up on a background thread, once per process: glslang builds its built-in tables on first use, which takes about 0.15 s on a PC and 0.6 to 1.1 s
+     * on the phones measured, and the first shader a game translates would pay it on the render thread. {@code GdxVkFrame} calls this when it is created, so by the time a
+     * level loads its shaders the cost is gone. It compiles two tiny shaders through the native entry points, not through {@link #compile}, so {@link #callCount} (which
+     * tests use to show the library's own shaders never need the compiler) does not see it. Turn it off with {@code -Dgdxvulkan.shaderWarmUp=false}.
+     */
+    public static void warmUp () {
+        if (!Boolean.parseBoolean(System.getProperty("gdxvulkan.shaderWarmUp", "true")) || !warmingUp.compareAndSet(false, true)) return;
+        final Thread thread = new Thread(new Runnable() {
+            @Override public void run () {
+                try {
+                    GdxVk.loadNatives();
+                    if (!GdxVkNative.nativeGlslAvailable()) return;
+                    GdxVkNative.nativeGlslCompile(Stage.VERTEX.code, "warm-up.vert", "#version 450\nlayout(location = 0) in vec4 p;\nvoid main() { gl_Position = p; }\n");
+                    GdxVkNative.nativeGlslCompile(Stage.FRAGMENT.code, "warm-up.frag", "#version 450\nlayout(location = 0) out vec4 c;\nvoid main() { c = vec4(1.0); }\n");
+                } catch (Throwable ignored) { // the compiler is optional here: a program that needs it reports its own error
+                }
+            }
+        }, "gdxvk-glslang-warm-up");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
     /** The pipeline stage of a source. */
     public enum Stage {
         VERTEX(0), FRAGMENT(1), COMPUTE(2);

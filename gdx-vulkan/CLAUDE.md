@@ -90,6 +90,8 @@ Windows natives link the MSVC runtime statically (`CMAKE_MSVC_RUNTIME_LIBRARY` i
 
 Driver rules (`docs/DRIVER_NOTES.md`): never address a buffer read in a vertex shader from a push constant (the Adreno 650 refuses the model pipelines: name the record with the draw's first instance, `drawIndexedInstanced(..., firstInstance)`, and read it from `gl_InstanceIndex`; `DriverRulesTest`); never pass a bindless index through a varying when it is the same for the whole draw (Adreno 840); link the MSVC runtime statically on Windows. The notes also describe how to bisect a pipeline a driver refuses.
 
+`GdxVkFrame`'s constructor starts glslang on a daemon thread (`GlslCompiler.warmUp`, not counted by `callCount`; `-Dgdxvulkan.shaderWarmUp=false` turns it off): do not make that thread go through `GlslCompiler.compile`, tests rely on the counter.
+
 ## Verification state
 - **`-Dgdxvulkan.device=N` was not being forwarded to the test JVM until Phase 1b**, so every earlier "RTX 2080" result was really the
   RTX 5080. Fixed; index 0 = RTX 5080, index 1 = RTX 2080 on this machine, and the soak prints the device name it used.

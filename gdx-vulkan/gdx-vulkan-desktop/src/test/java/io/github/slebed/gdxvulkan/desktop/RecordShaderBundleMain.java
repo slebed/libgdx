@@ -84,12 +84,46 @@ public final class RecordShaderBundleMain {
             textured.add(new Material(TextureAttribute.createDiffuse(texture), FloatAttribute.createAlphaTest(0.5f), new BlendingAttribute(true, 1f)));
 
             final ModelBuilder mb = new ModelBuilder();
+            addKnight(environments);
             for (int usage : new int[] {a, b, c}) {
                 for (Material m : plain) add(mb, usage, m, environments);
             }
             for (int usage : new int[] {b, c}) {
                 for (Material m : textured) add(mb, usage, m, environments);
             }
+        }
+
+        /** The skinned knight (libGDX's test asset, in test-assets): the bone-weight variants of the shaders, with every environment and the shadow pass. */
+        private void addKnight (Array<Environment> environments) {
+            final String assets = System.getProperty("gdxvulkan.assetsDir");
+            if (assets == null) return;
+            final com.badlogic.gdx.files.FileHandle file = new com.badlogic.gdx.files.FileHandle(new java.io.File(assets, "data/g3d/knight.g3db"));
+            if (!file.exists()) return;
+            final Model knight = new com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader(new com.badlogic.gdx.utils.UBJsonReader()).loadModel(file);
+            modelsToDispose.add(knight);
+            final ModelInstance instance = new ModelInstance(knight);
+            if (knight.animations.size > 0) {
+                final com.badlogic.gdx.graphics.g3d.utils.AnimationController controller = new com.badlogic.gdx.graphics.g3d.utils.AnimationController(instance);
+                controller.setAnimation(knight.animations.first().id);
+                controller.update(0.4f);
+            }
+            instance.transform.scl(0.03f); // the knight is large: keep it in front of the camera
+            for (final Environment e : environments) {
+                jobs.add(new Runnable() {
+                    @Override public void run () {
+                        models.begin(camera);
+                        models.render(instance, e);
+                        models.end();
+                    }
+                });
+            }
+            jobs.add(new Runnable() {
+                @Override public void run () {
+                    depth.begin(camera);
+                    depth.render(instance);
+                    depth.end();
+                }
+            });
         }
 
         private void add (ModelBuilder mb, int usage, Material material, Array<Environment> environments) {

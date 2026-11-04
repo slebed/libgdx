@@ -935,6 +935,12 @@ final class DeviceSuite {
         final double[] ms = new double[4];
         try {
             VulkanShaderProgram.setCacheDirectory(null); // no disk cache for the first two
+            // A game does other work (assets, the first frames) before it creates its shaders; the compiler starts up in the background meanwhile (GlslCompiler.warmUp).
+            try {
+                Thread.sleep(Long.getLong("gdxvulkan.shaderCompileDelayMs", 2000L));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
             ms[0] = timeProgram(vert, frag[0]);
             ms[1] = timeProgram(vert, frag[1]);
             VulkanShaderProgram.setCacheDirectory(dir);
@@ -946,7 +952,7 @@ final class DeviceSuite {
             if (files != null) for (java.io.File f : files) f.delete();
             dir.delete();
         }
-        TestLog.i(TAG, String.format("shaderCompileTime: first program (starts the compiler) %.1f ms, second %.1f ms, third (built and saved) %.1f ms, the same source from the disk cache %.1f ms",
+        TestLog.i(TAG, String.format("shaderCompileTime: first program (2 s after start, the compiler warmed up in the background) %.1f ms, second %.1f ms, third (built and saved) %.1f ms, the same source from the disk cache %.1f ms",
             ms[0], ms[1], ms[2], ms[3]));
     }
 
