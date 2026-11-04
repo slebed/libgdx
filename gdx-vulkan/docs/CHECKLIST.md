@@ -391,7 +391,13 @@ owner's own projects to prove that moving over is clean, and hopefully faster th
 
 ## Demos (to plan once Phase 5 is complete)
 
-Not started. The owner wants to discuss the list when Phase 5 is complete; these are the requirements stated so far.
+Not started. Decisions from the discussion of 2026-11-04 (owner):
+- Comparison: each demo is **one class written against stock libGDX**, with two small mains, one for `Lwjgl3Application` (OpenGL) and one for `VulkanDesktopApplication`; a launcher can start both side by side. This also shows that porting is a one-line change.
+- Packaging: **one demo app with a menu** (desktop and Android), each demo a small class of its own so it can be copied out.
+- First demos: the 3D scene with cascaded shadows and clustered lights (selected), and the owner's note "start with 2", plus: libGDX does support compute shaders on GL 3.2+/4.3 capable contexts, so the GPU boids demo can have an OpenGL comparison too (to be checked: which libGDX GL interface exposes `glDispatchCompute` on the LWJGL3 backend, and the context version it needs). Later: sprite storm (100k+ sprites, stock against Vulkan), post-processing over a Scene2D UI.
+- Open: which two demos "start with 2" means (the 3D scene and the boids comparison are the assumption).
+
+The requirements stated earlier:
 
 - [ ] Demos showcase what the library can do, and run on the desktop and on Android
 - [ ] Where a stock libGDX equivalent exists, the demo shows it next to the Vulkan version (stock OpenGL against gdx-vulkan: same scene, side by side or switchable) so the difference in speed or output is visible
