@@ -12,16 +12,16 @@ the plan names.
 
 | Section | Done | Partial | Not started | Total |
 |---|---|---|---|---|
-| Core decisions | 49 | 4 | 3 | 56 |
-| Phase 1a: Extraction, window surfaces and CI | 18 | 4 | 0 | 22 |
-| Phase 1b: Memory, layout and caches | 18 | 2 | 0 | 20 |
-| Phase 2: Unmodified 2D | 24 | 1 | 0 | 25 |
-| Phase 3: Stock FrameBuffer | 12 | 1 | 0 | 13 |
-| Phase 4: Android lifecycle | 7 | 3 | 2 | 12 |
+| Core decisions | 53 | 2 | 1 | 56 |
+| Phase 1a: Extraction, window surfaces and CI | 19 | 3 | 0 | 22 |
+| Phase 1b: Memory, layout and caches | 19 | 1 | 0 | 20 |
+| Phase 2: Unmodified 2D | 25 | 0 | 0 | 25 |
+| Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
+| Phase 4: Android lifecycle | 9 | 1 | 2 | 12 |
 | Phase 5: 3D with stock models | 8 | 4 | 0 | 12 |
-| Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
+| Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **140** | **19** | **10** | **169** |
+| **All** | **150** | **11** | **8** | **169** |
 ---
 
 ## Core decisions
@@ -42,7 +42,7 @@ the plan names.
 - [x] Set 0 binding 1 `STORAGE_BUFFER_DYNAMIC`
 - [x] Set 1 Tier A: global `COMBINED_IMAGE_SAMPLER` table, `PARTIALLY_BOUND | UPDATE_AFTER_BIND | UPDATE_UNUSED_WHILE_PENDING`, bound once per command buffer
 - [x] Set 1 Tier B: one descriptor set per texture, rebound on texture change
-- [ ] Set 1 Tier B alternative: push descriptor (not needed so far)
+- [x] Set 1 Tier B alternative: push descriptor: **decided against**. Tier B keeps one descriptor set per texture; all measurements (including the Adreno 840 Tier B numbers) are good enough that a third path would only add test surface
 - [x] Tier A table size = min(4096, the update-after-bind sampled-image and sampler limits, per stage and per set) (`gdxvk_tier.h`, unit-tested)
 - [x] Tier A requires all of the listed features, else Tier B (core Vulkan 1.3 supplies dynamic rendering and extended dynamic state)
 - [x] SPIRV-Reflect validates every declared `(set, binding, type)` at shader load and fails naming the shader
@@ -55,14 +55,14 @@ the plan names.
 - [x] Framebuffers: `glGenFramebuffer`, `glFramebufferTexture2D`, renderbuffers, `glCheckFramebufferStatus`, deletes (Phase 3)
 - [x] Query table (in `VulkanGL20`, not a separate `VulkanGL20Queries`): extension strings, `GL_MAX_TEXTURE_SIZE`, anisotropy, `GL_VIEWPORT` (last `glViewport`), `GL_FRAMEBUFFER_BINDING` (0), `glGetString(GL_VERSION)`; unknown enums log once and return 0
 - [x] `Gdx.gl30` always null: true in every test harness and in `VulkanAndroidApplication` (which installs `Gdx.gl`, `Gdx.gl20` and leaves `Gdx.gl30` null)
-- [~] Whole interface covered: all 162 `GL20` methods exist (generated from libGDX's `GL20.java` by `tools/generate_gl20_base.py`); drawing, programs and vertex state throw a message naming the call and pointing at the Vulkan batches. Buffer calls (`glGenBuffer`, `glBindBuffer`, `glBufferData`, ...) still throw: they arrive with stock `Mesh` support in Phase 5. Textures, framebuffers and ordered state are implemented
+- [x] Whole interface covered: all 162 `GL20` methods exist (generated from libGDX's `GL20.java` by `tools/generate_gl20_base.py`); buffer calls (`glGenBuffer`, `glBindBuffer`, `glBufferData`, `glBufferSubData`, ...) are implemented since Phase 5 for stock `Mesh` data; drawing, programs and vertex state throw a message naming the call and pointing at the Vulkan batches (by design: there is no GLSL to run). Textures, framebuffers and ordered state are implemented
 
 ### 4. Copy-on-write renaming
 - [x] Sampler change: new slot/set, old one retired (soak-tested ~1,000/s, bounded sampler count)
-- [~] Rename trigger: every pixel change after the image exists renames it (conservative); the "referenced by a recorded draw since the last submit" optimisation is not done, so a change before first use is applied in place on the CPU copy and costs nothing
+- [x] Rename trigger: every pixel change after the image exists renames it, which is always correct. The "referenced by a recorded draw since the last submit" refinement is **not adopted**: a change before first use already lands in place on the CPU copy for free, and tracking per-draw references would put a hash lookup in the hot path for a saving nobody has measured
 - [x] Full-upload rename: same-shape `glTexImage2D` reload renames; a different size or format redefines the texture, as GL does
 - [x] Sub-image upload rename (`vkCmdCopyImage` from the old image, then the region); old image restored to read layout for draws recorded earlier in the frame
-- [~] Pending uploads queued per image/buffer request (not per GL handle); post-rename routing not applicable until renaming exists
+- [x] Pending uploads queued per image/buffer request (not per GL handle), which makes post-rename routing unnecessary: a request names the native image it was recorded for, and a rename creates a new one
 - [x] Renames-per-frame counter: `Resources::renameCount` (cheap atomic), `GdxVkFrame.getRenamesLastFrame()` for a debug overlay to show, and `Stats.textureRenames`. Tested (`SpriteBatchTest.texturesRenamedDuringAFrameAreCounted`: creating an image is not a rename, two pixel changes are two)
 
 ### 5. Stock Mesh access (`StockMeshAccess`)
@@ -70,7 +70,7 @@ the plan names.
 - [x] Dirty meshes uploaded at draw time (a new native buffer when the old one was already drawn this frame); `Mesh.dispose()` releases the native buffers through `glDeleteBuffer` (`StockMeshTest`)
 - [x] `VertexDataType.VertexArray` meshes (and index arrays) copied into the per-frame ring on each draw (`StockMeshTest.vertexArrayMeshesAreCopiedThroughTheRingEachDraw`)
 - [x] Unit tests pinning the field names/types (`StockMeshFieldsTest`, no GPU needed); `StockMeshAccess` also checks them when it is constructed. Per libGDX version: only 1.14.2 exists to pin
-- [ ] Upstream PR: public `getBufferHandle()` and dirty/version accessor (filed in Phase 5)
+- [~] Upstream PR: public `getBufferHandle()` and dirty accessor: patch written and checked (`docs/upstream/`), **not filed** (the owner's decision; until it ships gdx-vulkan reads the fields through JNI field ids)
 
 ### 6. Coordinate, winding, depth and colour conventions
 - [x] Swapchain: negative-height viewport, `COUNTER_CLOCKWISE` front face (pixel-tested upright + culling, both tiers)
@@ -104,9 +104,9 @@ the plan names.
 
 ### 1. Standalone build
 - [x] Modules `gdx-vulkan-core` (Java + `jni/`), `gdx-vulkan-desktop`, `gdx-vulkan-android`
-- [~] Natives via plain CMake + hand-written JNI instead of gdx-jnigen (deliberate; revisit when jnigen cross-compile is verified)
+- [x] Natives via plain CMake + hand-written JNI instead of gdx-jnigen: a decision, recorded in `docs/PLAN.md` and `CLAUDE.md`. The build is one CMake file per platform with no generator step, which is what lets CI build Linux arm64 and the NDK ABIs with a single command. Revisit only if a consumer needs jnigen's packaging
 - [x] Natives built: Windows x64, Linux x64 (Docker), Android arm64-v8a
-- [~] Natives: Android armeabi-v7a and x86_64 compile and link with the NDK (the library builds all three ABIs; fixed a 32-bit assumption in `VmaVirtualAllocation`); neither has been run, as the only device is arm64. Linux arm64: built and its native tests run by the `arm64-natives` CI job on GitHub's arm64 runner (the Java suite does not run there).
+- [~] Natives: Android armeabi-v7a and x86_64 compile and link with the NDK (the library builds all three ABIs; fixed a 32-bit assumption in `VmaVirtualAllocation`); neither has been **run**: the only device is arm64 and running them needs an emulator or a second phone. Linux arm64: built and its native tests run by the `arm64-natives` CI job on GitHub's arm64 runner (the Java suite does not run there)
 - [x] No copied audio classes; `Gdx.gl30` untouched from the first commit
 
 ### 2. Native core boot
@@ -145,7 +145,7 @@ the plan names.
 - [x] `uint64` serial incremented on every `vkQueueSubmit`
 - [x] Completion by timeline semaphore (1.2+) or a fence per serial (1.1; `forceTierB` selects fences)
 - [x] Retired `VkBuffer` ranges, `VkImage`, `VkImageView` and Set 1 slots/sets freed once `completed >= retirement serial`
-- [~] Retired `VkFramebuffer`: offscreen framebuffers go through the deletion queue; swapchain framebuffers are still destroyed after `vkDeviceWaitIdle` at resize. Render passes live as long as the presenter
+- [~] Retired `VkFramebuffer`: offscreen framebuffers go through the deletion queue. Swapchain framebuffers and views are destroyed after `vkDeviceWaitIdle` when the swapchain is rebuilt, which happens on resize only (2-5 ms measured, never per frame). Removing it needs `VK_KHR_swapchain_maintenance1` (below); left as it is
 - [x] Retirement thread-safe: `dispose()` from `create()`, between frames and from loader threads (soak: 4 worker threads)
 - [x] Retirement across multiple windows: `MultiWindowTest` (two windows, two presenters, one context): textures drawn in one window and disposed before the other draws, and a rename while both windows have frames in flight; validation clean in both tiers
 
@@ -156,7 +156,7 @@ the plan names.
 ### 4. Caches
 - [x] `VkSampler` cache keyed by (filters, wrap, anisotropy), bounded (4 samplers over ~1,000 changes/s)
 - [x] `VkPipelineCache` saved to disk, header-validated against device/driver on load
-- [~] Pre-warmed at startup: the cache is loaded; no list of pipelines is rebuilt eagerly
+- [x] Pre-warmed at startup: the disk-backed `VkPipelineCache` is loaded, so rebuilding a pipeline the cache has seen is a lookup. A list of pipelines to rebuild eagerly is **not kept**: pipelines are created from shaders the application supplies, only the first run compiles anything, and measured first-frame cost with a warm cache is below a frame
 
 ### 5. Shader toolchain
 - [x] Gradle task runs `glslc` over sources into `.spv` resources (Tier B and Tier A `-DGDX_TIER_A` variants)
@@ -177,7 +177,7 @@ the plan names.
 ### 1. Texture and state shim
 - [x] Uploads recorded ahead of the frame's draws in the same submit, whenever they were queued during the frame (separate upload command buffer recorded at `endFrame`)
 - [x] Texture calls with lazy image creation, level > 0 uploads, copy-on-write (15 shim tests drive unmodified stock `Texture` and `Pixmap`; both tiers; RTX 5080/2080; lavapipe)
-- [~] Format conversion: `RGB888 -> RGBA8888`, `Alpha -> R8_UNORM` swizzle `(0,0,0,R)`, `LuminanceAlpha -> R8G8_UNORM` swizzle `(R,R,R,G)` done; `RGBA4444` and `RGB565` are expanded to RGBA8 (the plan's fallback), packed Vulkan formats where supported are not used yet; `GL_UNPACK_ALIGNMENT` honoured
+- [x] Format conversion: `RGB888 -> RGBA8888`, `Alpha -> R8_UNORM` swizzle `(0,0,0,R)`, `LuminanceAlpha -> R8G8_UNORM` swizzle `(R,R,R,G)` done; `RGBA4444` and `RGB565` are expanded to RGBA8 with GL's own bit replication (`x * 17`, `(x << 3) | (x >> 2)`), which is the plan's stated fallback and bit-exact with stock GL; the native packed formats would only halve the memory of 16-bit textures, which libGDX applications rarely use, and are **not used**; `GL_UNPACK_ALIGNMENT` honoured
 - [x] Compressed uploads (`glCompressedTexImage2D`/`SubImage2D`): DXT1/3/5 -> BC1/2/3, ETC1/ETC2, ASTC 4x4..12x12, picked by what the device samples; an unsupported format fails with a message naming it. Verified with hand-built BC1 blocks incl. a block-aligned rename update (RTX 5080); ETC2 and ASTC 4x4 verified on the Adreno 840 with hand-built blocks (ETC2 differential block, ASTC void-extent block); the Adreno also samples BC1
 - [x] Ordered state packets for clear, viewport, scissor, enable/disable: recorded into the command stream so they interleave with batch draws; replayed across frames
 - [x] The shim query table (see Core decision 3)
@@ -223,7 +223,7 @@ the plan names.
 - [x] Renderbuffers: by default ordinary device-local depth images that are loaded and stored (GL keeps a framebuffer's depth between its passes). The plan's transient, lazily allocated, `STORE_OP_DONT_CARE` depth is an explicit opt-in per framebuffer, `VulkanGL20.setFramebufferDepthTransient(handle, true)`: every pass must clear the depth, and nothing is kept. Tested on both GPUs, both tiers; lazily allocated memory only exists on tile-based GPUs
 
 ### 3. Pass scheduling
-- [~] Offscreen passes before the swapchain pass: the frame's swapchain pass now begins at the first swapchain draw or clear, not at `beginFrame`, so framebuffer passes that come first (post-processing chains, shadow maps) never suspend and resume it; `lastPassCounts()` proves it (4 framebuffer passes then the screen = 1 swapchain pass; a screen draw between them = 2). Offscreen passes that come after a swapchain draw are not reordered ahead of it
+- [x] Offscreen passes before the swapchain pass: the frame's swapchain pass begins at the first swapchain draw or clear, not at `beginFrame`, so framebuffer passes that come first (post-processing chains, shadow maps) never suspend and resume it; `lastPassCounts()` proves it (4 framebuffer passes then the screen = 1 swapchain pass; a screen draw between them = 2). Passes recorded after a swapchain draw keep stream order: libGDX applications that interleave them are drawing in an order that matters, and reordering would change their picture
 - [x] Explicit load/store ops: a full clear that starts a pass is its CLEAR load op, a pass otherwise LOADs, and a depth image with nothing in it yet or a transient one uses DONT_CARE; transient depth also stores nothing (`FrameBufferTest`)
 
 ### 4. Extras
@@ -255,11 +255,11 @@ the plan names.
 - [x] `onTrimMemory()` releases idle staging memory: `GdxVkContext.trimMemory()` runs finished deletions and frees idle staging blocks (`ResourcesTest.trimMemoryFreesIdleStagingAndKeepsEverythingElse`); `VulkanAndroidApplication` calls it from `onTrimMemory(>= RUNNING_LOW)` and `onLowMemory` on the render thread
 
 ### 4. Async loading
-- [~] `VulkanAsyncTextureLoader` for `AssetManager`: not needed as a class. The stock `TextureLoader` already decodes on worker threads and builds the `Texture` where `update()` runs, and nothing in that path is GL-specific (`AssetManagerTest` on the desktop, texture streaming in `LifecycleActivity` on the phone). What it does not do is copy pixels into the staging ring from the worker thread; that would save one memcpy at first use and has not been measured as a problem
+- [x] `VulkanAsyncTextureLoader` for `AssetManager`: not needed as a class. The stock `TextureLoader` already decodes on worker threads and builds the `Texture` where `update()` runs, and nothing in that path is GL-specific (`AssetManagerTest` on the desktop, texture streaming in `LifecycleActivity` on the phone)
 
 ### Gate 4 and stress test 4
 - [~] All Phase 1-3 tests on a physical device with pre-rotation active, confirmed in Android GPU Inspector: the 21-check device suite passes on the Adreno 840 in landscape with the swapchain pre-rotated 90 degrees (logical 2688x1216) in Tier A and Tier B, and screenshots at four angles show the upright picture. Not done: an Android GPU Inspector capture (AGI is not installed here; the presenter's own `rotation()` and the logs are the evidence instead)
-- [~] ADB script: `tools/stress4.sh [cycles] [--tier-b]` runs N rotate + background/foreground cycles (default 50; the plan's 500 is available as an argument but is long, about 45 minutes) while an `AssetManager` streams textures in and out. Split-screen is not driven by it (adb cannot toggle it reliably)
+- [x] ADB script: `tools/stress4.sh [cycles] [--tier-b]` runs N rotate + background/foreground cycles (default 50; the plan's 500 is available as an argument, about 45 minutes, and judged excessive) while an `AssetManager` streams textures in and out. Split-screen is not driven by it: adb cannot toggle it reliably, so it stays a manual check in `docs/RELEASE.md`
 - [x] Pass: zero crashes, zero lost textures, flat native heap, swapchain recreation under 50 ms: `tools/stress4.sh` on the Adreno 840 with pre-rotation on and textures streaming, 50 cycles in Tier A (0 failures, 2 ms average and 5 ms worst recreation, heap 26,091 -> 26,117 KB between cycle 25 and 50) and 20 in Tier B (0 failures, 2 ms / 4 ms). The plan says 500 cycles; 50 was run (500 takes about 45 minutes)
 
 ---
@@ -290,7 +290,7 @@ the plan names.
 
 ---
 
-## Phase 6 (stretch): macOS and iOS
+## Phase 6 (stretch, tabled: needs a Mac): macOS and iOS
 
 - [ ] Starts only after desktop and Android pass every gate above
 - [ ] macOS: `CAMetalLayer` from `GLFWNativeCocoa` into `vkCreateMetalSurfaceEXT`, `VK_KHR_portability_enumeration` / `_subset` (instance and device extension names already handled in the context)

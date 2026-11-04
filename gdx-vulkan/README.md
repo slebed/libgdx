@@ -4,7 +4,7 @@ A Vulkan renderer for libGDX, built as a standalone library on **stock libGDX** 
 libGDX is needed: unmodified `Texture`, `Pixmap`, `SpriteBatch`, `FrameBuffer`, Scene2D, `BitmapFont` and friends run against Vulkan through a
 GL20 shim, and the result is compared with stock libGDX on OpenGL.
 
-`docs/PLAN.md` has the architecture and the phases; `docs/CHECKLIST.md` is the item-by-item state (140 done, 19 partial, 10 not started, of 169; what is left is shadow cascades and point-light shadows, Phase 6, the desktop `Application`, the Galaxy S20, or a stated limit),
+`docs/PLAN.md` has the architecture and the phases; `docs/CHECKLIST.md` is the item-by-item state (150 done, 11 partial, 8 not started, of 169; what is left is Phase 6 (tabled, needs a Mac), the desktop `Application`, Swappy and `VK_KHR_swapchain_maintenance1`, shadow cascades and spot lights, the Galaxy S20, an Android GPU Inspector capture, running the other Android ABIs, filing the upstream PR, and the 1.14.3 bump),
 marking only what has been built **and verified**.
 
 ## Status
@@ -17,7 +17,7 @@ marking only what has been built **and verified**.
 | 3 Stock `FrameBuffer` | done: colour, depth and stencil framebuffers, `VulkanMultiTargetFrameBuffer` (several and floating-point attachments), GL cull/depth/stencil state, pass scheduling, Gate 3 scenes, Stress test 3. Not done: reordering offscreen passes that come after a swapchain draw |
 | 4 Android lifecycle | done apart from Swappy frame pacing, `VK_KHR_swapchain_maintenance1` and an Android GPU Inspector capture: `VulkanAndroidApplication` (stock input, audio and files), surface loss and recreation with everything resident (2 ms average), pre-rotation verified at all four angles on the phone, `onTrimMemory`, stock `AssetManager` texture streaming, Stress test 4 at 50 cycles, the 21-check device suite with the swapchain pre-rotated (both tiers) |
 | 5 3D with stock models | done apart from shadow cascades and point-light shadows: stock `Mesh` data through the GL buffer shim, a swapchain depth buffer, `VulkanModelBatch` (the stock `ModelBatch` API on a port of the default shader: lights, specular, emissive, textures, normal maps, fog, one directional shadow map, blending, skeletal animation, instancing), `VulkanComputeShader`, and GPU-driven instancing with compute culling, indirect draws and clustered point lights (`VulkanGpuInstances`). The animated knight and the `ModelBuilder` scenes match stock GL; Stress test 5 runs 250,000 boids and 500 lights at 495 fps on the RTX 2080 |
-| 6 macOS / iOS | not started (stretch) |
+| 6 macOS / iOS | tabled: it needs a Mac to build and test (stretch) |
 
 **Two tiers.** Tier A (Vulkan 1.3: dynamic rendering, a bindless texture table, dynamic raster state) and Tier B (Vulkan 1.1: render passes,
 one descriptor set per texture, pipeline variants). `forceTierB` runs Tier B on any device, and every test runs in both.
