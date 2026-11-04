@@ -50,7 +50,7 @@ import java.util.concurrent.TimeUnit;
 public class VulkanAndroidGraphics implements Graphics, SurfaceHolder.Callback, io.github.slebed.gdxvulkan.GdxVkFrameSource {
     private static final String TAG = "VulkanAndroidGraphics";
 
-    final SurfaceView view;
+    final VulkanSurfaceView view;
     private final VulkanAndroidApplication app;
     private final GdxVkConfig vkConfig;
     private final boolean vsync;
@@ -90,7 +90,7 @@ public class VulkanAndroidGraphics implements Graphics, SurfaceHolder.Callback, 
         this.listener = listener;
         this.vkConfig = vkConfig;
         this.vsync = vsync;
-        view = new SurfaceView(app);
+        view = new VulkanSurfaceView(app);
         view.setFocusable(true);
         view.setFocusableInTouchMode(true);
         view.getHolder().addCallback(this);

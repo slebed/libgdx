@@ -74,6 +74,7 @@ gradlew :testapp:assembleDebug && adb install -r testapp/build/outputs/apk/debug
 adb shell am start -n io.github.slebed.gdxvulkan.testapp/.MainActivity --ez suite true [--ez forceTierB true] [--ez vsync false]
 adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # look for "DEVICESUITE PASS"
 tools/stress4.sh [cycles=50] [--tier-b] [--no-prerotate] [--no-stream]             # rotate + background/foreground while textures stream
+tools/keyboard-test.sh <adb serial>                                                  # the on-screen keyboard: shown, a key arrives as libGDX input, hidden
 tools/device-suite.sh <adb serial> [--es only stress2,shaderPrograms]              # the device suite on one phone, or only the checks whose names contain those words
 tools/device-suite.sh <adb serial> --es only stockClasses,gate3Stock,stockSpriteBatch   # libGDX's own classes on the shim: same picture as the Vulkan classes, and the speed (2D; the 3D check is gate5Stock)
 ```

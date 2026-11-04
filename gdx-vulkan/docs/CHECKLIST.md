@@ -24,7 +24,7 @@ the plan names.
 | Demos (gdx-vulkan-demos) | 4 | 3 | 3 | 10 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **191** | **19** | **29** | **239** |
+| **All** | **192** | **19** | **29** | **240** |
 ---
 
 ## Core decisions
@@ -33,6 +33,7 @@ the plan names.
 - [x] Depends on upstream `com.badlogicgames.gdx:gdx` (1.14.2: 1.14.3 is not on Maven Central; bump when it ships)
 - [x] Core `gdx` is never patched
 - [x] Reuses `gdx-backend-lwjgl3` for files, networking, preferences, clipboard, OpenAL audio, GLFW and natives loading; `VulkanDesktopApplication` is the desktop `Application`. Input is the stock key mapping, event queue and polling, **as a generated copy** (`tools/generate_desktop_input.py` turns libGDX's `DefaultLwjgl3Input` into `VulkanDesktopInput`): the stock class needs an `Lwjgl3Window`, whose constructor is package-private and whose graphics object creates an OpenGL context, so it could not be used as it is. `DesktopApplicationTest` runs an application end to end (window, input events, posted runnables, resize, a captured frame, clean shutdown with no validation messages)
+- [x] The on-screen keyboard: `VulkanSurfaceView` offers the keyboard an input connection and `VulkanAndroidInput` shows and hides it (stock input casts the view to a GL class); `tools/keyboard-test.sh` on the Galaxy S20 FE (Android 13) and the REDMAGIC (Android 16): the system reports it shown and hidden, a key event arrives as libGDX `keyDown` and `keyTyped`
 - [x] Reuses `gdx-backend-android` for input, audio, files and net: `VulkanAndroidApplication` builds `DefaultAndroidInput`, `DefaultAndroidAudio`, `DefaultAndroidFiles`, `AndroidNet`. Known gap: the on-screen keyboard and native text input (`DefaultAndroidInput` casts the graphics object to its own GL class there)
 - [x] Copied `backend/vulkan/audio/*` and `jni/VulkanNative.*` are not carried over (this is a fresh project)
 - [x] No `lwjgl-vulkan`, `lwjgl-vma` or `lwjgl-shaderc` dependency; GLFW used for desktop windowing only

@@ -33,6 +33,7 @@ adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log    
 adb shell am start -n io.github.slebed.gdxvulkan.testapp/.LifecycleActivity --ei cycles 100 [--ez forceTierB true]
 adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # LIFECYCLE PASS
 ```
+- [ ] `tools/keyboard-test.sh <serial>`: KEYBOARD PASS
 - [ ] Device suite passes in both tiers, including the stock-class checks (`stockClassesOnTheShim`, `gate3StockClassesOnTheShim`, `gate5StockModelBatchOnTheShim`, `stockSpriteBatchAgainstGenerated`)
 - [ ] Lifecycle run passes in both tiers: zero failures, native heap flat after warm-up, surface recreation well under 50 ms
 - [ ] 10-minute soak (`--ei soakSeconds 600`) in both tiers when the release touches memory, the staging ring or deletion

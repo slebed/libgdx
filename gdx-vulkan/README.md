@@ -41,7 +41,7 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Spot lights, point-light shadows in `VulkanModelBatch` | libGDX's own default shader has neither. Stock `ModelBatch` through the shim compiled and drew a spot light without error, but no picture of it has been compared with OpenGL |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (191 of 239 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (192 of 240 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). Both phones pass the whole device suite (32 checks, 3D included); what each GPU needed is in [`docs/DRIVER_NOTES.md`](docs/DRIVER_NOTES.md). Other GPUs and drivers should work but have not been tried.
@@ -351,7 +351,7 @@ Stock classes run unchanged because the same shim also serves what they use to d
 - The GL shim draws from one vertex buffer per draw (or from vertex data in memory), with float and normalised-byte attributes; `glVertexAttrib*` constants for attributes a mesh lacks are ignored (a draw that reads such an attribute gets undefined values).
 - On the first run, a shader outside the set compiled with the library (everything but libGDX's own sprite, shape and default and depth model shaders for common materials and lights) is translated and compiled at run time.
 - A few features need a driver with Vulkan 1.3: shadow maps and specular, emissive and normal-map textures. On a Vulkan 1.1 driver they are skipped.
-- On Android, the on-screen keyboard through `Gdx.input` does not work yet.
+- On Android, `Gdx.input.setOnscreenKeyboardVisible` (what Scene2D's `TextField` uses) and `Gdx.input.getTextInput` work; a newer libGDX's `openTextInputField` overlay needs the stock `AndroidApplication` and is not covered.
 - Natives are built for Windows x64, Linux x64 and Android arm64. Android armeabi-v7a and x86_64 compile but have never been run.
 - Offscreen framebuffer passes recorded after a draw to the screen keep their order: a framebuffer pass in the middle of a frame interrupts the main pass.
 - The demo app is desktop only, and clustered lights and shadows are not combined in one scene: lights are sorted into clusters on the GPU-driven path (one mesh, no shadows), cascaded shadows work with `VulkanModelBatch` (up to 8 point lights).

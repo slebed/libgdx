@@ -20,6 +20,11 @@
             android:name=".LifecycleActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden|keyboard|smallestScreenSize|screenLayout|uiMode|density" />
+        <activity
+            android:name=".KeyboardActivity"
+            android:exported="true"
+            android:windowSoftInputMode="stateHidden|adjustResize"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|smallestScreenSize|screenLayout|uiMode|density" />
         <activity android:name=".CoverActivity" android:exported="false" />
     </application>
 </manifest>
