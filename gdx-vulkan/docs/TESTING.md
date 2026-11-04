@@ -21,7 +21,9 @@ skin, fonts and particle effects in `test-assets/` (see `NOTICE`); `-Dgdxvulkan.
 - **Stock OpenGL as the oracle.** The 2D, framebuffer and 3D scenes are written once against the stock libGDX API and drawn by stock libGDX on
   OpenGL (llvmpipe) and by gdx-vulkan (lavapipe). The framebuffer scenes match with zero differing pixels, the 3D scenes with at most a few pixels, and the
   2D scenes match except the shape renderer, which differs from OpenGL by 0.18% of pixels at line ends (within tolerance).
+- **Stock classes through the shim.** `StockClassesTest` and `StockScenesTest` draw a scene with libGDX's own `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `BitmapFont`, `Stage`, a custom `ShaderProgram` and `ModelBatch` (lit, with `DefaultShader`) and compare it with the `Vulkan...` classes; Gate 2, 3 and 5 each draw every scene a second time with the stock classes and compare it with the first (`PictureCompare`: within 2, 6 and 4 levels on all but 0.05%, 0.5% and 0.5% of the pixels). `BundledShadersTest` draws stock `ModelBatch` through a matrix of materials, vertex layouts and lights with the disk cache off and fails if the run-time compiler is called: run `recordShaderBundle` when it does.
 - **Goldens.** Committed PNGs rendered on lavapipe: exact on lavapipe, within a tolerance on a real GPU or a phone.
+- **Demos.** `DemosSmokeTest` (module `gdx-vulkan-demos`) starts each demo of the demo app, draws 20 frames and checks the picture is not blank; it is part of `check`.
 - **Validation.** The Vulkan validation layers run in every test; any message fails it.
 
 ### Two code paths
@@ -37,8 +39,25 @@ gradlew :gdx-vulkan-desktop:stress2                                   # VulkanSp
 gradlew :gdx-vulkan-desktop:stressInstanced -Dgdxvulkan.device=1      # 1,000,000 sprites moved by a compute shader
 gradlew :gdx-vulkan-desktop:stress3                                   # command stream recording against a C++ floor
 gradlew :gdx-vulkan-desktop:stress5                                   # 250,000 instanced meshes with compute culling and 500 lights
+gradlew :gdx-vulkan-desktop:stressShaders                             # a translated libGDX shader against the built-in one
+gradlew :gdx-vulkan-desktop:stressShim                                # libGDX's own SpriteBatch on the shim against VulkanSpriteBatch (within 1.5x, one texture)
 gradlew :gdx-vulkan-desktop:soakTest -Dgdxvulkan.soakSeconds=600      # the full soak (leaks and synchronization hazards)
 ```
+
+## Demos
+```
+gradlew :gdx-vulkan-demos:demos                            # the demo app on gdx-vulkan: keys 1-3 start a demo, C starts its OpenGL version beside it, Esc comes back
+gradlew :gdx-vulkan-demos:demoGl -Ddemo=shadows-stock      # one demo on stock libGDX and OpenGL (or -Ddemo=boids)
+gradlew :gdx-vulkan-demos:demos -Ddemo.start=3 -Ddemo.screenshot=out.png -Ddemo.frames=4000   # run one demo, save a picture, leave
+```
+Options (system properties, also passed on to the OpenGL window): `demo.boids` (250000), `demo.vsync` (false: the frame rate shown is what the GPU can do), `demo.lights` (true), `demo.width`
+and `demo.height`. The fps on screen is still in JIT warm-up for the first seconds; read it after about 4,000 frames. Both backends show the same fields (the API and version, device, driver,
+code path, then frame time, CPU time of the process and of the render thread per frame, and GPU time per frame), so two windows can be compared line by line. To profile the demo's own
+JVM: `-DdemoJvmArgs="-XX:StartFlightRecording=filename=demo.jfr,settings=profile,stackdepth=64"`.
+
+## Shader bundle
+`gradlew :gdx-vulkan-desktop:recordShaderBundle` translates and compiles the programs libGDX's `DefaultShader` and `DepthShader` ask for, for a matrix of materials, vertex layouts and lights, on both code paths,
+and keeps them in `gdx-vulkan-core/src/main/resources/shaders/bundle`. Run it after changing the translator, the glslang version or the matrix in `RecordShaderBundleMain`; `BundledShadersTest` fails when the bundle is stale.
 
 ## Lavapipe in Docker (what CI runs)
 ```
@@ -55,6 +74,7 @@ adb shell am start -n io.github.slebed.gdxvulkan.testapp/.MainActivity --ez suit
 adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # look for "DEVICESUITE PASS"
 tools/stress4.sh [cycles=50] [--tier-b] [--no-prerotate] [--no-stream]             # rotate + background/foreground while textures stream
 tools/device-suite.sh <adb serial> [--es only stress2,shaderPrograms]              # the device suite on one phone, or only the checks whose names contain those words
+tools/device-suite.sh <adb serial> --es only stockClasses,gate3Stock,stockSpriteBatch   # libGDX's own classes on the shim: same picture as the Vulkan classes, and the speed (2D; the 3D check is gate5Stock)
 ```
 Both scripts end the same way: the test app is stopped and the phone goes back to its home screen, so whoever holds the phone can see the test is over, also after a
 failure or a timeout. Phones need about six seconds to settle (the JIT compiles the draw path, the GPU clock rises), so the benchmarks warm up for six seconds; read a

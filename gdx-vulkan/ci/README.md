@@ -2,7 +2,7 @@
 
 `.github/workflows/gdx-vulkan.yml` builds `ci/Dockerfile` and runs `ci/run-checks.sh` in it. The script builds the natives,
 then runs `gradlew check` twice, Tier A and `-Dgdxvulkan.forceTierB=true`, on **lavapipe** under **Xvfb** with
-`VK_LAYER_KHRONOS_validation` and synchronization validation on (set per Gradle test task, not globally; the soak task drops sync validation for the fence-completion run, see `gdx-vulkan-desktop/build.gradle`). The soak runs at a tenth of its GPU load on lavapipe. Any validation message, or any golden mismatch, fails the run.
+`VK_LAYER_KHRONOS_validation` and synchronization validation on (set per Gradle test task, not globally; the soak task drops sync validation for the fence-completion run, see `gdx-vulkan-desktop/build.gradle`). The soak runs at a tenth of its GPU load on lavapipe. Any validation message, or any golden mismatch, fails the run. `gradlew check` covers every module: the desktop tests (including the stock-class passes of Gate 2, 3 and 5 and `BundledShadersTest`) and the demos' smoke tests (`DemosSmokeTest`; the modern-path demos skip on the Tier B run).
 
 ## Run it locally (Docker)
 

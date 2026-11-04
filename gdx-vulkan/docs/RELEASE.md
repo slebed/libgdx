@@ -14,9 +14,11 @@ Index 0 and 1 depend on the machine; the soak prints the device name it used.
 - [ ] `gradlew check -Dgdxvulkan.requireDriver=true -Dgdxvulkan.requireGl=true -Dgdxvulkan.device=N`
 - [ ] the same with `-Dgdxvulkan.forceTierB=true`
 - [ ] Validation and synchronization validation reported nothing (a message fails the test)
-- [ ] Gate 2 (7 scenes) and Gate 3 (2 scenes) ran, none skipped (`requireGl` makes a skip a failure)
+- [ ] Gate 2 (7 scenes), Gate 3 (2 scenes) and Gate 5 ran, none skipped (`requireGl` makes a skip a failure), each also with libGDX's own classes (the second pass in each test)
+- [ ] `BundledShadersTest` passed (if not: `gradlew :gdx-vulkan-desktop:recordShaderBundle`, commit the new bundle)
 - [ ] `gradlew :gdx-vulkan-desktop:soakTest -Dgdxvulkan.soakSeconds=600 -Dgdxvulkan.device=N` per GPU and tier: flat memory, 60 fps, no hazards
-- [ ] `gradlew :gdx-vulkan-desktop:stress2`, `stress3`, `stressInstanced`: compare with the numbers in `README.md`; a regression over 10% needs an explanation
+- [ ] `gradlew :gdx-vulkan-desktop:stress2`, `stress3`, `stressInstanced`, `stressShim`: compare with the numbers in `README.md`; a regression over 10% needs an explanation; `stressShim` must pass (stock `SpriteBatch` within 1.5x)
+- [ ] Demos: `gradlew :gdx-vulkan-demos:demos` by hand: each demo draws and its text reads well at the window size; C starts the OpenGL version beside it; both show the same fields. Compare the numbers with the Demo measurements in `README.md`
 
 ## 3. Linux
 - [ ] `docker build -t gdx-vulkan-ci ci` and `ci/run-checks.sh` (see `ci/README.md`), both tiers, exact goldens
@@ -27,11 +29,11 @@ Index 0 and 1 depend on the machine; the soak prints the device name it used.
 cd gdx-vulkan-android
 gradlew :testapp:assembleDebug && adb install -r testapp/build/outputs/apk/debug/testapp-debug.apk
 adb shell am start -n io.github.slebed.gdxvulkan.testapp/.MainActivity --ez suite true [--ez forceTierB true]
-adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # DEVICESUITE PASS, 21 checks
+adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # DEVICESUITE PASS, 30 checks (on a phone whose 3D shaders do not build, skip the 3D checks with `--es only`)
 adb shell am start -n io.github.slebed.gdxvulkan.testapp/.LifecycleActivity --ei cycles 100 [--ez forceTierB true]
 adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # LIFECYCLE PASS
 ```
-- [ ] Device suite passes in both tiers
+- [ ] Device suite passes in both tiers, including the stock-class checks (`stockClassesOnTheShim`, `gate3StockClassesOnTheShim`, `gate5StockModelBatchOnTheShim`, `stockSpriteBatchAgainstGenerated`)
 - [ ] Lifecycle run passes in both tiers: zero failures, native heap flat after warm-up, surface recreation well under 50 ms
 - [ ] 10-minute soak (`--ei soakSeconds 600`) in both tiers when the release touches memory, the staging ring or deletion
 - [ ] Pre-rotation: rotate the phone in all four orientations by hand and look at it (`adb exec-out screencap -p`), or run the lifecycle run with `--ez preRotate false` and compare

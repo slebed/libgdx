@@ -21,10 +21,13 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 
 | Works today | |
 |---|---|
-| 2D | `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `BitmapFont`, Scene2D, `TextureAtlas`, particles, compressed textures (ETC2, ASTC, ...), custom shaders (as SPIR-V) |
+| 2D | `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `BitmapFont`, Scene2D, `TextureAtlas`, particles, compressed textures (ETC2, ASTC, ...), custom shaders (libGDX GLSL, or SPIR-V) |
 | Framebuffers | the stock `FrameBuffer` (colour, depth, stencil), multiple and floating-point colour attachments |
 | 3D | `ModelBatch` with `ModelInstance`, `Environment`, directional and point lights, textures, normal maps, fog, skeletal animation, blending, shadow maps (one, or cascaded), instancing; models from `G3dModelLoader` or `ModelBuilder` |
 | GPU-driven | compute shaders, GPU culling, indirect drawing, clustered lighting for hundreds of lights |
+| Stock classes, unchanged | libGDX's own `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `Stage`, `ModelBatch` (`DefaultShader`, `DepthShader`) and your own `ShaderProgram`s run as they are, through the GL shim. The `Vulkan...` classes do the same work written straight against Vulkan and are the fast path |
+| Shaders | libGDX's GLSL (`attribute`, `varying`, `uniform`, `gl_FragColor`) is translated to Vulkan at run time and cached on disk; libGDX's own sprite, shape and model shaders are compiled when the library is built, so they cost no start-up compile; SPIR-V bundles are accepted too |
+| Demos | `gdx-vulkan-demos`: a demo app with a menu, and stock OpenGL versions to start beside it (see [Demos](#demos)) |
 | Platforms | Windows x64, Linux x64 (X11), Android 10+ (arm64) |
 | Application | a desktop `Application` (`VulkanDesktopApplication`) and an Android one (`VulkanAndroidApplication`), with stock input, audio and files |
 
@@ -32,9 +35,10 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 |---|---|
 | macOS and iOS | needs a Mac to build and test; not started |
 | Wayland | X11 only on Linux |
-| Custom GLSL | `VulkanShaderProgram` runs your libGDX GLSL with the sprite batch, the polygon batch and the shape renderer, and caches the compiled result on disk. **Not yet:** `ModelBatch` shaders, and the stock `ShaderProgram` class itself (tracked in `docs/CHECKLIST.md`, "Phase 5b") |
-| Direct OpenGL drawing | `glDrawArrays`, `glUseProgram`, `Mesh.render(ShaderProgram)` and similar throw an exception that says which Vulkan class to use |
-| Spot lights, point-light shadows | libGDX's own default shader has neither |
+| Some GLSL | cube maps and 3D samplers, structs with array or matrix members, `bool` arrays, array varyings, and (on a Vulkan 1.1 driver) more than one texture per draw are refused with a message that names the line |
+| More of OpenGL | the shim covers what libGDX's classes use: programs, uniforms, one vertex buffer (or vertex data in memory) and array or indexed draws. `Gdx.gl30` and `gl31` stay null, so instancing, several vertex buffers, vertex formats other than floats and normalised bytes, query objects and compute through GL are not available; use the Vulkan classes (`VulkanComputeShader`, `VulkanGpuInstances`) |
+| Demos on Android | the demo app runs on the desktop only |
+| Spot lights, point-light shadows in `VulkanModelBatch` | libGDX's own default shader has neither. Stock `ModelBatch` through the shim compiled and drew a spot light without error, but no picture of it has been compared with OpenGL |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
 The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (187 of 238 items done).
@@ -72,6 +76,7 @@ supports. Stock OpenGL runs on the display GPU, so on the two-GPU PC only PC-508
 | T4 | **250,000 lit 3D meshes** moved by a compute shader, culled on the GPU and drawn with one indirect call, with **500 point lights**, 1280x720 on the PC and full screen on a phone | the GPU-driven path; stock libGDX cannot run it |
 | T5 | T4 at a mobile load: 50,000 meshes and 64 lights | the same on phone-sized work |
 | T6 | T1 drawn with **libGDX's own sprite shader, translated at run time** (`VulkanShaderProgram`), against the batch's built-in shader | what a game's own shader costs compared with a built-in one |
+| T7 | T1 drawn by **libGDX's own `SpriteBatch`, unmodified, through the GL shim**, against `VulkanSpriteBatch` (`gradlew :gdx-vulkan-desktop:stressShim`) | what running stock code unchanged costs compared with the renamed classes |
 
 ### Results
 
@@ -98,6 +103,10 @@ Higher is better. "Stock" is libGDX 1.14.2 on OpenGL; a dash means the test has 
 | T6 translated stock sprite shader | PC-2080 | built-in shader 1,275 fps | 1,273 fps | 1.00x |
 | T6 translated stock sprite shader | RM-11P (144 Hz, vsync off) | built-in shader 1,545 fps | 1,457 fps | 0.94x (rounds 1 to 3 within 2% of each other; round 4 was noisy) |
 | T6 translated stock sprite shader | S20-FE (120 Hz, vsync off) | built-in shader 721 fps (cool), 518 fps (throttled) | 713 fps (cool), 511 fps (throttled) | 0.99x in either state |
+| T7 stock `SpriteBatch` on the shim, one texture | PC-5080 | - | 928 fps (modern), 879 fps (compatibility) against 1,227 fps for `VulkanSpriteBatch` | 0.76x, 0.72x |
+| T7 stock `SpriteBatch` on the shim, one texture | PC-2080 | - | 1,205 fps against 1,256 fps | 0.96x |
+| T7 stock `SpriteBatch` on the shim, one texture | S20-FE (120 Hz, vsync off) | - | 499 fps against 563 fps | 0.89x |
+| T7 stock `SpriteBatch` on the shim, eight textures | PC-5080, PC-2080 | - | 1.23x and 1.28x of `VulkanSpriteBatch` (modern), 0.78x (PC-5080 compatibility) | the stock batch flushes at each texture change; on a desktop GPU that is not always slower |
 
 Two more results that are not about a single device:
 - **Java layer:** recording 100,000 draws through the Java API costs 1.0 to 1.3 times a hand-written C++ loop on both PCs and the phones, and the 3D benchmark
@@ -114,10 +123,29 @@ How to read these:
 - The RM-11P one-texture number was 548 fps until a shader was fixed: the sprite batch's single-texture shader got its texture slot through a varying, which the
   Adreno compiler could not tell was the same for every pixel, so it took its slow path for indexing the bindless texture table. Reading the slot from the push
   constants in the fragment shader made it 2.6 times faster on that phone. The desktop GPUs were not affected (that test is CPU-bound there).
+- T7 is the cost of not renaming: libGDX's own batch, with the shader replaced by the dedicated one, runs at about three quarters of the speed of `VulkanSpriteBatch` on the RTX 5080 (a CPU-bound test: the shim records one draw per flush, the generated batch writes straight into GPU-visible memory) and at 0.9x to 1.0x on the RTX 2080 and the phone.
 - No phone has a stock OpenGL number yet; those cells will be filled in as the stock-against-Vulkan demo runs on phones.
 
 Rendering matches stock libGDX: the test scenes are drawn by stock OpenGL and by gdx-vulkan and compared pixel by pixel. The framebuffer scenes are identical;
 the 2D and 3D scenes differ in at most 0.2% of pixels, at the ends of lines and edges.
+
+### Demo measurements
+
+The demo app (below) shows these numbers on screen for both backends. RTX 5080 (PC-5080), window 1280 x 720, vsync off, 4,000 frames, as shown on screen:
+
+| Demo | Backend | Frame | CPU per frame (all threads) | Render thread | GPU per frame |
+|---|---|---|---|---|---|
+| Shadows, stock libGDX code | gdx-vulkan (shim) | 0.86 ms | 0.96 ms (1.1 cores) | 0.83 ms | 0.06 ms |
+| Shadows, stock libGDX code | OpenGL | 0.55 ms | 0.97 ms (1.7 cores) | 0.33 ms | 0.04 ms |
+| Cascaded shadows | gdx-vulkan | 1.11 ms | 1.35 ms (1.2 cores) | 1.10 ms | 0.10 ms |
+| 250,000 GPU boids, 500 lights | gdx-vulkan | 1.51 ms | 0.52 ms (0.3 cores) | 0.52 ms | 1.39 ms |
+| 250,000 GPU boids, no lights | gdx-vulkan | 1.40 ms | 0.52 ms (0.4 cores) | 0.48 ms | 1.27 ms |
+| 250,000 GPU boids, one light | OpenGL (compute, culling, indirect draw) | 2.03 ms | 2.53 ms (1.2 cores) | 0.57 ms | 1.73 ms |
+
+Reading them: with the same GPU work (the boids) gdx-vulkan spends about a fifth of the CPU, the render thread costs the same and the difference is the OpenGL driver's own
+threads, which partly wait. Stock libGDX code through the shim does **not** use less CPU than on OpenGL (the same 0.96 ms in total, more of it on the render thread); the saving
+is for the `Vulkan...` classes and the GPU-driven path. The GPU time of the boids differs (1.27 against 1.73 ms), but the two versions run different shader code, so it says
+nothing about the API; the shadow demos are CPU-bound and the GPU is idle 90% of each frame.
 
 ### Adding a device
 
@@ -296,6 +324,8 @@ gdx-vulkan implements libGDX's `GL20` interface on Vulkan for everything that is
 (memory, descriptors, pipelines, a pipeline cache, deferred deletion). Java records draw commands into an array and hands them over once per frame, so the Java
 side allocates almost nothing. The validation layers, a stock-OpenGL comparison and a leak/hazard soak test run in CI on every commit.
 
+Stock classes run unchanged because the same shim also serves what they use to draw: `glCreateProgram` and the other program, uniform and attribute calls, `glDrawElements` and `glDrawArrays`. libGDX's GLSL is translated to Vulkan GLSL when a program is linked (loose uniforms become push constants or one uniform block, textures go through the bindless table), compiled with a vendored glslang and cached on disk; libGDX's own sprite and shape shaders are recognised by a hash of their source and replaced by dedicated shaders compiled at build time, and the programs `DefaultShader` and `DepthShader` ask for are compiled at build time too (`gdx-vulkan-core/src/main/resources/shaders/bundle`), so none of them reach the run-time compiler. See `docs/SHADER_TRANSLATOR.md`.
+
 `docs/PLAN.md` is the full design.
 
 ## Layout
@@ -310,14 +340,16 @@ side allocates almost nothing. The validation layers, a stock-OpenGL comparison 
   [`RELEASE.md`](docs/RELEASE.md) the manual checks before a release
 
 ## Known limitations
-- Custom shaders must be precompiled to SPIR-V (a bundle of vertex and fragment shaders); there is no run-time GLSL compilation. A custom shader that
-  rotates its own output must call `gdx_vk_clip()` like the bundled ones, for Android pre-rotation.
-- 3D draws with the port of libGDX's default shader (plus normal maps). Custom 3D `Shader` and `ShaderProvider` classes are not accepted.
+- libGDX GLSL is translated at run time (the first use of a shader costs a compile, not yet measured, and is cached on disk afterwards; `VulkanShaderProgram.prepareAsync` does it on a worker thread). A hand-written SPIR-V shader that rotates its own output must call `gdx_vk_clip()` like the bundled ones, for Android pre-rotation.
+- `VulkanModelBatch` draws with the port of libGDX's default shader (plus normal maps) and does not accept custom 3D `Shader` or `ShaderProvider` classes. Stock `ModelBatch` through the shim accepts them (any stock `Shader`, `BaseShader`, `ShaderProvider`), at the cost of the shim's CPU time.
+- The GL shim draws from one vertex buffer per draw (or from vertex data in memory), with float and normalised-byte attributes; `glVertexAttrib*` constants for attributes a mesh lacks are ignored (a draw that reads such an attribute gets undefined values).
+- On the first run, a shader outside the set compiled with the library (everything but libGDX's own sprite, shape and default and depth model shaders for common materials and lights) is translated and compiled at run time.
 - A few features need a driver with Vulkan 1.3: shadow maps and specular, emissive and normal-map textures. On a Vulkan 1.1 driver they are skipped.
 - On Android, the on-screen keyboard through `Gdx.input` does not work yet.
 - On the Samsung Galaxy S20 FE (Adreno 650, Vulkan 1.1 driver) 3D models do not run yet: its driver refuses to build the model shaders. 2D, framebuffers, compute and instancing work there.
 - Natives are built for Windows x64, Linux x64 and Android arm64. Android armeabi-v7a and x86_64 compile but have never been run.
 - Offscreen framebuffer passes recorded after a draw to the screen keep their order: a framebuffer pass in the middle of a frame interrupts the main pass.
+- The demo app is desktop only, and clustered lights and shadows are not combined in one scene: lights are sorted into clusters on the GPU-driven path (one mesh, no shadows), cascaded shadows work with `VulkanModelBatch` (up to 8 point lights).
 
 ## Contributing and licence
 Issues and pull requests are welcome; run the tests first (`docs/TESTING.md`). Apache License 2.0, see `LICENSE`. Third-party code is vendored in
