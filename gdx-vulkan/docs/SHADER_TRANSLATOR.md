@@ -65,6 +65,17 @@ copies the push words into the batch's push block, and emits the uniform block w
 `u_projTrans` and `u_texture` first, as stock's `SpriteBatch` does, and flushes on every texture change, as stock does. Pipelines are built per program and blend
 state, with the vertex attributes (`a_position`, `a_color`, `a_texCoord0`) placed at the locations the program gave them.
 
+## The cache
+`ShaderCache` writes one file per program (`<sha-256 prefix>.spvprog`): both SPIR-V modules and the translation tables, named from a hash of the sources, the
+prepend text, the code path and the translator and compiler versions. Finding the file skips the preprocessor, the translator and the compiler, including
+glslang's first-use start-up (152 ms in the native test). `VulkanShaderProgram.cacheDirectory` chooses the folder (null turns it off); the default is
+`gdxvk-shader-cache` in local storage. Files that cannot be read or have another format number are ignored and replaced; failing to write is ignored.
+
+## Speed
+`stressShaders` draws 20,000 sprites from one texture with the built-in shader, the translated stock sprite shader and a custom shader, twice each in turn: the
+translated stock shader runs at 0.97x to 1.00x of the built-in one on the two PC GPUs and both code paths. The workload is CPU-bound and the shaders trivial, so
+this shows the translation adds no cost of its own.
+
 ## Not yet
-Programs for the polygon batch, the shape renderer and the model batch, the SPIRV-Reflect check on translated shaders, the on-disk cache of compiled SPIR-V, and the
-GL-shim calls that let a stock `ShaderProgram` run unchanged (checklist sections B, C and E).
+Programs for the model batch, the SPIRV-Reflect check on translated shaders, compiling off the render thread, and the GL-shim calls that let a stock `ShaderProgram`
+run unchanged (checklist sections B, C and E).

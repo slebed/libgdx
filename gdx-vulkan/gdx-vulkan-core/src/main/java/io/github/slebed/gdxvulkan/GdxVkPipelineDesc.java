@@ -27,6 +27,11 @@ public final class GdxVkPipelineDesc {
     public int[] specConstants = new int[0];
     private final List<int[]> attributes = new ArrayList<int[]>();
 
+    /** The attribute list itself, so a caller that built a default layout can replace it. */
+    public List<int[]> attributes() {
+        return attributes;
+    }
+
     public GdxVkPipelineDesc attribute(int location, int vkFormat, int offset) {
         attributes.add(new int[] {location, vkFormat, offset});
         return this;

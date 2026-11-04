@@ -119,6 +119,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         if (getIntent().getBooleanExtra("suite", false)) {
             // Phase 1b / Phase 2 device run; the triangle loop stays off so the suite owns the swapchain.
             try {
+                final String only = getIntent().getStringExtra("only");
+                DeviceSuite.only = only == null || only.isEmpty() ? null : only.split(",");
                 DeviceSuite.run(MainActivity.this, context, presenter, getIntent().getIntExtra("soakSeconds", 20), getIntent().getIntExtra("stressSeconds", 5));
             } catch (Throwable t) {
                 TestLog.e(TAG, "DEVICESUITE FAIL (setup)", t);

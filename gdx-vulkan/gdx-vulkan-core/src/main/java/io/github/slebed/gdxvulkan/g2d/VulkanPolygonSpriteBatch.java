@@ -12,6 +12,7 @@ import io.github.slebed.gdxvulkan.CommandStream;
 import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkPresenter;
 import io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle;
+import io.github.slebed.gdxvulkan.glsl.VulkanShaderProgram;
 import io.github.slebed.gdxvulkan.gl.VulkanGL20;
 
 import java.nio.ByteBuffer;
@@ -35,6 +36,7 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
     private final Matrix4 combinedMatrix = new Matrix4();
     private final float[] push = new float[32];
     private VulkanShaderPipelineBundle bundle; // null: the default sprite shaders
+    private VulkanShaderProgram program;       // a program written in libGDX's GLSL, translated at run time; excludes the bundle
 
     private boolean blendingDisabled;
     private int blendSrcFunc = GL20.GL_SRC_ALPHA;
@@ -142,7 +144,7 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
     }
 
     @Override protected void switchTexture (Texture texture) {
-        if (tierA) {
+        if (tierA && program == null) { // a program takes its texture slot from the push constants, one texture per draw, as stock does
             // Stock flushes here, which also makes room for the draw that follows. Keep room for it instead of flushing every time.
             if (vertexIndex > vertices.length * 3 / 4 || triangleIndex > triangles.length * 3 / 4) flush();
             lastTexture = texture;
@@ -174,7 +176,8 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
         final int vertexCount = vertexIndex / VERTEX_SIZE;
 
         final GdxVkPresenter presenter = frame.presenter();
-        final long vBytes = (long)vertexCount * SpritePipelines.VERTEX_BYTES;
+        final int vertexBytes = program != null ? SpritePipelines.VERTEX_BYTES - 4 : SpritePipelines.VERTEX_BYTES; // a program has no texture slot in the vertex
+        final long vBytes = (long)vertexCount * vertexBytes;
         final long va = presenter.allocVertex(vBytes);
         final int vBlock = GdxVkPresenter.blockOf(va);
         final long vOffset = GdxVkPresenter.offsetOf(va);
@@ -184,7 +187,7 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
         int marker = 0, slot = tierA ? markerSlot[0] : 0;
         int nextChange = (tierA && markerCount > 1) ? markerVertex[1] : Integer.MAX_VALUE;
         int pos = (int)vOffset, src = 0;
-        for (int i = 0; i < vertexCount; i++, src += VERTEX_SIZE, pos += SpritePipelines.VERTEX_BYTES) {
+        for (int i = 0; i < vertexCount; i++, src += VERTEX_SIZE, pos += vertexBytes) {
             while (i >= nextChange) {
                 marker++;
                 slot = markerSlot[marker];
@@ -195,7 +198,7 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
             vOut.putInt(pos + 8, Float.floatToRawIntBits(v[src + 2]));
             vOut.putFloat(pos + 12, v[src + 3]);
             vOut.putFloat(pos + 16, v[src + 4]);
-            vOut.putInt(pos + 20, slot);
+            if (program == null) vOut.putInt(pos + 20, slot);
         }
         presenter.flushVertices(vBlock, vOffset, vBytes);
 
@@ -209,15 +212,22 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
         presenter.flushVertices(iBlock, iOffset, iBytes);
 
         final CommandStream s = frame.stream();
-        s.bindPipeline(SpritePipelines.get(frame, bundle, false, blendingDisabled, blendSrcFunc, blendDstFunc, blendSrcFuncAlpha, blendDstFuncAlpha));
-        System.arraycopy(combinedMatrix.val, 0, push, 0, 16);
-        push[16] = push[17] = push[18] = push[19] = 1f;
-        if (bundle != null) {
-            System.arraycopy(bundle.custom0, 0, push, 24, 4);
-            System.arraycopy(bundle.custom1, 0, push, 28, 4);
+        s.bindPipeline(SpritePipelines.get(frame, bundle, program, false, blendingDisabled, blendSrcFunc, blendDstFunc, blendSrcFuncAlpha, blendDstFuncAlpha));
+        if (program != null) {
+            program.setUniformMatrix("u_projTrans", combinedMatrix);
+            program.setUniformi("u_texture", 0);
+            program.prepareDraw(s, push, lastTexture.getTextureObjectHandle());
+            s.pushConstants(push);
+        } else {
+            System.arraycopy(combinedMatrix.val, 0, push, 0, 16);
+            push[16] = push[17] = push[18] = push[19] = 1f;
+            if (bundle != null) {
+                System.arraycopy(bundle.custom0, 0, push, 24, 4);
+                System.arraycopy(bundle.custom1, 0, push, 28, 4);
+            }
+            s.pushConstants(push);
+            if (!tierA) s.bindTexture(nativeTexture(lastTexture));
         }
-        s.pushConstants(push);
-        if (!tierA) s.bindTexture(nativeTexture(lastTexture));
         s.bindVertex(vBlock, vOffset);
         s.bindIndexRing(iBlock, iOffset, CommandStream.INDEX_U16);
         s.drawIndexed(indexCount, 0, 0);
@@ -311,9 +321,30 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
 
     /** Custom shading: draws after this call use the bundle's shaders. Null restores the default. Flushes what is queued first. */
     public void setShaderBundle (VulkanShaderPipelineBundle bundle) {
-        if (bundle == this.bundle) return;
+        if (bundle == this.bundle && (bundle == null || program == null)) return;
         if (drawing) flush();
         this.bundle = bundle;
+        if (bundle != null) program = null;
+    }
+
+    /** See {@link VulkanSpriteBatch#setShaderProgram}: a shader written in libGDX's GLSL; the same rules and attributes. */
+    public void setShaderProgram (VulkanShaderProgram program) {
+        if (program == this.program) return;
+        if (program != null) {
+            program.requireCompiled();
+            final String extra = SpritePipelines.unsupportedAttribute(program);
+            if (extra != null) {
+                throw new GdxRuntimeException("gdx-vulkan: the shader reads the attribute '" + extra + "', which a sprite vertex does not have (it has "
+                    + SpritePipelines.POSITION + ", " + SpritePipelines.COLOR + " and " + SpritePipelines.TEXCOORD + ")");
+            }
+        }
+        if (drawing) flush();
+        this.program = program;
+        if (program != null) bundle = null;
+    }
+
+    public VulkanShaderProgram getShaderProgram () {
+        return program;
     }
 
     public VulkanShaderPipelineBundle getShaderBundle () {

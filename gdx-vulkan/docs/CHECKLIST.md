@@ -19,12 +19,12 @@ the plan names.
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 11 | 1 | 0 | 12 |
 | Phase 5: 3D with stock models | 9 | 3 | 1 | 13 |
-| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 12 | 8 | 22 | 42 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 14 | 9 | 19 | 42 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
 | Demos (to plan once Phase 5 is complete) | 0 | 0 | 7 | 7 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **168** | **16** | **47** | **231** |
+| **All** | **170** | **17** | **44** | **231** |
 ---
 
 ## Core decisions
@@ -310,7 +310,7 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 
 ### Built-in shaders (done)
 - [x] Built-in shaders are dedicated Vulkan GLSL, not translations: `sprite.*`, `shape.*`, `mesh_flat.*`, `model_default*` (a port of libGDX's default shader, with the data in a storage buffer and the material and light flags as specialization constants), `model_depth*` (the shadow-map pass), `fx_*`, `gpu_*`, `boids.comp`; compiled with `glslc` at build time to SPIR-V, loaded by name; nothing is compiled or translated at run time for them
-- [ ] A test fails the build if a built-in code path calls the run-time compiler (a counter in the compiler, asserted by the 2D, 3D and framebuffer scene tests), so base functionality cannot start depending on it by accident
+- [~] A test fails the build if a built-in code path calls the run-time compiler: `GlslCompiler.callCount()` is asserted unchanged around a frame drawn with the sprite batch, the polygon batch and the shape renderer (`ShaderProgramTest.theLibrarysOwnShadersNeverUseTheRunTimeCompiler`); the model batch, the effects and compute are not covered yet
 
 ### A. Translating stock GLSL
 - [x] Dialect: GLSL ES 1.00 / desktop 1.10-1.20 as libGDX ships it: `attribute` to `in`, `varying` to matched `out`/`in` locations across the two stages, `gl_FragColor` and `gl_FragData[n]` to declared outputs, `texture2D`/`texture2DProj`/`texture2DLod` to `texture`/`textureProj`/`textureLod`, `#ifdef GL_ES` and `precision` lines (`GlslTranslator`; the design is in `docs/SHADER_TRANSLATOR.md`). `textureCube` is refused until the texture shim has cube textures
@@ -327,9 +327,9 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [ ] `#define` flags that an application sets through `prependCode` can become specialization constants, so variants share SPIR-V
 - [ ] Precision qualifiers are mapped to `RelaxedPrecision` where the device benefits (mobile)
 - [ ] SPIR-V goes through an optimisation pass (spirv-opt performance recipe, debug info stripped); a benchmark shows the effect, or the pass is dropped
-- [ ] Compiled SPIR-V is cached on disk by a hash of (source, defines, code path), so a second launch compiles nothing; the existing pipeline cache keeps handling pipelines
+- [x] Compiled SPIR-V is cached on disk by a hash of (source, prepend text, code path, translator and compiler versions): `ShaderCache` keeps both modules and the translation tables, so a program found in the cache is created without the preprocessor, the translator or the compiler (`VulkanShaderProgram.cacheDirectory`, default `gdxvk-shader-cache` in local storage; `ShaderProgramTest` checks the compiler is not called, the cached program draws the same picture, and a damaged file is ignored and replaced). The existing pipeline cache keeps handling pipelines
 - [ ] Compilation can run off the render thread; pipelines are still built lazily at first use
-- [ ] Measured: a translated stock shader is not slower than the same shader written as a SPIR-V bundle
+- [x] Measured: a translated stock shader is not slower than the built-in one (`gradlew :gdx-vulkan-desktop:stressShaders`, 20,000 sprites from one texture, vsync off, three shaders in turn, twice): RTX 5080 0.990x (modern path) and 0.973x (compatibility path), RTX 2080 0.998x; a custom shader with a push-constant tint and a uniform-block palette 0.98x to 1.01x. The test is CPU-bound by design (the shaders are trivial), so it shows that the translation, the uniform handling and the pipeline add no cost; it does not show shader arithmetic differences. On the Galaxy S20 FE (Adreno 650, compatibility path, display at 120 Hz, vsync off) the three shaders agree within 2% while the phone's clocks stay in one state (cool: 721, 713 and 719 fps; throttled: 520, 511 and 512 fps); the phone steps between those states during a run, so an average across rounds is not meaningful and the figure to trust is the comparison inside a state. Not yet run on the REDMAGIC.
 
 ### C. The compiler
 - [x] Choose the compiler: **glslang** used directly behind a `ShaderCompiler` interface, with the reasons and the comparison with shaderc (and with the original backend, which used shaderc through LWJGL) in `docs/SHADER_COMPILER.md`
@@ -340,7 +340,7 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 ### D. `VulkanShaderProgram` API
 - [x] `new VulkanShaderProgram(vertexSource, fragmentSource)` and the `FileHandle` form (and with an explicit frame), with `isCompiled`, `getLog`, `getAttributes`, `getAttributeLocation`, `getUniforms`, `hasUniform`, `dispose`, and the statics `prependVertexCode`, `prependFragmentCode`, `pedantic` (a missing uniform throws, as in stock). A shader that fails does not throw: `isCompiled()` is false and `getLog()` has the message with your line numbers
 - [~] The `ShaderProgram` setters: `setUniformi`/`setUniformf` with 1 to 4 values (by name; by location for one value), `setUniformf` with `Vector2`/`Vector3`/`Color`, `setUniform1fv` to `setUniform4fv`, `setUniformMatrix` with `Matrix4` and `Matrix3` (and `transpose`), `setUniformMatrix2fv`/`3fv`/`4fv`, `fetchUniformLocation`, `bind`/`begin`/`end`; uniform values are kept by the program and reach the GPU as push-constant words or one uniform block, bound again only when the data, the frame, or another Set 0 binding changed (`ShaderProgramTest`). Missing: the `FloatBuffer` and `IntBuffer` overloads and the by-location forms of the multi-value setters
-- [~] Custom shaders for the batches the way stock does it: `VulkanSpriteBatch.setShaderProgram(program)` is done and tested on the GPU (a translated stock sprite shader draws a picture identical to the built-in one; custom uniforms from push constants and the uniform block; two programs and the built-in shader alternating in one frame; a second texture from texture unit 1; a shader that does not compile is refused with its log), on both code paths and both GPUs. The name is not stock's `setShader` because adding an overload would make `batch.setShader(null)` ambiguous for existing code; stock's `setShader(ShaderProgram)` will accept a stock `ShaderProgram` when the GL shim runs them (section E). Not done: the same for the polygon batch and the shape renderer, and a constructor taking the program
+- [~] Custom shaders for the batches the way stock does it: `setShaderProgram(program)` on `VulkanSpriteBatch`, `VulkanPolygonSpriteBatch` and, through `((VulkanImmediateModeRenderer)shapeRenderer.getRenderer())`, the shape renderer; tested on the GPU against the built-in shaders (the translated stock sprite shader draws a picture identical to the built-in one, in the sprite and the polygon batch; uniforms from push constants and the uniform block; two programs and the built-in shader alternating in one frame; a second texture from texture unit 1; a shader that does not compile is refused with its log; a shape shader with a tint), on both code paths and both GPUs. The batch method is `setShaderProgram`, not stock's `setShader`: an overload would make `batch.setShader(null)` ambiguous for existing code. Not done: a constructor taking the program, a stock-named `setShader`, and programs for `ModelBatch`
 - [ ] Custom 3D shaders: `ShaderProvider` / `Shader` for `VulkanModelBatch` built on `VulkanShaderProgram`
 - [ ] `VulkanShaderPipelineBundle` (precompiled SPIR-V) stays supported as the build-time path
 

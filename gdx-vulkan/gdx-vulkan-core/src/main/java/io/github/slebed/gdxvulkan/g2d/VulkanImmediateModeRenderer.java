@@ -9,6 +9,7 @@ import io.github.slebed.gdxvulkan.CommandStream;
 import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkPipelineDesc;
 import io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle;
+import io.github.slebed.gdxvulkan.glsl.VulkanShaderProgram;
 import io.github.slebed.gdxvulkan.GdxVkPresenter;
 
 import java.nio.ByteBuffer;
@@ -36,6 +37,7 @@ public class VulkanImmediateModeRenderer implements ImmediateModeRenderer {
     private final float[] push = new float[32];
     private float colorBits = Color.WHITE_FLOAT_BITS;
     private VulkanShaderPipelineBundle bundle;
+    private VulkanShaderProgram program;
 
     /**
      * Custom shading for what this renderer draws: the bundle's shaders replace {@code shape.vert}/{@code shape.frag}. The vertex layout is the
@@ -51,6 +53,33 @@ public class VulkanImmediateModeRenderer implements ImmediateModeRenderer {
 
     public VulkanShaderPipelineBundle getShaderBundle () {
         return bundle;
+    }
+
+    /**
+     * Draws with a shader written in libGDX's GLSL, like stock's {@code ShapeRenderer(maxVertices, shader)}: it may read {@code a_position} and {@code a_color}
+     * and no texture, and it gets {@code u_projModelView} before every draw. Null restores the default. The thin-line nudge of {@code shape.vert} is not applied
+     * to a program. Reach this renderer with {@code ((VulkanImmediateModeRenderer)shapeRenderer.getRenderer())}.
+     */
+    public void setShaderProgram (VulkanShaderProgram program) {
+        if (program == this.program) return;
+        if (program != null) {
+            program.requireCompiled();
+            for (String name : program.getAttributes()) {
+                if (!name.equals("a_position") && !name.equals("a_color")) {
+                    throw new GdxRuntimeException("gdx-vulkan: the shader reads the attribute '" + name + "', which the shape renderer's vertex does not have (it has a_position and a_color)");
+                }
+            }
+            for (io.github.slebed.gdxvulkan.glsl.GlslTranslator.Sampler sampler : program.translation().samplers) {
+                if (sampler.active) throw new GdxRuntimeException("gdx-vulkan: the shader samples the texture '" + sampler.name + "'; the shape renderer draws without textures");
+            }
+        }
+        flush();
+        this.program = program;
+        if (program != null) bundle = null;
+    }
+
+    public VulkanShaderProgram getShaderProgram () {
+        return program;
     }
 
     public VulkanImmediateModeRenderer (GdxVkFrame frame, int maxVertices) {
@@ -112,6 +141,15 @@ public class VulkanImmediateModeRenderer implements ImmediateModeRenderer {
 
         final CommandStream s = frame.stream();
         s.bindPipeline(pipeline());
+        if (program != null) {
+            program.setUniformMatrix("u_projModelView", projModelView);
+            program.prepareDraw(s, push, 0);
+            s.pushConstants(push);
+            s.bindVertex(block, offset);
+            s.draw(numVertices, 0);
+            numVertices = 0;
+            return;
+        }
         System.arraycopy(projModelView.val, 0, push, 0, 16);
         push[16] = push[17] = push[18] = push[19] = 1f;
         // Lines and points: move them 1/256 pixel in GL's downward direction so a primitive on a pixel boundary lands on the pixel GL
@@ -146,6 +184,13 @@ public class VulkanImmediateModeRenderer implements ImmediateModeRenderer {
             d.dstColor = f[1];
             d.srcAlpha = f[2];
             d.dstAlpha = f[3];
+        }
+        if (program != null) {
+            d.attributes().clear(); // the program decides where each attribute goes
+            final int position = program.getAttributeLocation("a_position"), color = program.getAttributeLocation("a_color");
+            if (position >= 0) d.attribute(position, GdxVkPipelineDesc.FORMAT_R32G32B32_SFLOAT, 0);
+            if (color >= 0) d.attribute(color, GdxVkPipelineDesc.FORMAT_R8G8B8A8_UNORM, 12);
+            return program.pipeline(key, d);
         }
         if (bundle != null) {
             d.colorOutputs = bundle.colorOutputs();

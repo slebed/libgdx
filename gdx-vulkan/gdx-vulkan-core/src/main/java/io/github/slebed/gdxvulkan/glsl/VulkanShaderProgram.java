@@ -1,8 +1,10 @@
 package io.github.slebed.gdxvulkan.glsl;
 
+import java.io.File;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Matrix3;
@@ -40,6 +42,36 @@ public class VulkanShaderProgram implements Disposable {
     /** When true (the default, as in stock) setting a uniform the shader does not read throws; when false it is ignored. */
     public static boolean pedantic = true;
 
+    /**
+     * Where compiled programs are kept so the next launch does not translate or compile them (see {@code ShaderCache}). The default is the
+     * {@code gdxvk-shader-cache} folder in the application's local storage ({@code Gdx.files.local}); set it to another folder, or to null to turn the cache off.
+     * Set it before creating programs.
+     */
+    public static File cacheDirectory;
+    private static boolean cacheDirectoryChosen;
+
+    /** Chooses the cache folder explicitly (null: no cache) and stops the default from being looked up. */
+    public static void setCacheDirectory (File directory) {
+        cacheDirectory = directory;
+        cacheDirectoryChosen = true;
+    }
+    /** How many programs were created from the cache instead of being compiled (for tests and diagnostics). */
+    public static int cacheHits;
+
+    private static File cacheDirectory () {
+        if (!cacheDirectoryChosen) {
+            cacheDirectoryChosen = true;
+            if (cacheDirectory == null && Gdx.files != null) {
+                try {
+                    cacheDirectory = Gdx.files.local("gdxvk-shader-cache").file();
+                } catch (RuntimeException e) {
+                    cacheDirectory = null; // a files implementation without a local file
+                }
+            }
+        }
+        return cacheDirectory;
+    }
+
     private static int nextId;
 
     private final int id = nextId++;
@@ -74,7 +106,16 @@ public class VulkanShaderProgram implements Disposable {
         byte[] vert = null, frag = null;
         String message = "";
         boolean ok = false;
-        try {
+        final File cache = cacheDirectory();
+        final String cacheKey = cache == null ? null : ShaderCache.key(frame.isTierA(), prependVertexCode, vertexShader, prependFragmentCode, fragmentShader);
+        final ShaderCache.Entry cached = cache == null ? null : ShaderCache.load(cache, cacheKey);
+        if (cached != null) {
+            cacheHits++;
+            translation = cached.translation;
+            vert = cached.vertex;
+            frag = cached.fragment;
+            ok = true;
+        } else try {
             translation = GlslTranslator.translate("program" + id, vertexShader, fragmentShader, prependVertexCode, prependFragmentCode, frame.isTierA());
             final GlslCompiler.Result v = GlslCompiler.compile(GlslCompiler.Stage.VERTEX, "vertex shader", translation.vertex);
             final GlslCompiler.Result f = GlslCompiler.compile(GlslCompiler.Stage.FRAGMENT, "fragment shader", translation.fragment);
@@ -83,6 +124,7 @@ public class VulkanShaderProgram implements Disposable {
                 vert = bytes(v.spirv);
                 frag = bytes(f.spirv);
                 ok = true;
+                if (cache != null) ShaderCache.save(cache, cacheKey, translation, vert, frag);
             }
         } catch (GlslTranslationException e) {
             message = e.getMessage() + "\n";

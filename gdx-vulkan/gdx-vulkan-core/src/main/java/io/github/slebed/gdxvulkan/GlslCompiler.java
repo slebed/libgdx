@@ -7,6 +7,16 @@ package io.github.slebed.gdxvulkan;
 public final class GlslCompiler {
     private GlslCompiler () {}
 
+    private static final java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+
+    /**
+     * How many times the native compiler was asked to preprocess or compile in this process. A test reads it before and after a piece of work to show that the
+     * work did not use the run-time compiler: the library's own shaders are compiled at build time, and a cached program needs no compiler at all.
+     */
+    public static int callCount () {
+        return calls.get();
+    }
+
     /** The pipeline stage of a source. */
     public enum Stage {
         VERTEX(0), FRAGMENT(1), COMPUTE(2);

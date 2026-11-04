@@ -18,6 +18,9 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.Texture.TextureFilter;
+import com.badlogic.gdx.graphics.g2d.PolygonRegion;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.math.EarClippingTriangulator;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
 import io.github.slebed.gdxvulkan.GdxVkConfig;
@@ -25,6 +28,9 @@ import io.github.slebed.gdxvulkan.GdxVkContext;
 import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkPresenter;
 import io.github.slebed.gdxvulkan.VulkanCaps;
+import io.github.slebed.gdxvulkan.g2d.VulkanImmediateModeRenderer;
+import io.github.slebed.gdxvulkan.g2d.VulkanPolygonSpriteBatch;
+import io.github.slebed.gdxvulkan.g2d.VulkanShapeRenderer;
 import io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch;
 import io.github.slebed.gdxvulkan.gl.VulkanGL20;
 import io.github.slebed.gdxvulkan.glsl.VulkanShaderProgram;
@@ -277,5 +283,160 @@ class ShaderProgramTest {
         } finally {
             VulkanShaderProgram.pedantic = was;
         }
+    }
+
+    /** A frame drawn by {@code draw}, read back; a failure inside closes the frame so the error that is reported is the first one. */
+    private byte[] renderRaw (Runnable draw) {
+        GLFW.glfwPollEvents();
+        assertTrue(frame.begin(0, 0, 0, 1));
+        gl.glViewport(0, 0, W, H);
+        try {
+            draw.run();
+            return frame.endAndCapture();
+        } catch (RuntimeException | Error e) {
+            if (frame.isOpen()) frame.end();
+            throw e;
+        }
+    }
+
+    @Test void aProgramIsReadFromTheCacheTheSecondTimeWithoutTheCompiler () throws Exception {
+        final java.io.File dir = java.nio.file.Files.createTempDirectory("gdxvk-shader-cache").toFile();
+        VulkanShaderProgram.setCacheDirectory(dir);
+        try {
+            final int hits = VulkanShaderProgram.cacheHits;
+            final VulkanShaderProgram first = new VulkanShaderProgram(frame, SPRITE_VERT, CUSTOM_FRAG);
+            assertTrue(first.isCompiled(), first.getLog());
+            assertEquals(hits, VulkanShaderProgram.cacheHits, "the first one was compiled");
+            assertEquals(1, dir.listFiles((d, name) -> name.endsWith(".spvprog")).length, "and saved");
+
+            final int calls = io.github.slebed.gdxvulkan.GlslCompiler.callCount();
+            final VulkanShaderProgram second = new VulkanShaderProgram(frame, SPRITE_VERT, CUSTOM_FRAG);
+            assertTrue(second.isCompiled(), second.getLog());
+            assertEquals(hits + 1, VulkanShaderProgram.cacheHits, "the second one came from the cache");
+            assertEquals(calls, io.github.slebed.gdxvulkan.GlslCompiler.callCount(), "without a call to the compiler");
+            assertEquals(first.translation().pushBytes, second.translation().pushBytes);
+            assertEquals(first.translation().blockBytes, second.translation().blockBytes);
+            assertEquals(first.getAttributeLocation("a_color"), second.getAttributeLocation("a_color"));
+            assertEquals(first.translation().uniform("u_palette").offset, second.translation().uniform("u_palette").offset);
+
+            // The cached program draws like the compiled one.
+            final Texture white = solid(1, 1, 1);
+            final byte[][] pictures = new byte[2][];
+            final VulkanShaderProgram[] both = {first, second};
+            for (int i = 0; i < 2; i++) {
+                final VulkanShaderProgram p = both[i];
+                p.setUniformf("u_tint", 1f, 0.5f, 0.25f, 1f);
+                p.setUniform4fv("u_palette", new float[] {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, 0, 16);
+                p.setUniformi("u_index", 2);
+                p.setUniformi("u_invert", 0);
+                pictures[i] = render(b -> {
+                    b.setShaderProgram(p);
+                    b.begin();
+                    b.draw(white, 0, 0, S, S);
+                    b.end();
+                });
+            }
+            assertTrue(Arrays.equals(pictures[0], pictures[1]), "the cached program draws the same picture");
+            assertPx(pictures[1], 32, 32, 255, 128, 64, "the cached program's uniforms work");
+            white.dispose();
+
+            // A different source is a different entry; a damaged file is ignored and replaced.
+            final VulkanShaderProgram other = new VulkanShaderProgram(frame, SPRITE_VERT, SPRITE_FRAG);
+            assertTrue(other.isCompiled(), other.getLog());
+            assertEquals(2, dir.listFiles((d, name) -> name.endsWith(".spvprog")).length);
+            for (java.io.File f : dir.listFiles((d, name) -> name.endsWith(".spvprog"))) {
+                java.nio.file.Files.write(f.toPath(), new byte[] {1, 2, 3});
+            }
+            final int hitsBefore = VulkanShaderProgram.cacheHits;
+            final VulkanShaderProgram healed = new VulkanShaderProgram(frame, SPRITE_VERT, CUSTOM_FRAG);
+            assertTrue(healed.isCompiled(), healed.getLog());
+            assertEquals(hitsBefore, VulkanShaderProgram.cacheHits, "a damaged file is not a hit");
+        } finally {
+            VulkanShaderProgram.setCacheDirectory(null);
+            final java.io.File[] files = dir.listFiles();
+            if (files != null) for (java.io.File f : files) f.delete();
+            dir.delete();
+        }
+    }
+
+    @Test void theLibrarysOwnShadersNeverUseTheRunTimeCompiler () {
+        final Texture t = solid(0.5f, 0.5f, 0.5f);
+        final float[] square = {0, 0, 16, 0, 16, 16, 0, 16};
+        final PolygonRegion region = new PolygonRegion(new TextureRegion(t), square, new EarClippingTriangulator().computeTriangles(square).toArray());
+        final int calls = io.github.slebed.gdxvulkan.GlslCompiler.callCount();
+        renderRaw(() -> {
+            final VulkanSpriteBatch sprites = new VulkanSpriteBatch(frame);
+            sprites.getProjectionMatrix().setToOrtho2D(0, 0, S, S);
+            sprites.begin();
+            sprites.draw(t, 0, 0, 16, 16);
+            sprites.end();
+            sprites.dispose();
+            final VulkanPolygonSpriteBatch polygons = new VulkanPolygonSpriteBatch(frame);
+            polygons.getProjectionMatrix().setToOrtho2D(0, 0, S, S);
+            polygons.begin();
+            polygons.draw(region, 20, 20);
+            polygons.end();
+            polygons.dispose();
+            final VulkanShapeRenderer shapes = new VulkanShapeRenderer(frame);
+            shapes.getProjectionMatrix().setToOrtho2D(0, 0, S, S);
+            shapes.begin(VulkanShapeRenderer.ShapeType.Line);
+            shapes.rect(40, 40, 10, 10);
+            shapes.end();
+            shapes.dispose();
+        });
+        assertEquals(calls, io.github.slebed.gdxvulkan.GlslCompiler.callCount(), "the batches and the shape renderer draw with shaders compiled at build time");
+        t.dispose();
+    }
+
+    @Test void thePolygonBatchTakesAProgramToo () {
+        final VulkanShaderProgram program = new VulkanShaderProgram(frame, SPRITE_VERT, SPRITE_FRAG);
+        assertTrue(program.isCompiled(), program.getLog());
+        final Texture blue = solid(0.25f, 0.5f, 1f);
+        final float[] square = {0, 0, 32, 0, 32, 32, 0, 32};
+        final PolygonRegion region = new PolygonRegion(new TextureRegion(blue), square, new EarClippingTriangulator().computeTriangles(square).toArray());
+        final boolean[] withProgram = {false};
+        final Runnable draw = () -> {
+            final VulkanPolygonSpriteBatch polygons = new VulkanPolygonSpriteBatch(frame);
+            polygons.getProjectionMatrix().setToOrtho2D(0, 0, S, S);
+            if (withProgram[0]) polygons.setShaderProgram(program);
+            polygons.begin();
+            polygons.draw(region, 8, 8);
+            polygons.end();
+            polygons.dispose();
+        };
+        final byte[] builtIn = renderRaw(draw);
+        withProgram[0] = true;
+        final byte[] translated = renderRaw(draw);
+        assertTrue(Arrays.equals(builtIn, translated), "the polygon batch draws the same picture with the translated stock shader");
+        assertPx(translated, 24, 40, 64, 128, 255, "the polygon's colour");
+        blue.dispose();
+    }
+
+    @Test void theShapeRendererTakesAProgramToo () {
+        final String vert = "attribute vec4 a_position;\nattribute vec4 a_color;\nuniform mat4 u_projModelView;\nvarying vec4 v_col;\n"
+            + "void main() {\n   gl_Position = u_projModelView * a_position;\n   v_col = a_color;\n   v_col.a *= 255.0 / 254.0;\n   gl_PointSize = 1.0;\n}\n";
+        final String frag = "#ifdef GL_ES\nprecision mediump float;\n#endif\nvarying vec4 v_col;\nuniform vec4 u_tint;\n"
+            + "void main() {\n   gl_FragColor = v_col * u_tint;\n}\n";
+        final VulkanShaderProgram program = new VulkanShaderProgram(frame, vert, frag);
+        assertTrue(program.isCompiled(), program.getLog());
+        program.setUniformf("u_tint", 0.5f, 1f, 1f, 1f);
+        final byte[] f = renderRaw(() -> {
+            final VulkanShapeRenderer shapes = new VulkanShapeRenderer(frame);
+            shapes.getProjectionMatrix().setToOrtho2D(0, 0, S, S);
+            final VulkanImmediateModeRenderer renderer = (VulkanImmediateModeRenderer)shapes.getRenderer();
+            renderer.setShaderProgram(program);
+            shapes.begin(VulkanShapeRenderer.ShapeType.Filled);
+            shapes.setColor(1f, 0.5f, 0.25f, 1f);
+            shapes.rect(8, 8, 32, 32);
+            shapes.end();
+            renderer.setShaderProgram(null);
+            shapes.begin(VulkanShapeRenderer.ShapeType.Filled);
+            shapes.setColor(0f, 1f, 0f, 1f);
+            shapes.rect(44, 44, 16, 16);
+            shapes.end();
+            shapes.dispose();
+        });
+        assertPx(f, 24, 40, 128, 128, 64, "the shape, tinted by the program (0.5, 1, 1) on (1, 0.5, 0.25)");
+        assertPx(f, 52, 12, 0, 255, 0, "the built-in shader draws after the program is removed");
     }
 }

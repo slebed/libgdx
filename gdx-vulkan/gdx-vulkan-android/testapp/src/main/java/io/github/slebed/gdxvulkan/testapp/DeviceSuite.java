@@ -22,6 +22,7 @@ import io.github.slebed.gdxvulkan.GdxVkPresenter;
 import io.github.slebed.gdxvulkan.VulkanCaps;
 import io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle;
 import io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch;
+import io.github.slebed.gdxvulkan.glsl.VulkanShaderProgram;
 import io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatchInstanced;
 import io.github.slebed.gdxvulkan.desktop.Gate3Scenes;
 import io.github.slebed.gdxvulkan.desktop.Gate5Scenes;
@@ -70,6 +71,9 @@ final class DeviceSuite {
         frame = new GdxVkFrame(ctx, presenter, gl);
     }
 
+    /** When set (intent extra {@code only}, comma separated), only checks whose name contains one of the words run: for measuring one thing without the rest. */
+    static String[] only;
+
     static void run(android.content.Context app, GdxVkContext ctx, GdxVkPresenter presenter, int soakSeconds, int stressSeconds) {
         DeviceSuite s = new DeviceSuite(app, ctx, presenter);
         TestLog.i(TAG, "DEVICESUITE tier " + ctx.caps().tier + " on " + ctx.caps().deviceName);
@@ -95,6 +99,7 @@ final class DeviceSuite {
         s.check("soakTextureChurn", () -> s.soak(soakSeconds));
         s.check("stress2Single", () -> s.stress(1, stressSeconds));
         s.check("stress2Textures128", () -> s.stress(128, stressSeconds));
+        s.check("shaderProgramsAgainstBuiltIn", () -> s.shaderPrograms(stressSeconds));
         s.check("instancedMillionSprites", () -> s.instancedMillion(stressSeconds));
         s.check("stress5Instances50k", () -> s.stress5(50_000, 64, stressSeconds));
         s.check("stress5Instances250k", () -> s.stress5(250_000, 500, stressSeconds));
@@ -368,6 +373,11 @@ final class DeviceSuite {
     }
 
     private void check(String name, Check c) {
+        if (only != null) {
+            boolean wanted = false;
+            for (String w : only) wanted |= name.toLowerCase().contains(w.toLowerCase());
+            if (!wanted) return;
+        }
         try {
             c.run();
             passed++;
@@ -1120,6 +1130,80 @@ final class DeviceSuite {
         b.dispose();
         for (Texture t : tex) t.dispose();
         require(fps > 5, "stress workload too slow: " + fps + " fps");
+    }
+
+    /**
+     * Translated shaders against the built-in one on this device: 20,000 sprites from one texture drawn with the batch's own shader, with libGDX's sprite shader
+     * translated at run time, and with a custom shader (a tint in the push constants, a palette in the uniform block), four times each in turn, the order alternating.
+     */
+    private void shaderPrograms(int seconds) {
+        final String vert = "attribute vec4 a_position;\nattribute vec4 a_color;\nattribute vec2 a_texCoord0;\nuniform mat4 u_projTrans;\n"
+            + "varying vec4 v_color;\nvarying vec2 v_texCoords;\nvoid main() {\n   v_color = a_color;\n   v_color.a = v_color.a * (255.0/254.0);\n"
+            + "   v_texCoords = a_texCoord0;\n   gl_Position =  u_projTrans * a_position;\n}\n";
+        final String fragStock = "#ifdef GL_ES\nprecision mediump float;\n#endif\nvarying vec4 v_color;\nvarying vec2 v_texCoords;\n"
+            + "uniform sampler2D u_texture;\nvoid main() {\n  gl_FragColor = v_color * texture2D(u_texture, v_texCoords);\n}\n";
+        final String fragCustom = "#ifdef GL_ES\nprecision mediump float;\n#endif\nvarying vec4 v_color;\nvarying vec2 v_texCoords;\n"
+            + "uniform sampler2D u_texture;\nuniform vec4 u_tint;\nuniform vec4 u_palette[4];\nuniform int u_index;\n"
+            + "void main() {\n  gl_FragColor = v_color * texture2D(u_texture, v_texCoords) * u_tint * u_palette[u_index];\n}\n";
+        final VulkanShaderProgram stock = new VulkanShaderProgram(frame, vert, fragStock);
+        final VulkanShaderProgram custom = new VulkanShaderProgram(frame, vert, fragCustom);
+        require(stock.isCompiled() && custom.isCompiled(), "the shaders translate and compile on this device: " + stock.getLog() + custom.getLog());
+        custom.setUniformf("u_tint", 1f, 1f, 1f, 1f);
+        custom.setUniform4fv("u_palette", new float[] {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, 0, 16);
+        custom.setUniformi("u_index", 1);
+
+        final int sprites = 20_000, size = 24, each = Math.max(2, seconds / 2);
+        Pixmap pm = new Pixmap(16, 16, Pixmap.Format.RGBA8888);
+        pm.setColor(0.9f, 0.7f, 0.4f, 1f);
+        pm.fill();
+        final Texture texture = new Texture(pm);
+        pm.dispose();
+        final Random r = new Random(7);
+        final float[] x = new float[sprites], y = new float[sprites];
+        for (int i = 0; i < sprites; i++) {
+            x[i] = r.nextFloat() * (W - size);
+            y[i] = r.nextFloat() * (H - size);
+        }
+        final VulkanSpriteBatch b = new VulkanSpriteBatch(frame, 8191);
+        final VulkanShaderProgram[] programs = {null, stock, custom};
+        final String[] names = {"built-in shader", "translated stock shader", "translated custom shader"};
+        final double[] sum = new double[3];
+        final int rounds = 4;
+        for (int round = 0; round < rounds; round++) {
+            for (int k = 0; k < 3; k++) {
+                // The order alternates, so a phone that warms up and slows down does not favour whichever shader runs first.
+                final int c = round % 2 == 0 ? k : 2 - k;
+                b.setShaderProgram(programs[c]);
+                long warmEnd = System.nanoTime() + 1_000_000_000L, end = 0, measureStart = 0;
+                long frames = 0;
+                while (true) {
+                    if (!frame.begin(0.1f, 0.1f, 0.1f, 1f)) continue;
+                    b.getProjectionMatrix().setToOrtho2D(0, 0, W, H);
+                    b.begin();
+                    for (int i = 0; i < sprites; i++) b.draw(texture, x[i], y[i], size, size);
+                    b.end();
+                    frame.end();
+                    final long now = System.nanoTime();
+                    if (measureStart == 0) {
+                        if (now >= warmEnd) {
+                            measureStart = now;
+                            end = now + each * 1_000_000_000L;
+                        }
+                    } else {
+                        frames++;
+                        if (now >= end) break;
+                    }
+                }
+                final double fps = frames / ((System.nanoTime() - measureStart) / 1e9);
+                sum[c] += fps / rounds;
+                TestLog.i(TAG, String.format("shader programs round %d: %s %.1f fps", round + 1, names[c], fps));
+            }
+        }
+        TestLog.i(TAG, String.format("shader programs at %dx%d, %d sprites (Tier %s, vsync-capped by the display if near its refresh rate): built-in %.1f fps, "
+            + "translated stock %.1f fps (%.3fx), translated custom %.1f fps (%.3fx)", W, H, sprites, ctx.caps().tier, sum[0], sum[1], sum[1] / sum[0], sum[2], sum[2] / sum[0]));
+        b.dispose();
+        texture.dispose();
+        require(sum[1] >= sum[0] * 0.85, "the translated stock shader is much slower than the built-in one: " + sum[1] + " against " + sum[0] + " fps");
     }
 
     // ------------------------------------------------------------------------------------------------------------------- Gdx

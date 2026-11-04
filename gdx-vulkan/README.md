@@ -32,12 +32,12 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 |---|---|
 | macOS and iOS | needs a Mac to build and test; not started |
 | Wayland | X11 only on Linux |
-| Custom GLSL | `VulkanShaderProgram` runs your libGDX GLSL with `VulkanSpriteBatch` today. **Not yet:** the polygon batch, the shape renderer and `ModelBatch` shaders, and the stock `ShaderProgram` class itself (tracked in `docs/CHECKLIST.md`, "Phase 5b") |
+| Custom GLSL | `VulkanShaderProgram` runs your libGDX GLSL with the sprite batch, the polygon batch and the shape renderer, and caches the compiled result on disk. **Not yet:** `ModelBatch` shaders, and the stock `ShaderProgram` class itself (tracked in `docs/CHECKLIST.md`, "Phase 5b") |
 | Direct OpenGL drawing | `glDrawArrays`, `glUseProgram`, `Mesh.render(ShaderProgram)` and similar throw an exception that says which Vulkan class to use |
 | Spot lights, point-light shadows | libGDX's own default shader has neither |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (168 of 231 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (170 of 231 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). **Known problem:** on the Adreno 650 everything works except 3D models
@@ -56,7 +56,7 @@ table says otherwise. More devices will be added over time: see [Adding a device
 | PC-5080 | Desktop PC | Windows 10 Pro 22H2 | NVIDIA GeForce RTX 5080 (driver 610.62) | Intel Core i7-6900K, 128 GB RAM | 1.4 (1.4.341) | modern (forced to the compatibility path for one row) |
 | PC-2080 | the same desktop PC | Windows 10 Pro 22H2 | NVIDIA GeForce RTX 2080 (driver 610.62) | Intel Core i7-6900K, 128 GB RAM | 1.4 (1.4.341) | modern |
 | RM-11P | REDMAGIC Pro 11 (NX809J) | Android 16 | Qualcomm Adreno 840 | Qualcomm Snapdragon (model not recorded) | 1.4 | modern, and compatibility when forced |
-| S20-FE | Samsung Galaxy S20 FE 5G (SM-G781W) | Android 13 | Qualcomm Adreno 650 | Snapdragon 865 (SM8250) | 1.1 (1.1.128) | compatibility only (3D models do not run yet: see Known limitations) |
+| S20-FE | Samsung Galaxy S20 FE 5G (SM-G781W), display set to 120 Hz | Android 13 | Qualcomm Adreno 650 | Snapdragon 865 (SM8250) | 1.1 (1.1.128) | compatibility only (3D models do not run yet: see Known limitations) |
 | CI | GitHub Actions runner | Ubuntu 24.04 | lavapipe (software, Mesa 25.2) | | 1.3 or newer | modern and compatibility; used for correctness, not speed |
 
 The modern path needs a Vulkan 1.3 driver; the compatibility path needs Vulkan 1.1 and is slower with many textures. The library picks the best one the device
@@ -71,6 +71,7 @@ supports. Stock OpenGL runs on the display GPU, so on the two-GPU PC only PC-508
 | T3 | **1,000,000 sprites** moved every frame by a compute shader | how much the GPU can do on its own; stock libGDX cannot run it |
 | T4 | **250,000 lit 3D meshes** moved by a compute shader, culled on the GPU and drawn with one indirect call, with **500 point lights**, 1280x720 on the PC and full screen on a phone | the GPU-driven path; stock libGDX cannot run it |
 | T5 | T4 at a mobile load: 50,000 meshes and 64 lights | the same on phone-sized work |
+| T6 | T1 drawn with **libGDX's own sprite shader, translated at run time** (`VulkanShaderProgram`), against the batch's built-in shader | what a game's own shader costs compared with a built-in one |
 
 ### Results
 
@@ -80,10 +81,10 @@ Higher is better. "Stock" is libGDX 1.14.2 on OpenGL; a dash means the test has 
 |---|---|---|---|---|
 | T1 one texture | PC-5080 | 1,064 fps | 1,306 fps | 1.2x |
 | T1 one texture | RM-11P | not run | 548 fps (modern), 1,428 fps (compatibility) | |
-| T1 one texture | S20-FE | not run | 59 fps (held at the display's refresh rate) | |
+| T1 one texture | S20-FE (120 Hz, vsync off) | not run | 717 fps | |
 | T2 128 textures | PC-5080 | 17.5 fps | 423 fps (modern), 61-70 fps (compatibility) | **24x**, 3.5-4x |
 | T2 128 textures | RM-11P | not run | 38 fps (modern), 8.6 fps (compatibility) | |
-| T2 128 textures | S20-FE | not run | 11 fps (compatibility) | |
+| T2 128 textures | S20-FE (120 Hz, vsync off) | not run | 11.6 fps (compatibility) | |
 | T3 1M sprites by compute | PC-5080 | - | 1,879 fps | |
 | T3 1M sprites by compute | PC-2080 | - | 722 fps | |
 | T3 1M sprites by compute | RM-11P | - | 208-225 fps | |
@@ -93,6 +94,9 @@ Higher is better. "Stock" is libGDX 1.14.2 on OpenGL; a dash means the test has 
 | T4 250,000 meshes, 500 lights | S20-FE | - | 7.5 fps | |
 | T5 50,000 meshes, 64 lights | RM-11P | - | 781 fps | |
 | T5 50,000 meshes, 64 lights | S20-FE | - | held at 59 fps by the display (a faster figure was not measured) | |
+| T6 translated stock sprite shader | PC-5080 | built-in shader 1,332 fps (modern path), 1,323 fps (compatibility) | 1,319 fps (modern), 1,288 fps (compatibility) | 0.99x, 0.97x |
+| T6 translated stock sprite shader | PC-2080 | built-in shader 1,275 fps | 1,273 fps | 1.00x |
+| T6 translated stock sprite shader | S20-FE (120 Hz, vsync off) | built-in shader 721 fps (cool), 518 fps (throttled) | 713 fps (cool), 511 fps (throttled) | 0.99x in either state |
 
 Two more results that are not about a single device:
 - **Java layer:** recording 100,000 draws through the Java API costs 1.0 to 1.3 times a hand-written C++ loop on both PCs and the phones, and the 3D benchmark
@@ -213,7 +217,7 @@ Vulkan context yourself (a test, a tool), pass the frame explicitly: `new Vulkan
 | `ModelBatch` | `VulkanModelBatch` | same `begin / render(instances, environment) / end` |
 | `Stage` | `VulkanStage` | the stock `Stage` with a `VulkanSpriteBatch`; same constructors |
 | `Texture`, `Pixmap`, `TextureAtlas`, `FrameBuffer`, `Mesh`, `BitmapFont`, `Skin`, `AssetManager`, `Model`, `Environment`, `Camera` and the Scene2D actors | **unchanged** | these run on the shim as they are |
-| `ShaderProgram` (GLSL source) | `VulkanShaderProgram` | your libGDX GLSL as it is (`attribute`, `varying`, `uniform`, `gl_FragColor`, `texture2D`), translated and compiled when the program is created; same constructors and `setUniform...` calls; give it to a batch with `setShaderProgram(program)` (sprite batch so far). Uniform arrays, `bool`, `int`, several textures (modern path) and `prependVertexCode` work; structs, cube maps and more than one texture on a Vulkan 1.1 driver are refused with a message |
+| `ShaderProgram` (GLSL source) | `VulkanShaderProgram` | your libGDX GLSL as it is (`attribute`, `varying`, `uniform`, `gl_FragColor`, `texture2D`), translated and compiled when the program is created; same constructors and `setUniform...` calls; give it to a batch with `setShaderProgram(program)` (sprite batch, polygon batch; the shape renderer through `getRenderer()`). Uniform arrays, `bool`, `int`, several textures (modern path) and `prependVertexCode` work; structs, cube maps and more than one texture on a Vulkan 1.1 driver are refused with a message |
 | `Gdx.gl.glDrawArrays`, `glUseProgram`, ... | not supported | use the batches, or a compute shader |
 
 Rules that carry over from stock libGDX: dispose textures and batches yourself; do not dispose a texture between drawing with it and the batch's `end()`.

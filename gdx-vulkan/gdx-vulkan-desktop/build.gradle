@@ -142,6 +142,19 @@ tasks.register('stress5', JavaExec) {
     System.properties.each { k, v -> if (k.toString().startsWith('gdxvulkan.')) systemProperty k.toString(), v.toString() }
 }
 
+// Translated shaders against the built-in one: 20,000 sprites, the batch's own shader, libGDX's sprite shader translated at run time, and a custom shader.
+// Fails when the translated stock shader is more than 5% slower; -Dgdxvulkan.stressShaders.report=true never fails. -Dgdxvulkan.device=N picks the GPU.
+tasks.register('stressShaders', JavaExec) {
+    description = 'Translated shaders (VulkanShaderProgram) against the batches built-in shaders.'
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.github.slebed.gdxvulkan.desktop.StressShadersMain'
+    dependsOn 'testClasses', ':gdx-vulkan-core:buildNatives'
+    systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
+    systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'false')
+    System.properties.each { k, v -> if (k.toString().startsWith('gdxvulkan.')) systemProperty k.toString(), v.toString() }
+}
+
 // Stress test 3 (plan, Phase 3): recording 100,000 draws as a plain C++ loop (the floor) against replaying them from Java through the
 // command stream. Pass: <= 1.3x the floor. -Dgdxvulkan.device=N, -Dgdxvulkan.forceTierB=true, -Dgdxvulkan.stress3.report=true.
 tasks.register('stress3', JavaExec) {
