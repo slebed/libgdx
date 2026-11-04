@@ -1,0 +1,92 @@
+#version 430
+// The boids simulation of the OpenGL demo: the same algorithm as gdx-vulkan's boids.comp, written for stock libGDX (GL 4.3 compute through Gdx.gl31).
+// Three dispatches per frame, in order, each with u_mode:
+//   0  clear the grid (one invocation per uint of it)
+//   1  every boid adds its position and velocity to its cell (fixed point, atomics)
+//   2  every boid steers toward its cell's centre (cohesion), toward its average velocity (alignment) and away from a crowded cell (separation),
+//      swirls around the vertical axis and is pushed back from the edge of the volume, then moves
+// A boid is 12 uints: {x, y, z, scale}, {quaternion x, y, z, w}, {vx, vy, vz, spare}. A grid cell is 8 uints: {count, sum position x, y, z, sum velocity x, y, z, spare}.
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) buffer Boids { uint b[]; };
+layout(std430, binding = 1) buffer Grid { uint g[]; };
+
+uniform int u_mode;
+uniform int u_count;
+uniform float u_dt;
+uniform float u_half;
+uniform float u_maxSpeed;
+uniform vec4 u_params; // cohesion, alignment, separation, swirl
+
+const int GRID = 32;
+const float FIX = 256.0;
+
+float f(uint i) {
+    return uintBitsToFloat(b[i]);
+}
+
+void put(uint i, float v) {
+    b[i] = floatBitsToUint(v);
+}
+
+uint cellOf(vec3 p) {
+    const ivec3 c = clamp(ivec3((p + u_half) / (2.0 * u_half) * float(GRID)), ivec3(0), ivec3(GRID - 1));
+    return uint(c.x + GRID * (c.y + GRID * c.z));
+}
+
+void main() {
+    const uint i = gl_GlobalInvocationID.x;
+    if (u_mode == 0) {
+        if (i < uint(GRID * GRID * GRID * 8)) g[i] = 0u;
+        return;
+    }
+    if (i >= uint(u_count)) return;
+    const uint base = i * 12u;
+    vec3 p = vec3(f(base), f(base + 1u), f(base + 2u));
+    vec3 v = vec3(f(base + 8u), f(base + 9u), f(base + 10u));
+    const uint cell = cellOf(p) * 8u;
+
+    if (u_mode == 1) {
+        atomicAdd(g[cell], 1u);
+        atomicAdd(g[cell + 1u], uint(int(p.x * FIX)));
+        atomicAdd(g[cell + 2u], uint(int(p.y * FIX)));
+        atomicAdd(g[cell + 3u], uint(int(p.z * FIX)));
+        atomicAdd(g[cell + 4u], uint(int(v.x * FIX)));
+        atomicAdd(g[cell + 5u], uint(int(v.y * FIX)));
+        atomicAdd(g[cell + 6u], uint(int(v.z * FIX)));
+        return;
+    }
+
+    const float n = float(g[cell]);
+    vec3 steer = vec3(0.0);
+    if (n > 1.0) {
+        const vec3 centre = vec3(int(g[cell + 1u]), int(g[cell + 2u]), int(g[cell + 3u])) / (FIX * n);
+        const vec3 avgVel = vec3(int(g[cell + 4u]), int(g[cell + 5u]), int(g[cell + 6u])) / (FIX * n);
+        const float crowd = clamp((n - 6.0) / 10.0, 0.0, 1.0);
+        steer += (centre - p) * u_params.x + (avgVel - v) * u_params.y + (p - centre) * u_params.z * (0.2 + crowd);
+    }
+    steer += vec3(-p.z, 0.0, p.x) * u_params.w / (length(p.xz) + 10.0);
+    const float r = length(p);
+    if (r > 0.8 * u_half) steer -= p / r * (r - 0.8 * u_half) * 0.5;
+
+    v += steer * u_dt;
+    const float speed = length(v);
+    if (speed > 1e-4) v *= clamp(speed, 0.4 * u_maxSpeed, u_maxSpeed) / speed;
+    else v = vec3(0.0, 0.0, u_maxSpeed);
+    p += v * u_dt;
+
+    put(base, p.x);
+    put(base + 1u, p.y);
+    put(base + 2u, p.z);
+    put(base + 8u, v.x);
+    put(base + 9u, v.y);
+    put(base + 10u, v.z);
+    // The rotation taking +Z to the heading.
+    const vec3 dir = normalize(v);
+    vec4 q = vec4(cross(vec3(0.0, 0.0, 1.0), dir), 1.0 + dir.z);
+    q = q.w < 1e-4 ? vec4(1.0, 0.0, 0.0, 0.0) : normalize(q);
+    put(base + 4u, q.x);
+    put(base + 5u, q.y);
+    put(base + 6u, q.z);
+    put(base + 7u, q.w);
+}

@@ -21,10 +21,10 @@ the plan names.
 | Phase 5: 3D with stock models | 9 | 3 | 1 | 13 |
 | Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 26 | 10 | 9 | 45 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
-| Demos (to plan once Phase 5 is complete) | 0 | 0 | 7 | 7 |
+| Demos (gdx-vulkan-demos) | 4 | 3 | 3 | 10 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **183** | **18** | **34** | **235** |
+| **All** | **187** | **21** | **30** | **238** |
 ---
 
 ## Core decisions
@@ -389,23 +389,22 @@ owner's own projects to prove that moving over is clean, and hopefully faster th
 
 ---
 
-## Demos (to plan once Phase 5 is complete)
+## Demos (`gdx-vulkan-demos`)
 
-Not started. Decisions from the discussion of 2026-11-04 (owner):
-- Comparison: each demo is **one class written against stock libGDX**, with two small mains, one for `Lwjgl3Application` (OpenGL) and one for `VulkanDesktopApplication`; a launcher can start both side by side. This also shows that porting is a one-line change.
-- Packaging: **one demo app with a menu** (desktop and Android), each demo a small class of its own so it can be copied out.
-- First demos: the 3D scene with cascaded shadows and clustered lights (selected), and the owner's note "start with 2", plus: libGDX does support compute shaders on GL 3.2+/4.3 capable contexts, so the GPU boids demo can have an OpenGL comparison too (to be checked: which libGDX GL interface exposes `glDispatchCompute` on the LWJGL3 backend, and the context version it needs). Later: sprite storm (100k+ sprites, stock against Vulkan), post-processing over a Scene2D UI.
-- Open: which two demos "start with 2" means (the 3D scene and the boids comparison are the assumption).
+Decisions of the owner, 2026-11-04: each demo is **one class written against stock libGDX**, with a main for `Lwjgl3Application` (OpenGL) and one for `VulkanDesktopApplication`, started side by side from the demo app (key C); **one demo app with a menu**; first the 3D scene with cascaded shadows and the GPU boids, which may have an OpenGL compute comparison. Built: three demos, each on gdx-vulkan, two with an OpenGL counterpart. Run with `gradlew :gdx-vulkan-demos:demos` (menu; keys 1 to 3, C, Esc) and `gradlew :gdx-vulkan-demos:demoGl -Ddemo=shadows-stock|boids`; `-Ddemo.start=N -Ddemo.screenshot=file.png` runs one demo and saves a picture.
 
-The requirements stated earlier:
+- [~] Demos showcase what the library can do, and run on the desktop and on Android: three demos on the desktop (stock shadow recipe, cascaded shadows, GPU boids); not on Android yet
+- [x] Where a stock libGDX equivalent exists, the demo shows it next to the Vulkan version: the stock shadow demo is the same class on OpenGL and on gdx-vulkan; the boids demo has an OpenGL 4.3 version with a compute shader written with `Gdx.gl31`; C starts the OpenGL window beside the Vulkan one, same size
+- [x] Where there is no OpenGL equivalent (cascaded shadow maps, GPU culling, indirect drawing, clustered lights), the demo says so on screen: what it does and what stock libGDX has instead
+- [~] The demo code is clean, clear and easy to follow: short classes, one concern each, comments where Vulkan differs from stock (the owner reviews)
+- [~] Every demo is visually interesting (the owner judges)
+- [x] Every demo has easily readable text that says what it is about; the size follows the window height (`Hud`: body text is a 36th of the height, regenerated with FreeType when the window changes), plain libGDX (SpriteBatch, ShapeRenderer, FreeType) so it is the same on both backends
+- [x] The demos are built by CI (`DemosSmokeTest` starts each, draws 20 frames, checks the picture) and listed in the README
+- [ ] Clustered lights together with shadows in one scene: lights are sorted into clusters only on the GPU-driven path (one mesh, no shadows), `VulkanModelBatch` has up to 8 point lights and cascaded shadows; a scene with both needs the cluster lookup in the model shader, or shadows in `gpu_lit`
+- [ ] More demos: sprite storm (100k+ sprites, stock against Vulkan), post-processing over a Scene2D UI
+- [ ] The demo app on Android
 
-- [ ] Demos showcase what the library can do, and run on the desktop and on Android
-- [ ] Where a stock libGDX equivalent exists, the demo shows it next to the Vulkan version (stock OpenGL against gdx-vulkan: same scene, side by side or switchable) so the difference in speed or output is visible
-- [ ] Where there is no OpenGL equivalent (compute shaders, GPU culling, indirect drawing, clustered lights, cascaded shadows), the demo makes its purpose clear: what it does and why stock libGDX cannot
-- [ ] The demo code is clean, clear and easy to follow: they are the implementation examples users will copy from; short methods, names that explain themselves, comments where the Vulkan side differs from stock
-- [ ] Every demo is visually interesting
-- [ ] Every demo has easily readable text on screen that says what the demo is about. The text is scaled to the screen: libGDX's Scene2D test text is too small on high-resolution screens, so size it from the display density or the window height, never in fixed pixels, and check it on the desktop and on a phone
-- [ ] The demos are built by CI and listed in the README
+Measured (RTX 5080, window 1280 x 720, vsync off, steady state): the stock shadow code 1,238 fps on gdx-vulkan against 1,686 on OpenGL (0.73x, through the GL shim); cascaded shadows 960 fps; boids 250,000: gdx-vulkan 656 fps with 500 clustered lights and 710 without, OpenGL 667 fps with one directional light and no culling. The first run of the cascaded demo measured 133 fps and found a real bug: `VulkanModelBatch` recomputed every mesh part's bounds on every `render()` (96% of the frame); it is now measured once, as stock libGDX does.
 
 ---
 

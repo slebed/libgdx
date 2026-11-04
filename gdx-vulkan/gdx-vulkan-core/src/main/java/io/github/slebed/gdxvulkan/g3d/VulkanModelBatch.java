@@ -204,13 +204,23 @@ public class VulkanModelBatch implements Disposable {
     }
 
     public void render (final Renderable renderable) {
+        measure(renderable);
         renderables.add(renderable);
+    }
+
+    /**
+     * The centre and radius the sorter and the culling use. A model's parts have them from the moment it was built (stock's ModelBatch relies on that and never
+     * recomputes them); only a part that was put together by hand, with no bounds yet, is measured here, once. Walking every vertex of every part on every frame
+     * took most of a frame's CPU time in a scene of a hundred objects.
+     */
+    private static void measure (final Renderable renderable) {
+        if (renderable.meshPart.radius < 0f) renderable.meshPart.update();
     }
 
     public void render (final RenderableProvider renderableProvider) {
         final int offset = renderables.size;
         renderableProvider.getRenderables(renderables, pool);
-        for (int i = offset; i < renderables.size; i++) renderables.get(i).meshPart.update();
+        for (int i = offset; i < renderables.size; i++) measure(renderables.get(i));
     }
 
     public void render (final RenderableProvider renderableProvider, final Environment environment) {
@@ -219,7 +229,7 @@ public class VulkanModelBatch implements Disposable {
         for (int i = offset; i < renderables.size; i++) {
             Renderable renderable = renderables.get(i);
             renderable.environment = environment;
-            renderable.meshPart.update();
+            measure(renderable);
         }
     }
 

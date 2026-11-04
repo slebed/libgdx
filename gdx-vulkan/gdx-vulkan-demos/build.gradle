@@ -1,0 +1,59 @@
+// The demo programs (docs/CHECKLIST.md, "Demos"): one demo app with a menu, and for each demo that has an OpenGL counterpart a second main that runs the same
+// scene on stock libGDX, so the two can be started side by side.
+dependencies {
+    api project(':gdx-vulkan-desktop')   // gdx-vulkan, its desktop application, stock libGDX's LWJGL3 backend and natives
+    implementation "com.badlogicgames.gdx:gdx-freetype:${gdxVersion}"       // the on-screen text is rendered at the size the screen needs
+    runtimeOnly "com.badlogicgames.gdx:gdx-freetype-platform:${gdxVersion}:natives-desktop"
+
+    testImplementation platform("org.junit:junit-bom:${junitVersion}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// The font of the on-screen text: libGDX's own test font, bundled in test-assets (see NOTICE in the repository root).
+processResources {
+    from('../test-assets/data') {
+        include 'lsans.ttf'
+        into 'data'
+    }
+}
+
+def coreNative = project(':gdx-vulkan-core').layout.buildDirectory.dir('native')
+
+test {
+    useJUnitPlatform()
+    dependsOn ':gdx-vulkan-core:buildNatives'
+    systemProperty 'gdxvulkan.native.path', project(':gdx-vulkan-core').layout.buildDirectory.dir('native').get().asFile.absolutePath
+    systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'true')
+    systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
+    systemProperty 'gdxvulkan.requireDriver', System.getProperty('gdxvulkan.requireDriver', 'false')
+    System.getProperty('gdxvulkan.device')?.with { v -> systemProperty('gdxvulkan.device', v) }
+    testLogging { events 'passed', 'skipped', 'failed'; showStandardStreams = true }
+}
+
+def configureDemoRun = { JavaExec t ->
+    t.group = 'demos'
+    // -DdemoJvmArgs="-XX:StartFlightRecording=..." for profiling the demo's own JVM
+    t.jvmArgs System.getProperty('demoJvmArgs', '-Dgdxvulkan.demos=true').tokenize()
+    t.classpath = sourceSets.main.runtimeClasspath
+    t.dependsOn ':gdx-vulkan-core:buildNatives'
+    t.systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
+    // The validation layers slow a demo down; they are for the tests.
+    t.systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'false')
+    System.properties.each { k, v -> if (k.toString().startsWith('gdxvulkan.') || k.toString().startsWith('demo.')) t.systemProperty k.toString(), v.toString() }
+}
+
+// The demo app on gdx-vulkan. Keys 1-3 start a demo, Esc returns to the menu, C starts the OpenGL counterpart next to the window.
+tasks.register('demos', JavaExec) {
+    description = 'Runs the demo app on gdx-vulkan.'
+    mainClass = 'io.github.slebed.gdxvulkan.demos.VulkanDemos'
+    configureDemoRun(it)
+}
+
+// One demo on stock libGDX and OpenGL: -Ddemo=shadows-stock | boids
+tasks.register('demoGl', JavaExec) {
+    description = 'Runs one demo on stock libGDX (OpenGL): -Ddemo=shadows-stock or -Ddemo=boids.'
+    mainClass = 'io.github.slebed.gdxvulkan.demos.GlDemos'
+    configureDemoRun(it)
+    args System.getProperty('demo', 'shadows-stock')
+}

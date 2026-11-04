@@ -37,7 +37,7 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Spot lights, point-light shadows | libGDX's own default shader has neither |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (183 of 235 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (187 of 238 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). **Known problem:** on the Adreno 650 everything works except 3D models
@@ -211,6 +211,18 @@ OpenGL context settings are ignored). `VulkanDesktopConfiguration` holds the sam
 The batches find the running application's frame through `Gdx.graphics`, so create them in `create()` or later, as you would stock ones. If you build the
 Vulkan context yourself (a test, a tool), pass the frame explicitly: `new VulkanSpriteBatch(frame)`.
 
+### Demos
+
+`gradlew :gdx-vulkan-demos:demos` opens the demo app, a menu of demos on gdx-vulkan (keys 1 to 3 start one, Esc comes back). In a demo, **C starts the stock OpenGL version in a window beside it**, same size, so the two can be watched together. Each demo is a short class you can copy; the text on screen says what it is about and is sized from the window height.
+
+| Demo | What it shows | Stock libGDX equivalent |
+|---|---|---|
+| 1 Shadows, stock libGDX code | libGDX's own shadow recipe (`DirectionalShadowLight`, `DepthShaderProvider`), the same class on both backends | yes: the same code on OpenGL |
+| 2 Cascaded shadows | the same road with four cascaded shadow maps: sharp shadows near the camera and shadows to the end of the road | no: one shadow map (demo 1) |
+| 3 GPU boids | 250,000 boids simulated, culled and drawn on the GPU, lit by 500 clustered point lights | the simulation and an instanced draw, written with `Gdx.gl31` compute shaders on OpenGL 4.3 (`demoGl -Ddemo=boids`), without culling or the lights |
+
+`gradlew :gdx-vulkan-demos:demoGl -Ddemo=shadows-stock` (or `boids`) runs a demo on OpenGL alone. Options: `-Ddemo.boids=N`, `-Ddemo.vsync=true` (off by default, so the frame rate shown is what the GPU can do), `-Ddemo.width=` and `-Ddemo.height=`, `-Ddemo.lights=false`, `-Ddemo.start=2 -Ddemo.screenshot=out.png` (saves a picture and leaves). On the RTX 5080 at 1280 x 720 the stock shadow code runs at about 0.7x of OpenGL's frame rate through the shim, and the boids at 0.9x to 1.1x of the OpenGL version with 500 lights added; see `docs/CHECKLIST.md` for the numbers and what is not built yet (Android, clustered lights together with shadows).
+
 ### Moving an existing game over
 
 | Stock libGDX | gdx-vulkan | Notes |
@@ -289,6 +301,7 @@ side allocates almost nothing. The validation layers, a stock-OpenGL comparison 
 ## Layout
 - `gdx-vulkan-core/` the Java API and the C++ core (`jni/`: CMake, with volk, VMA, SPIRV-Reflect and the Vulkan headers vendored); shaders in `src/main/shaders`
 - `gdx-vulkan-desktop/` the desktop `Application`, plus the desktop tests and benchmarks
+- `gdx-vulkan-demos/` the demo app and the OpenGL counterparts of its demos (see Demos)
 - `gdx-vulkan-android/` the Android library and a test app (its own Gradle build)
 - `ci/`, `.github/` the Docker image and workflow that run every test on a software Vulkan driver
 - `tools/` generators that copy code from stock libGDX (so the comparison stays honest)
