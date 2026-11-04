@@ -10,7 +10,7 @@ import io.github.slebed.gdxvulkan.desktop.VulkanDesktopConfiguration;
 public final class VulkanConfigurations {
     private VulkanConfigurations () {}
 
-    /** The settings of a stock configuration that mean something here. OpenGL context settings (GL version, colour/depth bits, samples) are ignored. */
+    /** The settings of a stock configuration that mean something here. OpenGL context settings (GL version, colour bits, samples) are ignored. */
     public static VulkanDesktopConfiguration from (Lwjgl3ApplicationConfiguration c) {
         final VulkanDesktopConfiguration v = new VulkanDesktopConfiguration();
         v.title = c.title;
@@ -25,6 +25,7 @@ public final class VulkanConfigurations {
         v.vsync = c.vSyncEnabled;
         v.foregroundFPS = c.foregroundFPS;
         v.disableAudio = c.disableAudio;
+        v.depthBuffer = c.depth > 0;
         v.audioDeviceSimultaneousSources = c.audioDeviceSimultaneousSources;
         v.audioDeviceBufferCount = c.audioDeviceBufferCount;
         v.audioDeviceBufferSize = c.audioDeviceBufferSize;

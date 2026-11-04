@@ -103,7 +103,7 @@ class GlslTranslatorTest {
         assertFalse(single.sampler("u_mask").active);
     }
 
-    @Test void theModelShadersTranslateWithoutLightsAndExplainWhyNotWithThem () throws Exception {
+    @Test void theModelShadersTranslateWithAndWithoutLights () throws Exception {
         final String flags = "#define normalFlag\n#define diffuseTextureFlag\n#define diffuseColorFlag\n";
         final Translation t = GlslTranslator.translate("default", resource("default.vertex.glsl"), resource("default.fragment.glsl"), flags, flags, true);
         assertCompiles(t, "default/unlit");
@@ -111,11 +111,22 @@ class GlslTranslatorTest {
         final Translation depth = GlslTranslator.translate("depth", resource("depth.vertex.glsl"), resource("depth.fragment.glsl"), null, null, true);
         assertCompiles(depth, "depth");
 
-        // DefaultShader's light structs are uniform arrays of structs, which the translator refuses; the library has a dedicated port of that shader.
-        final String lit = flags + "#define lightingFlag\n#define numDirectionalLights 2\n#define numPointLights 0\n#define numSpotLights 0\n";
-        final GlslTranslationException e = assertThrows(GlslTranslationException.class,
-            () -> GlslTranslator.translate("default", resource("default.vertex.glsl"), resource("default.fragment.glsl"), lit, lit, true));
-        assertTrue(e.getMessage().contains("DirectionalLight") && e.getMessage().contains("not supported"), e.getMessage());
+        // DefaultShader's lights are uniform arrays of structs: the block holds the structs (std140), each member is a uniform of its own named like GL names it.
+        final String lit = flags + "#define lightingFlag\n#define numDirectionalLights 2\n#define numPointLights 1\n#define numSpotLights 0\n";
+        for (boolean bindless : new boolean[] {true, false}) {
+            final Translation l = GlslTranslator.translate("default", resource("default.vertex.glsl"), resource("default.fragment.glsl"), lit, lit, bindless);
+            assertCompiles(l, "default/lit/" + (bindless ? "modern" : "compat"));
+            final Uniform c0 = l.uniform("u_dirLights[0].color"), d0 = l.uniform("u_dirLights[0].direction");
+            final Uniform c1 = l.uniform("u_dirLights[1].color"), p0 = l.uniform("u_pointLights[0].position");
+            assertNotNull(c0);
+            assertNotNull(p0);
+            assertTrue(c0.active && !c0.push);
+            assertEquals(c0.offset + 16, d0.offset, "members follow std140: a vec3 takes a 16-byte slot");
+            assertEquals(c0.offset + 32, c1.offset, "the array stride of this struct is 32 bytes");
+            assertEquals(0, p0.offset % 16 == 0 ? 0 : 1, "the point light starts on 16 bytes");
+            assertTrue(l.vertex.contains("struct DirectionalLight") && l.fragment.contains("struct DirectionalLight"), "the struct is declared once in each stage's prelude");
+            assertEquals(1, l.fragment.split("struct DirectionalLight", -1).length - 1, "and only once");
+        }
     }
 
     @Test void errorsKeepTheLineNumbersOfTheOriginalSource () {

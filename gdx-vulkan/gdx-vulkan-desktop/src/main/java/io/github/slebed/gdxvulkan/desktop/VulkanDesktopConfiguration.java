@@ -25,6 +25,8 @@ public class VulkanDesktopConfiguration {
     /** OpenAL: the number of sources and buffers, and the size of a streaming buffer. Ignored with {@link #disableAudio}. */
     public int audioDeviceSimultaneousSources = 16, audioDeviceBufferCount = 9, audioDeviceBufferSize = 512;
     public boolean disableAudio = false;
+    /** Give the screen a depth buffer from the start (stock configurations have one by default). Without it the first 3D batch or GL_DEPTH_TEST turns it on, one frame late. */
+    public boolean depthBuffer = false;
     /** Where {@code Gdx.app.getPreferences} keeps its files, relative to the working directory. */
     public String preferencesDirectory = ".prefs/";
 }

@@ -19,12 +19,12 @@ the plan names.
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 12 | 1 | 0 | 13 |
 | Phase 5: 3D with stock models | 9 | 3 | 1 | 13 |
-| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 16 | 9 | 17 | 42 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 22 | 11 | 12 | 45 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
 | Demos (to plan once Phase 5 is complete) | 0 | 0 | 7 | 7 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **173** | **17** | **42** | **232** |
+| **All** | **179** | **19** | **37** | **235** |
 ---
 
 ## Core decisions
@@ -308,7 +308,7 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [x] `VulkanDesktopApplication` accepts a stock `Lwjgl3ApplicationConfiguration` (`VulkanConfigurations` reads its package-private fields; libGDX is not changed)
 - [x] `VulkanModelBatch` turns the screen's depth buffer on itself (kept across swapchain replacement); no `setDepth` call
 - [x] `VulkanStage`: the stock `Stage` with a `VulkanSpriteBatch`, same constructors, disposes the batch
-- [x] Creating a stock `SpriteBatch`, `ShaderProgram` or `Stage(viewport)` fails with a message that names the class to use instead
+- [x] ~~Creating a stock `SpriteBatch`, `ShaderProgram` or `Stage(viewport)` fails with a message that names the class to use instead~~ Replaced by section E: the stock classes run, so there is nothing to refuse. Calls the shim still cannot serve (client-side vertex or index arrays, vertex data from several buffers) fail with a message that says what to use
 
 ### Built-in shaders (done)
 - [x] Built-in shaders are dedicated Vulkan GLSL, not translations: `sprite.*`, `shape.*`, `mesh_flat.*`, `model_default*` (a port of libGDX's default shader, with the data in a storage buffer and the material and light flags as specialization constants), `model_depth*` (the shadow-map pass), `fx_*`, `gpu_*`, `boids.comp`; compiled with `glslc` at build time to SPIR-V, loaded by name; nothing is compiled or translated at run time for them
@@ -316,10 +316,11 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 
 ### A. Translating stock GLSL
 - [x] Dialect: GLSL ES 1.00 / desktop 1.10-1.20 as libGDX ships it: `attribute` to `in`, `varying` to matched `out`/`in` locations across the two stages, `gl_FragColor` and `gl_FragData[n]` to declared outputs, `texture2D`/`texture2DProj`/`texture2DLod` to `texture`/`textureProj`/`textureLod`, `#ifdef GL_ES` and `precision` lines (`GlslTranslator`; the design is in `docs/SHADER_TRANSLATOR.md`). `textureCube` is refused until the texture shim has cube textures
+- [x] Struct uniforms and arrays of structs (`DefaultShader`'s `u_dirLights[n]`, `u_pointLights[n]`, `u_spotLights[n]`, members float, int and vecN): the struct is declared in the uniform block (std140: the struct starts on 16 bytes, members follow their own alignment, size and array stride round up to 16) and each member is a uniform named as GL names it (`u_dirLights[1].color`), listed element by element so that the location of one light's member minus the next's is the light stride `BaseShader` computes (`GlslTranslatorTest.theModelShadersTranslateWithAndWithoutLights`, both code paths)
 - [ ] `#version 300 es` / `330` style shaders pass through with only the Vulkan declarations added
 - [x] `ShaderProgram.prependVertexCode` / `prependFragmentCode`, `#define`s and `#extension` lines are honoured: the source is expanded with glslang's preprocessor before the declarations are read, so libGDX's flag-driven shaders (`DefaultShader`) resolve exactly; `GL_OES_*` extension lines are dropped
 - [x] Compile errors come back as `ShaderProgram`-style logs with the line numbers of the **original** source, not of the translated one: the translation never changes the number of lines and restarts numbering at 1 after its declarations; the prepend text counts as lines, as in stock (`GlslTranslatorTest.errorsKeepTheLineNumbersOfTheOriginalSource`)
-- [x] Fails loudly (a clear message with the shader, line and construct) on GLSL it cannot translate: cube and 3D samplers, struct and array-of-struct uniforms (so `DefaultShader` with lights is refused, the library has its own port), bool arrays, array varyings, a varying the vertex shader does not declare, more textures than the path can bind; no silent mis-compiles
+- [x] Fails loudly (a clear message with the shader, line and construct) on GLSL it cannot translate: cube and 3D samplers, structs that are not uniform types or have array or matrix members, bool arrays, array varyings, a varying the vertex shader does not declare, more textures than the path can bind; no silent mis-compiles
 
 ### B. Vulkan-native mapping (the optimisation requirements)
 - [~] Loose uniforms become one std140 uniform block per program, laid out from reflection and placed in the existing per-frame ring; at draw time only the changed byte ranges are written, never one call per uniform: the layout is done (arrays and the uniforms that no longer fit go to a std140 block at set 0, binding 0, with explicit offsets, `Translation.uniforms`); writing the changed ranges at draw time belongs to `VulkanShaderProgram` (section D)
@@ -346,14 +347,16 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [ ] Custom 3D shaders: `ShaderProvider` / `Shader` for `VulkanModelBatch` built on `VulkanShaderProgram`
 - [ ] `VulkanShaderPipelineBundle` (precompiled SPIR-V) stays supported as the build-time path
 
-### E. Stock classes with no rename (stretch)
-- [ ] GL shim: `glCreateShader`, `glShaderSource`, `glCompileShader`, `glCreateProgram`, `glAttachShader`, `glLinkProgram`, `glGetProgramiv`/`glGetShaderInfoLog`, `glGetActiveUniform`/`Attrib`, `glGetUniformLocation`, `glUniform*`, `glUseProgram` route to the translator, so the stock `ShaderProgram` works
-- [ ] GL shim: array buffers, `glVertexAttribPointer`, `glEnableVertexAttribArray`, `glDrawElements`, `glDrawArrays` become command-stream draws; the pipeline comes from (program, vertex layout, blend/depth/cull state) with the state cached so equal state costs one lookup
-- [ ] Stock `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `ImmediateModeRenderer20`, `Mesh.render(ShaderProgram)` and `new Stage(viewport)` run unmodified. Libgdx's own shaders in these classes are **recognised by their source text (a hash of the normalised source) and replaced by the dedicated Vulkan shaders**, so the stock classes run at the speed of the generated ones; only an unknown (custom) shader is translated
-- [ ] Stock `ModelBatch` with libGDX's `DefaultShader` and `DepthShader` GLSL runs unmodified
-- [ ] Gate: the Gate 2, 3 and 5 scenes drawn by the stock classes on the shim match stock OpenGL, and match the generated Vulkan batches
-- [ ] Performance gate: a stock `SpriteBatch` on the shim is within 1.5x of `VulkanSpriteBatch` in Stress test 2 (target to confirm once measured); first-use compile of a typical shader under 50 ms, second launch about 0
-- [ ] README and the migration section drop the renames once this passes (the generated Vulkan batches stay as the fast path)
+### E. Stock classes with no rename
+- [x] GL shim: `glCreateShader`, `glShaderSource`, `glCompileShader`, `glCreateProgram`, `glAttachShader`, `glLinkProgram`, `glGetProgramiv`/`glGetShaderInfoLog`, `glGetActiveUniform`/`Attrib`, `glGetUniformLocation`, `glUniform*`, `glUseProgram` route to the translator (`gl/StockPrograms`), so the stock `ShaderProgram` works: a custom shader compiles and draws through a stock `SpriteBatch` (`StockClassesTest`)
+- [x] GL shim: array buffers, `glVertexAttribPointer`, `glEnableVertexAttribArray`, `glDrawElements`, `glDrawArrays` become command-stream draws; the pipeline comes from (program, vertex layout, blend state) and is cached per program, so equal state costs one map lookup. Floats and normalised unsigned bytes as vertex formats; vertex data from one buffer. A buffer changed after it was drawn this frame is copied on write (`glBufferData` and `glBufferSubData`; dynamic buffers keep a CPU copy for this) and a native buffer id is not reused until the frame that names it is submitted. Not supported, with a message: client-side arrays (`Mesh` of the `VertexArray` type), several vertex buffers, other vertex formats; `glVertexAttrib4f` defaults for disabled attributes are ignored
+- [x] Stock `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer` and `new Stage(viewport)` run unmodified, and libGDX's own shaders in them are **recognised by a hash of the whitespace-normalised source and replaced by the dedicated Vulkan shaders** (`glsl/KnownShaders`: `sprite_single` for both batches, `shape` for the shape renderer, with hand-written tables); the run-time compiler is not called (`StockClassesTest` asserts three replacements and zero compiler calls). Not yet recognised, so translated: `ImmediateModeRenderer20` with normals or texture coordinates, and any shader that is not libGDX's own text
+- [x] Stock `ModelBatch` with libGDX's `DefaultShader` (lit by a directional light, through the translator) and a stock `Stage` draw what `VulkanModelBatch` and `VulkanStage` draw (`StockScenesTest`: the 3D picture within 6 levels on all but 1% of the pixels, the Scene2D picture identical). Not yet run: `DepthShader` / shadows through the stock path, skinned models, point and spot lights, textures in `DefaultShader`
+- [x] The screen's depth buffer follows the stock configuration: `Lwjgl3ApplicationConfiguration` / `AndroidApplicationConfiguration` depth bits above zero turn it on from the start (`VulkanDesktopConfiguration.depthBuffer` for the new class); `glEnable(GL_DEPTH_TEST)` on a screen without depth prints one warning that says what to set
+- [ ] The default shader of `ModelBatch` goes through the translator on every first start (cached on disk afterwards); a dedicated replacement by hash, like the sprite one, would take base 3D off the translator and is the next step
+- [~] Gate: the sprite, shape and Stage scenes drawn by the stock classes match the generated Vulkan batches pixel for pixel, and one lit 3D scene matches within tolerance (tests above); the Gate 2, 3 and 5 scene sets are not yet driven through the stock classes
+- [ ] Performance gate: a stock `SpriteBatch` on the shim is within 1.5x of `VulkanSpriteBatch` in Stress test 2 (target to confirm once measured); first-use compile of a typical shader under 50 ms, second launch about 0. Not measured. Known cost: the shim builds a pipeline-key string per draw (to be replaced by an integer key)
+- [~] README and the migration section drop the renames once this passes: the README says the stock classes run and the generated ones are the fast path; how much faster is not yet measured
 
 ### F. Tests
 - [~] Translator tests with the shaders libGDX ships: done for the `SpriteBatch`/`PolygonSpriteBatch`, `ShapeRenderer` and `ImmediateModeRenderer20` shaders, `DefaultShader` (unlit variants) and `DepthShader`, and a custom shader with arrays, a bool, an int, two samplers and `#ifdef` flags, each compiled by glslang on both code paths (`GlslTranslatorTest`, no GPU needed); not yet the Gate 3 post-processing shaders

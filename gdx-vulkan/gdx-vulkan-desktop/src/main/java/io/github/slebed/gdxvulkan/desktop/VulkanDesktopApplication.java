@@ -148,6 +148,7 @@ public class VulkanDesktopApplication implements Application {
 
         presenter = GlfwSurfaces.createPresenter(context, window, config.vsync);
         frame = new GdxVkFrame(context, presenter, gl);
+        if (config.depthBuffer) frame.requireDepth(GdxVkPresenter.DEPTH);
         GLFW.glfwShowWindow(window);
         graphics.refreshSizes();
         graphics.continuous = config.continuousRendering;

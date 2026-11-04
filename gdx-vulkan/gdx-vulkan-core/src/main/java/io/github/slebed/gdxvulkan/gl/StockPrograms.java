@@ -359,6 +359,10 @@ final class StockPrograms {
 
         final int nativeVertices = gl.nativeBuffer(buffer);
         if (nativeVertices < 0) throw new GdxRuntimeException("gdx-vulkan: the vertex buffer has no data");
+        if (program.hasThinLineNudge()) { // as VulkanImmediateModeRenderer does: lines and points move 1/256 pixel the way GL resolves a tie
+            final boolean thin = mode == 0x0000 || mode == 0x0001 || mode == 0x0003;
+            program.setPushFloat(96, thin ? -2f / 256f / Math.max(1, frame.height()) : 0f);
+        }
         s.bindPipeline(pipeline);
         program.prepareDraw(s, push, gl.boundTexture(0));
         s.pushConstants(push);

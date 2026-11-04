@@ -103,6 +103,9 @@ public class VulkanAndroidGraphics implements Graphics, SurfaceHolder.Callback, 
         ppcY = m.ydpi / 2.54f;
     }
 
+    /** Give the screen a depth buffer from the start: set from the stock configuration's depth bits. */
+    volatile boolean depthBuffer;
+
     public View getView() { return view; }
 
     // ---- lifecycle, called from the UI thread
@@ -265,7 +268,10 @@ public class VulkanAndroidGraphics implements Graphics, SurfaceHolder.Callback, 
             presenter.resize(w, h);
         } else {
             presenter = context.createPresenterAndroid(surface, w, h, vsync, vkConfig.preRotate);
-            if (frame == null) frame = new GdxVkFrame(context, presenter, gl);
+            if (frame == null) {
+                frame = new GdxVkFrame(context, presenter, gl);
+                if (depthBuffer) frame.requireDepth(io.github.slebed.gdxvulkan.GdxVkPresenter.DEPTH);
+            }
             else frame.replacePresenter(presenter); // batches keep their frame; only its swapchain side is new
             recreateCount++;
             lastRecreateNanos = System.nanoTime() - t0;

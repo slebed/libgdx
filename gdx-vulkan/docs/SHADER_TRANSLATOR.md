@@ -46,8 +46,21 @@ The result of a translation carries the table the program class needs: for each 
 stride; for each attribute its name, type and location; for each sampler its name and push offset; and the line map. Setting a uniform by name is then a copy into a
 byte array plus a dirty flag.
 
+## Struct uniforms
+`uniform DirectionalLight u_dirLights[2];` (libGDX's `DefaultShader` lights) works. The struct definition is taken out of the sources and declared once in the prelude
+of both stages; the uniform becomes a member of the std140 block at set 0, binding 0, with its explicit offset (the struct starts on 16 bytes, members follow their own
+alignment, the struct size and the array stride round up to 16). The program's table lists every member as a uniform of its own, named the way GL names it
+(`u_dirLights[1].color`), element by element, so the location of a member in one element minus the location in the next is the same for every member (the light
+stride `BaseShader` computes from two locations). Members may be float, int, vec2-4 and ivec2-4.
+
+## Known shaders
+libGDX's own sprite and shape shaders are not translated. `KnownShaders` hashes the vertex and fragment source (white space reduced to one space) as `glShaderSource`
+or `new VulkanShaderProgram` gets it, and a match gets the dedicated, build-time compiled shader with hand-written tables (`sprite_single` for `SpriteBatch` and
+`PolygonSpriteBatch`, `shape` for `ShapeRenderer`'s `ImmediateModeRenderer20`; the shape shader's sub-pixel line nudge is written by the GL shim for lines and points).
+Any other source goes through the translator.
+
 ## What it refuses (with a message naming the shader, the line and the construct)
-`samplerCube` and 3D samplers (the texture shim has no cube textures yet), samplers passed to functions, arrays of structs and struct uniforms, `bool` arrays, a
+`samplerCube` and 3D samplers (the texture shim has no cube textures yet), samplers passed to functions, structs with array or matrix members or used as anything but a uniform type (a uniform struct of floats, ints and vectors, or an array of them, is supported), `bool` arrays, a
 program with more samplers than the path allows, uniform data over 16 KB, desktop GL built-ins that have no Vulkan meaning (`gl_ModelViewMatrix`, `ftransform`).
 Everything else stays a glslang error with the original line number.
 

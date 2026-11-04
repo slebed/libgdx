@@ -101,6 +101,7 @@ class StockPortingTest {
         config.setInitialBackgroundColor(Color.BLACK);
         config.setResizable(false);
         config.disableAudio(true);
+        config.setBackBufferConfig(8, 8, 8, 8, 0, 0, 0); // no depth bits: the screen gets its depth buffer from the 3D batch
 
         Probe probe = new Probe();
         new VulkanDesktopApplication(probe, config);

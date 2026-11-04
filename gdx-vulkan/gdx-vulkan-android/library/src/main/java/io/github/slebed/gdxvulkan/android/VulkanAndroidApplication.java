@@ -99,6 +99,7 @@ public class VulkanAndroidApplication extends Activity implements AndroidApplica
         setApplicationLogger(new AndroidApplicationLogger());
         if (vkConfig.framePacing) GdxVkContext.setFramePacingActivity(this); // before the context exists: Swappy asks for a device extension
         graphics = new VulkanAndroidGraphics(this, listener, vkConfig, vsync);
+        graphics.depthBuffer = config.depth > 0;
         input = (DefaultAndroidInput)createInput(this, this, graphics.view, config);
         audio = createAudio(this, config);
         files = createFiles();

@@ -261,6 +261,8 @@ public class VulkanGL20 extends VulkanGL20Base {
         }
     }
 
+    private boolean depthWarned;
+
     @Override public void glEnable (int cap) {
         if (cap == GL_BLEND) blendEnabled = true;
         if (cap == GL_SCISSOR_TEST) {
@@ -274,6 +276,11 @@ public class VulkanGL20 extends VulkanGL20Base {
         }
         if (cap == GL_DEPTH_TEST_) {
             depthTest = true;
+            if (!depthWarned && attachedFrame != null && attachedFrame.presenter().depthMode() == io.github.slebed.gdxvulkan.GdxVkPresenter.DEPTH_NONE) {
+                depthWarned = true; // GL_DEPTH_TEST is ignored while the screen has no depth buffer
+                System.err.println("[gdx-vulkan] GL_DEPTH_TEST was enabled but the screen has no depth buffer, so depth testing does nothing. Set config.depthBuffer = true "
+                    + "(a stock Lwjgl3ApplicationConfiguration with depth bits does this), or create a VulkanModelBatch.");
+            }
             emitDepth();
         }
         if (cap == GL_STENCIL_TEST_) {

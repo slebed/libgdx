@@ -81,6 +81,7 @@ public class VulkanShaderProgram implements Disposable {
     private final String log;
     private final boolean compiled;
     private boolean disposed;
+    private final boolean thinLineNudge;
 
     private final int[] pushWords = new int[32];
     private final int[] ringWords;
@@ -119,6 +120,7 @@ public class VulkanShaderProgram implements Disposable {
         vertexSpirv = built.vertex;
         fragmentSpirv = built.fragment;
         compiled = built.ok;
+        thinLineNudge = "shape".equals(built.known);
         log = built.log;
         ringWords = new int[Math.max(1, t.blockBytes / 4)];
         samplerUnit = new int[t.samplers.size()];
@@ -130,6 +132,7 @@ public class VulkanShaderProgram implements Disposable {
         byte[] vertex, fragment;
         String log = "";
         boolean ok;
+        String known; // the name of the dedicated shader this stands for, null for a translated program
     }
 
     /** Programs made ahead of time by {@link #prepareAsync}, by cache key: taken by the constructor when the same source is asked for. */
@@ -187,6 +190,17 @@ public class VulkanShaderProgram implements Disposable {
         if (ready != null) {
             if (!keep) preparedHits++;
             return ready;
+        }
+        final KnownShaders.Match known = KnownShaders.find(prependV + vertexShader, prependF + fragmentShader, bindless);
+        if (known != null) { // libGDX's own sprite and shape shaders: the dedicated Vulkan ones, no translation
+            KnownShaders.hits++;
+            final Built b = new Built();
+            b.translation = known.table;
+            b.vertex = known.vertex;
+            b.fragment = known.fragment;
+            b.known = known.name;
+            b.ok = true;
+            return b;
         }
         final File cache = cacheDirectory();
         final ShaderCache.Entry cached = cache == null ? null : ShaderCache.load(cache, key);
@@ -306,6 +320,10 @@ public class VulkanShaderProgram implements Disposable {
 
     /** What {@code glGetUniformLocation} answers: the name of a uniform, or of one element of an array ({@code u_palette[2]}); -1 when the shader does not read it. */
     public int uniformLocation (String name) {
+        for (int i = 0; i < t.uniforms.size(); i++) { // a member of a struct is named in full, like u_dirLights[1].color
+            final Uniform u = t.uniforms.get(i);
+            if (u.active && u.name.equals(name) && u.arraySize == 0) return i * ELEMENTS;
+        }
         String base = name;
         int element = 0;
         final int br = name.indexOf('[');
@@ -668,6 +686,21 @@ public class VulkanShaderProgram implements Disposable {
     /** The program's translated tables: attributes, uniforms and where they live. */
     public Translation translation () {
         return t;
+    }
+
+    /** Whether this is the dedicated shape shader, which takes a sub-pixel nudge for lines and points in the push word at byte 96 (see {@code shape.vert}). */
+    public boolean hasThinLineNudge () {
+        return thinLineNudge;
+    }
+
+    /** Writes a float into the push constants at a byte offset, for the words of a dedicated shader that no uniform names. */
+    public void setPushFloat (int byteOffset, float value) {
+        pushWords[byteOffset >> 2] = Float.floatToRawIntBits(value);
+    }
+
+    /** How many programs were replaced by a dedicated shader because their source is one of libGDX's own (for tests and diagnostics). */
+    public static int knownShaderHits () {
+        return KnownShaders.hits;
     }
 
     /** Identifies the program in the frame's pipeline cache. */

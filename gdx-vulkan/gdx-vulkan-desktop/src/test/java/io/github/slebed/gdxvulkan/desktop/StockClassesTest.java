@@ -36,6 +36,7 @@ class StockClassesTest {
         Throwable failure;
         byte[] stockPicture, vulkanPicture, customPicture;
         String stockError;
+        int knownHits, compilerCalls;
         boolean customCompiled;
         String customLog;
 
@@ -57,13 +58,18 @@ class StockClassesTest {
             quads.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
             pm.dispose();
             font = new BitmapFont();
+            final int hitsBefore = io.github.slebed.gdxvulkan.glsl.VulkanShaderProgram.knownShaderHits();
+            final int callsBefore = io.github.slebed.gdxvulkan.GlslCompiler.callCount();
             try {
                 stockBatch = new SpriteBatch();
                 stockShapes = new ShapeRenderer();
+                new com.badlogic.gdx.graphics.g2d.PolygonSpriteBatch().dispose();
             } catch (Throwable t) {
                 stockError = String.valueOf(t);
                 throw t;
             }
+            knownHits = io.github.slebed.gdxvulkan.glsl.VulkanShaderProgram.knownShaderHits() - hitsBefore;
+            compilerCalls = io.github.slebed.gdxvulkan.GlslCompiler.callCount() - callsBefore;
             vulkanBatch = new VulkanSpriteBatch();
             vulkanShapes = new VulkanShapeRenderer();
 
@@ -85,6 +91,12 @@ class StockClassesTest {
             stockShapes.setColor(1f, 0.5f, 0.25f, 1f);
             stockShapes.rect(110, 10, 60, 40);
             stockShapes.end();
+            stockShapes.begin(ShapeRenderer.ShapeType.Line);
+            stockShapes.setColor(0f, 1f, 1f, 1f);
+            stockShapes.line(5, 5, 180, 120);
+            stockShapes.line(0, 64, 190, 64);
+            stockShapes.rect(100, 60, 30, 20);
+            stockShapes.end();
         }
 
         private void sceneWithVulkan () {
@@ -95,6 +107,12 @@ class StockClassesTest {
             vulkanShapes.begin(VulkanShapeRenderer.ShapeType.Filled);
             vulkanShapes.setColor(1f, 0.5f, 0.25f, 1f);
             vulkanShapes.rect(110, 10, 60, 40);
+            vulkanShapes.end();
+            vulkanShapes.begin(VulkanShapeRenderer.ShapeType.Line);
+            vulkanShapes.setColor(0f, 1f, 1f, 1f);
+            vulkanShapes.line(5, 5, 180, 120);
+            vulkanShapes.line(0, 64, 190, 64);
+            vulkanShapes.rect(100, 60, 30, 20);
             vulkanShapes.end();
         }
 
@@ -157,6 +175,8 @@ class StockClassesTest {
 
         if (probe.failure != null) throw new AssertionError("the listener failed", probe.failure);
         assertNull(probe.stockError, "stock SpriteBatch and ShapeRenderer are created");
+        assertEquals(3, probe.knownHits, "stock SpriteBatch, PolygonSpriteBatch and ShapeRenderer run on the library's dedicated shaders");
+        assertEquals(0, probe.compilerCalls, "and none of them went through the run-time translator and compiler");
         assertNotNull(probe.stockPicture, "a picture of the stock classes");
         assertNotNull(probe.vulkanPicture, "a picture of the Vulkan classes");
         assertEquals(W * H * 4, probe.stockPicture.length);

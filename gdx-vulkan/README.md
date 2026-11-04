@@ -37,7 +37,7 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Spot lights, point-light shadows | libGDX's own default shader has neither |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (173 of 232 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (179 of 235 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). **Known problem:** on the Adreno 650 everything works except 3D models
@@ -203,7 +203,7 @@ public static void main(String[] args) {
 ```
 
 `VulkanSpriteBatch` implements the stock `Batch` interface, so anything that takes a `Batch` takes it: `BitmapFont.draw`, `ParticleEffect.draw`, `Image`, and
-so on. The exception is `new Stage(viewport)`, which makes a stock `SpriteBatch` for itself and cannot run here; use `new VulkanStage(viewport)`, the same `Stage`.
+so on. Stock `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `Stage`, `ModelBatch` and your own `ShaderProgram`s also run as they are, through the GL shim; the `Vulkan...` classes are the same classes written straight against Vulkan and are the fast path.
 
 A game's existing `Lwjgl3ApplicationConfiguration` is used as it is: window size and title, vsync, resizable, fullscreen, audio and preferences settings (the
 OpenGL context settings are ignored). `VulkanDesktopConfiguration` holds the same settings in a class of ours, all optional.
@@ -223,8 +223,8 @@ Vulkan context yourself (a test, a tool), pass the frame explicitly: `new Vulkan
 | `ModelBatch` | `VulkanModelBatch` | same `begin / render(instances, environment) / end` |
 | `Stage` | `VulkanStage` | the stock `Stage` with a `VulkanSpriteBatch`; same constructors |
 | `Texture`, `Pixmap`, `TextureAtlas`, `FrameBuffer`, `Mesh`, `BitmapFont`, `Skin`, `AssetManager`, `Model`, `Environment`, `Camera` and the Scene2D actors | **unchanged** | these run on the shim as they are |
-| `ShaderProgram` (GLSL source) | `VulkanShaderProgram` | your libGDX GLSL as it is (`attribute`, `varying`, `uniform`, `gl_FragColor`, `texture2D`), translated and compiled when the program is created; same constructors and `setUniform...` calls; give it to a batch with `setShaderProgram(program)` (sprite batch, polygon batch; the shape renderer through `getRenderer()`). Uniform arrays, `bool`, `int`, several textures (modern path) and `prependVertexCode` work; structs, cube maps and more than one texture on a Vulkan 1.1 driver are refused with a message |
-| `Gdx.gl.glDrawArrays`, `glUseProgram`, ... | not supported | use the batches, or a compute shader |
+| `ShaderProgram` (GLSL source) | **unchanged**, or `VulkanShaderProgram` to give it to a `Vulkan...` batch | your libGDX GLSL as it is (`attribute`, `varying`, `uniform`, `gl_FragColor`, `texture2D`), translated and compiled when the program is created; same constructors and `setUniform...` calls; give it to a batch with `setShaderProgram(program)` (sprite batch, polygon batch; the shape renderer through `getRenderer()`). Uniform arrays, structs of floats and vectors (lights), `bool`, `int`, several textures (modern path) and `prependVertexCode` work; cube maps and more than one texture on a Vulkan 1.1 driver are refused with a message |
+| `Gdx.gl.glDrawArrays`, `glDrawElements`, `glUseProgram`, `glUniform*`, `glVertexAttribPointer`, ... | **unchanged** | served by the shim for a program with one vertex buffer (what `Mesh` and the stock classes use); vertex data in memory (a `Mesh` of the `VertexArray` type) and several vertex buffers are refused with a message |
 
 Rules that carry over from stock libGDX: dispose textures and batches yourself; do not dispose a texture between drawing with it and the batch's `end()`.
 Stock batches keep the projection they were created with, so on a window resize update it the way you already do.

@@ -53,6 +53,12 @@ public final class GlslTranslator {
         /** Bytes between array elements, 0 when it is not an array. */
         public int arrayStride;
 
+        /** For a member of a struct uniform (named like {@code u_dirLights[1].color}): the struct uniform it belongs to; null otherwise. */
+        StructUniform parent;
+        /** The member's name inside the struct, and its element of the struct array. */
+        String member;
+        int element;
+
         Uniform (String name, String type, int arraySize) {
             this.name = name;
             this.type = type;
@@ -65,6 +71,31 @@ public final class GlslTranslator {
 
         @Override public String toString () {
             return type + " " + name + (arraySize > 0 ? "[" + arraySize + "]" : "") + (active ? (push ? " push@" : " ring@") + offset : " inactive");
+        }
+    }
+
+    /** A {@code struct} whose members are float, int or vec/ivec types; it can be the type of a uniform. */
+    static final class StructDef {
+        final String name;
+        final List<String[]> members = new ArrayList<String[]>(); // {type, name}
+
+        StructDef (String name) {
+            this.name = name;
+        }
+    }
+
+    /** A uniform whose type is a struct (or an array of them). It lives in the uniform block; its members are listed as uniforms of their own. */
+    static final class StructUniform {
+        final String name;
+        final StructDef type;
+        final int arraySize;
+        boolean active;
+        int offset, stride;
+
+        StructUniform (String name, StructDef type, int arraySize) {
+            this.name = name;
+            this.type = type;
+            this.arraySize = arraySize;
         }
     }
 
@@ -107,6 +138,13 @@ public final class GlslTranslator {
         public int blockBytes;
         public boolean bindless;
         public final List<String> warnings = new ArrayList<String>();
+        final Map<String, StructDef> structs = new LinkedHashMap<String, StructDef>();
+        final List<StructUniform> structUniforms = new ArrayList<StructUniform>();
+
+        StructUniform structUniform (String name) {
+            for (StructUniform s : structUniforms) if (s.name.equals(name)) return s;
+            return null;
+        }
 
         public Uniform uniform (String name) {
             for (Uniform u : uniforms) if (u.name.equals(name)) return u;
@@ -200,7 +238,8 @@ public final class GlslTranslator {
     private static final Pattern DECL = Pattern.compile(
         "^((?:\\s*\\b(?:invariant|flat|smooth|centroid|highp|mediump|lowp|uniform|attribute|varying|in|out|const)\\b)+)\\s+([A-Za-z_]\\w*)\\s+([^;]*);\\s*$",
         Pattern.DOTALL);
-    private static final Pattern WORD = Pattern.compile("\\b(invariant|flat|smooth|centroid|highp|mediump|lowp|uniform|attribute|varying|in|out|const)\\b");
+    private static final Pattern STRUCT = Pattern.compile("^\\s*struct\\s+(\\w+)\\s*\\{([^{}]*)\\}\\s*;\\s*$", Pattern.DOTALL);
+    private static final Pattern WORD =Pattern.compile("\\b(invariant|flat|smooth|centroid|highp|mediump|lowp|uniform|attribute|varying|in|out|const)\\b");
 
     private static final class Stage {
         final GlslCompiler.Stage stage;
@@ -275,7 +314,12 @@ public final class GlslTranslator {
 
         private void classify (int start, int end, Translation t) {
             final String statement = text.substring(start, end);
-            if (statement.trim().startsWith("layout") || statement.trim().startsWith("struct")) return; // already Vulkan style, or a type definition
+            if (statement.trim().startsWith("struct")) {
+                final Matcher sm = STRUCT.matcher(statement);
+                if (sm.matches()) recordStruct(t, sm.group(1), sm.group(2), start, end, lineAt(start));
+                return; // a type definition
+            }
+            if (statement.trim().startsWith("layout")) return; // already Vulkan style
             final Matcher m = DECL.matcher(statement);
             if (!m.matches()) return;
             final String qualifiers = m.group(1);
@@ -329,6 +373,43 @@ public final class GlslTranslator {
             }
         }
 
+        /** Struct definitions found in this stage: {start, end} of the statement, and the name. */
+        final List<int[]> structStatements = new ArrayList<int[]>();
+        final List<String> structNames = new ArrayList<String>();
+
+        private void recordStruct (Translation t, String structName, String body, int start, int end, int line) {
+            final StructDef def = new StructDef(structName);
+            for (String m : body.split(";")) {
+                final String member = m.trim();
+                if (member.isEmpty()) continue;
+                final Matcher mm = Pattern.compile("^(?:(?:highp|mediump|lowp)\\s+)?(\\w+)\\s+(\\w+)$").matcher(member);
+                if (!mm.matches()) return; // an array member or another form: the struct stays as it is, and cannot be a uniform type
+                def.members.add(new String[] {mm.group(1), mm.group(2)});
+            }
+            for (String[] m : def.members) {
+                if (!isBlockType(m[0]) || m[0].equals("bool") || m[0].startsWith("mat")) return; // only float, int, vecN and ivecN members
+            }
+            if (!t.structs.containsKey(structName)) t.structs.put(structName, def);
+            structStatements.add(new int[] {start, end});
+            structNames.add(structName);
+        }
+
+        private void addStructUniform (Translation t, Decl d, String[] n, int array) {
+            final StructDef def = t.structs.get(d.type);
+            if (t.structUniform(n[0]) != null) return; // declared in both stages
+            final StructUniform su = new StructUniform(n[0], def, array);
+            t.structUniforms.add(su);
+            for (int e = 0; e < Math.max(1, array); e++) {
+                for (String[] m : def.members) {
+                    final Uniform leaf = new Uniform(array > 0 ? n[0] + "[" + e + "]." + m[1] : n[0] + "." + m[1], m[0], 0);
+                    leaf.parent = su;
+                    leaf.member = m[1];
+                    leaf.element = e;
+                    t.uniforms.add(leaf);
+                }
+            }
+        }
+
         private void addUniform (Translation t, Decl d, String[] n) {
             final String type = d.type;
             int array = 0;
@@ -338,6 +419,10 @@ public final class GlslTranslator {
                 } catch (NumberFormatException e) {
                     fail(d.line, "the array size of the uniform '" + n[0] + "' must be a number after preprocessing, not '" + n[1] + "'");
                 }
+            }
+            if (t.structs.containsKey(type)) {
+                addStructUniform(t, d, n, array);
+                return;
             }
             if (type.equals("sampler2D")) {
                 if (array > 0) fail(d.line, "an array of samplers ('" + n[0] + "') is not supported");
@@ -519,8 +604,22 @@ public final class GlslTranslator {
 
     /** Which uniforms are read, where each goes, and the byte offsets. */
     private static void assignUniforms (Translation t, Stage v, Stage f) {
+        // The structs that are the type of a uniform are declared in the uniform block's prelude, in both stages: take their definitions out of the sources.
+        for (Stage s : new Stage[] {v, f}) {
+            final StringBuilder blanked = new StringBuilder(s.text);
+            for (int i = 0; i < s.structStatements.size(); i++) {
+                boolean used = false;
+                for (StructUniform su : t.structUniforms) used |= su.type.name.equals(s.structNames.get(i));
+                if (!used) continue;
+                final int[] range = s.structStatements.get(i);
+                for (int c = range[0]; c < range[1]; c++) if (blanked.charAt(c) != '\n') blanked.setCharAt(c, ' ');
+            }
+            s.text = blanked.toString();
+        }
         final String bodies = stripDeclarations(v) + "\n" + stripDeclarations(f);
-        for (Uniform u : t.uniforms) u.active = Pattern.compile("\\b" + Pattern.quote(u.name) + "\\b").matcher(bodies).find();
+        for (Uniform u : t.uniforms) if (u.parent == null) u.active = Pattern.compile("\\b" + Pattern.quote(u.name) + "\\b").matcher(bodies).find();
+        for (StructUniform su : t.structUniforms) su.active = Pattern.compile("\\b" + Pattern.quote(su.name) + "\\b").matcher(bodies).find();
+        for (Uniform u : t.uniforms) if (u.parent != null) u.active = u.parent.active;
         for (Sampler s : t.samplers) s.active = Pattern.compile("\\b" + Pattern.quote(s.name) + "\\b").matcher(bodies).find();
 
         int active = 0;
@@ -535,7 +634,7 @@ public final class GlslTranslator {
         int push = 0;
         int block = 0;
         for (Uniform u : t.uniforms) {
-            if (!u.active) continue;
+            if (!u.active || u.parent != null) continue;
             if (u.arraySize == 0) {
                 final int[] l = layoutOf(u.type, false);
                 final int at = roundUp(push, l[1]);
@@ -567,6 +666,34 @@ public final class GlslTranslator {
             }
             if (block > UNIFORM_BYTES) {
                 throw new GlslTranslationException(v.name + ": the uniforms need " + block + " bytes; the limit for one program is " + UNIFORM_BYTES);
+            }
+        }
+        // Struct uniforms, std140: the struct starts on 16 bytes, its members follow their own alignment, its size and the array stride round up to 16.
+        for (StructUniform su : t.structUniforms) {
+            if (!su.active) continue;
+            final int[] memberOffset = new int[su.type.members.size()];
+            int at = 0;
+            for (int i = 0; i < memberOffset.length; i++) {
+                final int[] l = layoutOf(su.type.members.get(i)[0], true);
+                at = roundUp(at, l[1]);
+                memberOffset[i] = at;
+                at += l[0];
+            }
+            su.stride = roundUp(at, 16);
+            block = roundUp(block, 16);
+            su.offset = block;
+            block += su.stride * Math.max(1, su.arraySize);
+            if (block > UNIFORM_BYTES) {
+                throw new GlslTranslationException(v.name + ": the uniforms need " + block + " bytes; the limit for one program is " + UNIFORM_BYTES);
+            }
+            for (Uniform u : t.uniforms) {
+                if (u.parent != su) continue;
+                for (int i = 0; i < memberOffset.length; i++) {
+                    if (!su.type.members.get(i)[1].equals(u.member)) continue;
+                    u.push = false;
+                    u.offset = su.offset + u.element * su.stride + memberOffset[i];
+                    u.size = layoutOf(u.type, true)[0];
+                }
             }
         }
         if (t.bindless) {
@@ -604,9 +731,18 @@ public final class GlslTranslator {
         final List<Uniform> pushUniforms = new ArrayList<Uniform>();
         final List<Uniform> ringUniforms = new ArrayList<Uniform>();
         for (Uniform u : t.uniforms) {
-            if (!u.active) continue;
+            if (!u.active || u.parent != null) continue;
             (u.push ? pushUniforms : ringUniforms).add(u);
         }
+        final StringBuilder structText = new StringBuilder();
+        final java.util.Set<String> written = new java.util.HashSet<String>();
+        for (StructUniform su : t.structUniforms) {
+            if (!su.active || !written.add(su.type.name)) continue;
+            structText.append("struct ").append(su.type.name).append(" { ");
+            for (String[] m : su.type.members) structText.append(m[0]).append(' ').append(m[1]).append("; ");
+            structText.append("};\n");
+        }
+        out.append(structText);
         final StringBuilder defines = new StringBuilder();
         for (Uniform u : pushUniforms) {
             if (u.isBool()) {
@@ -621,8 +757,14 @@ public final class GlslTranslator {
             for (String m : pushMembers) out.append(m).append(' ');
             out.append("};\n");
         }
-        if (!ringUniforms.isEmpty()) {
+        boolean anyStruct = false;
+        for (StructUniform su : t.structUniforms) anyStruct |= su.active;
+        if (!ringUniforms.isEmpty() || anyStruct) {
             out.append("layout(std140, set = 0, binding = 0) uniform GdxUniforms { ");
+            for (StructUniform su : t.structUniforms) {
+                if (su.active) out.append("layout(offset = ").append(su.offset).append(") ").append(su.type.name).append(' ').append(su.name)
+                    .append(su.arraySize > 0 ? "[" + su.arraySize + "]" : "").append("; ");
+            }
             for (Uniform u : ringUniforms) {
                 if (u.isBool()) {
                     out.append("layout(offset = ").append(u.offset).append(") int gdx_b_").append(u.name).append("; ");
