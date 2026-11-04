@@ -72,6 +72,14 @@ public final class CommandStream {
         put(id);
     }
 
+    private long set0Generation;
+
+    /**
+     * Counts the operations that bind Set 0 data. A caller that bound its own data can skip binding it again for the next draw when this
+     * number has not changed since, in the same frame.
+     */
+    public long set0Generation() { return set0Generation; }
+
     /** @param block32 the whole 128-byte push-constant block, as 32 floats */
     public void pushConstants(float[] block32) {
         ensure(33);
@@ -181,6 +189,7 @@ public final class CommandStream {
      * bind different data. The uniform part is at most 16 KB.
      */
     public void set0Data(int[] words, int uniformBytes, int storageBytes) {
+        set0Generation++;
         final int uw = (uniformBytes + 3) >> 2, sw = (storageBytes + 3) >> 2;
         ensure(3 + uw + sw);
         put(SET0_DATA);
@@ -233,6 +242,7 @@ public final class CommandStream {
 
     /** Set 0's storage binding reads the whole resource buffer for the draws that follow (instanced sprites, compute-driven data). */
     public void bindStorage(int resourceBuffer) {
+        set0Generation++;
         ensure(2);
         put(BIND_STORAGE);
         put(resourceBuffer);

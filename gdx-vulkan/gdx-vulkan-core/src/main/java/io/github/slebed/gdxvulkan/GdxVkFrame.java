@@ -175,6 +175,19 @@ public final class GdxVkFrame {
      * A pipeline by key, created on first use. {@code vertName}/{@code fragName} are shader resources ({@code name.vert}); the Tier A or
      * Tier B build is chosen to match the device.
      */
+    /** The frames drawn so far; changes at every {@link #begin}. */
+    public long frameNumber() { return frameNumber; }
+
+    /** A pipeline by key from SPIR-V you hold (little-endian words as bytes), created on first use: what {@code VulkanShaderProgram} uses. */
+    public int pipeline(String key, String name, byte[] vertSpv, byte[] fragSpv, GdxVkPipelineDesc desc) {
+        Integer id = pipelines.get(key);
+        if (id == null) {
+            id = presenter.createPipeline(name, vertSpv, fragSpv, desc);
+            pipelines.put(key, id);
+        }
+        return id;
+    }
+
     public int pipeline(String key, String name, VulkanShaderPipelineBundle bundle, GdxVkPipelineDesc desc) {
         Integer id = pipelines.get(key);
         if (id == null) {

@@ -1,6 +1,6 @@
 # The stock GLSL translator
 
-Status: steps 1 to 4 below (assemble, preprocess, translate, compile) are built and tested; step 5 (the reflection check) is not; the program class and the GL-shim calls are not (see "Not in this step"). The checklist section "Phase 5b" tracks the work. Related: `docs/SHADER_COMPILER.md` (why glslang).
+Status: steps 1 to 4 below (assemble, preprocess, translate, compile) and the program class are built and tested on both GPUs and both code paths; step 5 (the reflection check) and the GL-shim calls are not. The checklist section "Phase 5b" tracks the work. Related: `docs/SHADER_COMPILER.md` (why glslang).
 
 ## What it is for
 A game's own libGDX shaders: the `attribute` / `varying` / `uniform` GLSL that goes into `new ShaderProgram(vertexSource, fragmentSource)`. The translator turns them
@@ -58,6 +58,13 @@ Everything else stays a glslang error with the original line number.
 - Errors: the line number of the original source survives preprocessing and translation, including through `prependVertexCode`.
 - The run-time compiler call count is zero in every built-in code path (the translator is never on the path of base functionality).
 
-## Not in this step
-The `VulkanShaderProgram` class (uniform setters, binding, the batches' `setShader`) and the GL-shim calls that let a stock `ShaderProgram` run unchanged are the next
-steps (checklist sections D and E). This step produces and tests the translation they stand on.
+## The program class (step 2, built)
+`VulkanShaderProgram` owns a translation and the SPIR-V, and keeps the uniform values: setting one writes a word into the program's push-constant array or its
+uniform-block array. A batch asks the program to get ready for a draw: it writes each texture's slot (modern path) or binds the one texture (compatibility path),
+copies the push words into the batch's push block, and emits the uniform block when it changed since the program last bound it in this frame. The batch sets
+`u_projTrans` and `u_texture` first, as stock's `SpriteBatch` does, and flushes on every texture change, as stock does. Pipelines are built per program and blend
+state, with the vertex attributes (`a_position`, `a_color`, `a_texCoord0`) placed at the locations the program gave them.
+
+## Not yet
+Programs for the polygon batch, the shape renderer and the model batch, the SPIRV-Reflect check on translated shaders, the on-disk cache of compiled SPIR-V, and the
+GL-shim calls that let a stock `ShaderProgram` run unchanged (checklist sections B, C and E).

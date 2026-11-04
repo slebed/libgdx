@@ -898,6 +898,11 @@ public class VulkanGL20 extends VulkanGL20Base {
     }
 
     /** The bindless-table slot (Tier A) or 0 (Tier B) of a native texture; it changes whenever the texture is rebound. */
+    /** The GL handle of the texture bound to a texture unit (0 when none): what a program with several samplers reads its textures from. */
+    public int boundTexture (int unit) {
+        return unit >= 0 && unit < boundTexture.length ? boundTexture[unit] : 0;
+    }
+
     public int slotOf (int nativeTexture) {
         return resources.slotOf(nativeTexture);
     }

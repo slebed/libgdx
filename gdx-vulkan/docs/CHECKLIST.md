@@ -19,12 +19,12 @@ the plan names.
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 11 | 1 | 0 | 12 |
 | Phase 5: 3D with stock models | 9 | 3 | 1 | 13 |
-| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 11 | 6 | 25 | 42 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 12 | 8 | 22 | 42 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
 | Demos (to plan once Phase 5 is complete) | 0 | 0 | 7 | 7 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **167** | **14** | **50** | **231** |
+| **All** | **168** | **16** | **47** | **231** |
 ---
 
 ## Core decisions
@@ -338,9 +338,9 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [ ] The build still works without the compiler's sources for people who only use precompiled bundles (optional component), or the dependency is vendored
 
 ### D. `VulkanShaderProgram` API
-- [ ] `new VulkanShaderProgram(vertexSource, fragmentSource)` and the `FileHandle` form, with `isCompiled`, `getLog`, `getAttributes`, `getUniforms`, `hasUniform`, `dispose`
-- [ ] The `ShaderProgram` setters: `setUniformf`/`i` (1 to 4 values), `setUniformMatrix` (2/3/4), array and `Vector`/`Color`/`Matrix` overloads, `setUniform*` by location, `fetchUniformLocation`, `pedantic`, `bind`/`begin`/`end`
-- [ ] Custom shaders for the batches the way stock does it: `new VulkanSpriteBatch(size, program)`, `setShader`, and the same for the polygon batch and the shape renderer
+- [x] `new VulkanShaderProgram(vertexSource, fragmentSource)` and the `FileHandle` form (and with an explicit frame), with `isCompiled`, `getLog`, `getAttributes`, `getAttributeLocation`, `getUniforms`, `hasUniform`, `dispose`, and the statics `prependVertexCode`, `prependFragmentCode`, `pedantic` (a missing uniform throws, as in stock). A shader that fails does not throw: `isCompiled()` is false and `getLog()` has the message with your line numbers
+- [~] The `ShaderProgram` setters: `setUniformi`/`setUniformf` with 1 to 4 values (by name; by location for one value), `setUniformf` with `Vector2`/`Vector3`/`Color`, `setUniform1fv` to `setUniform4fv`, `setUniformMatrix` with `Matrix4` and `Matrix3` (and `transpose`), `setUniformMatrix2fv`/`3fv`/`4fv`, `fetchUniformLocation`, `bind`/`begin`/`end`; uniform values are kept by the program and reach the GPU as push-constant words or one uniform block, bound again only when the data, the frame, or another Set 0 binding changed (`ShaderProgramTest`). Missing: the `FloatBuffer` and `IntBuffer` overloads and the by-location forms of the multi-value setters
+- [~] Custom shaders for the batches the way stock does it: `VulkanSpriteBatch.setShaderProgram(program)` is done and tested on the GPU (a translated stock sprite shader draws a picture identical to the built-in one; custom uniforms from push constants and the uniform block; two programs and the built-in shader alternating in one frame; a second texture from texture unit 1; a shader that does not compile is refused with its log), on both code paths and both GPUs. The name is not stock's `setShader` because adding an overload would make `batch.setShader(null)` ambiguous for existing code; stock's `setShader(ShaderProgram)` will accept a stock `ShaderProgram` when the GL shim runs them (section E). Not done: the same for the polygon batch and the shape renderer, and a constructor taking the program
 - [ ] Custom 3D shaders: `ShaderProvider` / `Shader` for `VulkanModelBatch` built on `VulkanShaderProgram`
 - [ ] `VulkanShaderPipelineBundle` (precompiled SPIR-V) stays supported as the build-time path
 

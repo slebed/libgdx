@@ -32,12 +32,12 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 |---|---|
 | macOS and iOS | needs a Mac to build and test; not started |
 | Wayland | X11 only on Linux |
-| Custom GLSL at run time | shaders are compiled to SPIR-V at build time; `new ShaderProgram(vertexSource, fragmentSource)` is not supported. **In progress:** a `VulkanShaderProgram` that takes your existing libGDX GLSL and translates it to Vulkan at run time (tracked in `docs/CHECKLIST.md`, "Phase 5b") |
+| Custom GLSL | `VulkanShaderProgram` runs your libGDX GLSL with `VulkanSpriteBatch` today. **Not yet:** the polygon batch, the shape renderer and `ModelBatch` shaders, and the stock `ShaderProgram` class itself (tracked in `docs/CHECKLIST.md`, "Phase 5b") |
 | Direct OpenGL drawing | `glDrawArrays`, `glUseProgram`, `Mesh.render(ShaderProgram)` and similar throw an exception that says which Vulkan class to use |
 | Spot lights, point-light shadows | libGDX's own default shader has neither |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (167 of 231 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (168 of 231 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). **Known problem:** on the Adreno 650 everything works except 3D models
@@ -213,7 +213,7 @@ Vulkan context yourself (a test, a tool), pass the frame explicitly: `new Vulkan
 | `ModelBatch` | `VulkanModelBatch` | same `begin / render(instances, environment) / end` |
 | `Stage` | `VulkanStage` | the stock `Stage` with a `VulkanSpriteBatch`; same constructors |
 | `Texture`, `Pixmap`, `TextureAtlas`, `FrameBuffer`, `Mesh`, `BitmapFont`, `Skin`, `AssetManager`, `Model`, `Environment`, `Camera` and the Scene2D actors | **unchanged** | these run on the shim as they are |
-| `ShaderProgram` (GLSL source) | SPIR-V shader bundle (`VulkanShaderPipelineBundle`) | write GLSL as before, compile it with `glslc` at build time; the batches' own shaders in `gdx-vulkan-core/src/main/shaders` are the examples |
+| `ShaderProgram` (GLSL source) | `VulkanShaderProgram` | your libGDX GLSL as it is (`attribute`, `varying`, `uniform`, `gl_FragColor`, `texture2D`), translated and compiled when the program is created; same constructors and `setUniform...` calls; give it to a batch with `setShaderProgram(program)` (sprite batch so far). Uniform arrays, `bool`, `int`, several textures (modern path) and `prependVertexCode` work; structs, cube maps and more than one texture on a Vulkan 1.1 driver are refused with a message |
 | `Gdx.gl.glDrawArrays`, `glUseProgram`, ... | not supported | use the batches, or a compute shader |
 
 Rules that carry over from stock libGDX: dispose textures and batches yourself; do not dispose a texture between drawing with it and the batch's `end()`.

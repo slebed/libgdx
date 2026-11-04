@@ -99,6 +99,8 @@ public final class GlslTranslator {
         public final List<Uniform> uniforms = new ArrayList<Uniform>();
         public final List<Attribute> attributes = new ArrayList<Attribute>();
         public final List<Sampler> samplers = new ArrayList<Sampler>();
+        /** How many colour outputs the fragment shader writes (1 for {@code gl_FragColor}, more with {@code gl_FragData[n]}). */
+        public int colorOutputs = 1;
         /** Bytes of push constants the program uses (a multiple of 4). */
         public int pushBytes;
         /** Bytes of the uniform block in the ring, 0 when everything fits in the push constants. */
@@ -422,6 +424,7 @@ public final class GlslTranslator {
                     final StringBuilder outs = new StringBuilder();
                     for (int i = 0; i <= max; i++) outs.append("layout(location = ").append(i).append(") out vec4 gdx_FragData").append(i).append("; ");
                     fragmentPrelude = outs.toString();
+                    t.colorOutputs = max + 1;
                 }
                 if (Pattern.compile("\\bgl_FragColor\\b").matcher(code).find()) {
                     code = code.replaceAll("\\bgl_FragColor\\b", "gdx_FragColor");
@@ -437,7 +440,7 @@ public final class GlslTranslator {
                 out.append("vec4 gdx_vk_clip(vec4 p) { p.z = 0.5 * (p.z + p.w); if (GDX_PREROT == 1) p.xy = vec2(p.y, -p.x); "
                     + "else if (GDX_PREROT == 2) p.xy = -p.xy; else if (GDX_PREROT == 3) p.xy = vec2(-p.y, p.x); return p; }\n");
             }
-            appendBlocks(out, t);
+            appendBlocks(out, t, stripDeclarations(this));
             out.append(fragmentPrelude).append('\n');
             out.append("#line 1\n");
             out.append(code);
@@ -589,7 +592,12 @@ public final class GlslTranslator {
         return b.toString();
     }
 
-    private static void appendBlocks (StringBuilder out, Translation t) {
+    /** Whether the code reads a name. A texture is declared only in the stage that reads it: an unused unsized array would be sized to one element. */
+    private static boolean reads (String body, String name) {
+        return Pattern.compile("\\b" + Pattern.quote(name) + "\\b").matcher(body).find();
+    }
+
+    private static void appendBlocks (StringBuilder out, Translation t, String body) {
         // Push constants: texture slots, then the uniforms that fit.
         final List<String> pushMembers = new ArrayList<String>();
         for (Sampler s : t.samplers) if (s.active && s.slotOffset >= 0) pushMembers.add("layout(offset = " + s.slotOffset + ") int gdx_slot_" + s.name + ";");
@@ -628,15 +636,19 @@ public final class GlslTranslator {
         }
         // Textures.
         boolean any = false;
-        for (Sampler s : t.samplers) any |= s.active;
+        for (Sampler s : t.samplers) any |= s.active && reads(body, s.name);
         if (any) {
             if (t.bindless) {
                 out.append("layout(set = 1, binding = 0) uniform sampler2D gdx_textures[];\n");
                 for (Sampler s : t.samplers) {
-                    if (s.active) defines.append("#define ").append(s.name).append(" gdx_textures[nonuniformEXT(gdx_slot_").append(s.name).append(")]\n");
+                    if (s.active && reads(body, s.name)) {
+                        defines.append("#define ").append(s.name).append(" gdx_textures[nonuniformEXT(gdx_slot_").append(s.name).append(")]\n");
+                    }
                 }
             } else {
-                for (Sampler s : t.samplers) if (s.active) out.append("layout(set = 1, binding = 0) uniform sampler2D ").append(s.name).append(";\n");
+                for (Sampler s : t.samplers) {
+                    if (s.active && reads(body, s.name)) out.append("layout(set = 1, binding = 0) uniform sampler2D ").append(s.name).append(";\n");
+                }
             }
         }
         out.append(defines);
