@@ -47,6 +47,8 @@ struct PipelineDesc {
     bool blend = false;
     uint32_t srcColor = 1, dstColor = 0, srcAlpha = 1, dstAlpha = 0; // GL_ONE, GL_ZERO
     uint32_t colorOutputs = 1; // colour outputs the fragment shader writes; the render target it is used with must have as many attachments
+    // Specialization constants 1..n of both shaders (constant 0 is the pre-rotation, set by the presenter). Material and light flags of the model shaders.
+    std::vector<int32_t> spec;
 };
 
 class Presenter {
@@ -63,6 +65,9 @@ public:
     // Diagnostics and tests: render as if the display were rotated by `quarterTurns` (0-3, clockwise); -1 follows the surface. The swapchain is
     // rebuilt on the next frame. Only meaningful on a square surface (a desktop window cannot change its image size).
     void debugForceRotation(int quarterTurns);
+    // A depth buffer on the swapchain itself (0 none, 1 depth, 2 depth + stencil), so 3D can depth-test on screen. Takes effect at the next frame.
+    void setDepth(int mode);
+    int depthMode() const;
 
     // Waits for a free frame slot, acquires an image and starts a pass that clears it to `rgba`.
     FrameStatus beginFrame(const float rgba[4]);

@@ -10,6 +10,9 @@ import io.github.slebed.gdxvulkan.GdxVkResources;
 import io.github.slebed.gdxvulkan.GdxVkSampler;
 
 import java.nio.Buffer;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.ShortBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
@@ -888,5 +891,138 @@ public class VulkanGL20 extends VulkanGL20Base {
     /** Textures the shim currently knows (GL names, not native images). */
     public int textureCount() {
         return textures.size;
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------ buffers
+
+    /** A GL buffer name and the persistent native buffer behind it (plan, Core decision 3). Created on the first data, not on glGenBuffer. */
+    private static final class GlBuffer {
+        final int handle;
+        int nativeId = -1;
+        long size;
+        long usedFrame = -1; // the frame whose draws last read it: changing it that frame means a new native buffer (copy-on-write)
+
+        GlBuffer(int handle) {
+            this.handle = handle;
+        }
+    }
+
+    private final IntMap<GlBuffer> buffers = new IntMap<GlBuffer>();
+    private int boundArrayBuffer, boundElementBuffer;
+    private long bufferFrame;
+
+    /** Called once at the start of every frame ({@code GdxVkFrame.begin}). */
+    public void frameStarted() {
+        bufferFrame++;
+    }
+
+    @Override public int glGenBuffer () {
+        int h = nextHandle++;
+        buffers.put(h, new GlBuffer(h));
+        return h;
+    }
+
+    @Override public void glGenBuffers (int n, IntBuffer out) {
+        for (int i = 0; i < n; i++) out.put(glGenBuffer());
+    }
+
+    @Override public void glBindBuffer (int target, int buffer) {
+        if (target == GL_ARRAY_BUFFER) boundArrayBuffer = buffer;
+        else if (target == GL_ELEMENT_ARRAY_BUFFER) boundElementBuffer = buffer;
+        else throw unsupported("glBindBuffer(target 0x" + Integer.toHexString(target) + ")");
+        if (buffer != 0 && buffers.get(buffer) == null) buffers.put(buffer, new GlBuffer(buffer)); // GL lets a name be bound before it was generated
+    }
+
+    private GlBuffer boundBuffer (int target, String call) {
+        int h = target == GL_ARRAY_BUFFER ? boundArrayBuffer : target == GL_ELEMENT_ARRAY_BUFFER ? boundElementBuffer : -1;
+        if (h < 0) throw unsupported(call + "(target 0x" + Integer.toHexString(target) + ")");
+        GlBuffer b = h == 0 ? null : buffers.get(h);
+        if (b == null) throw new GdxRuntimeException("gdx-vulkan: " + call + " with no buffer bound");
+        return b;
+    }
+
+    @Override public void glBufferData (int target, int size, Buffer data, int usage) {
+        GlBuffer b = boundBuffer(target, "glBufferData");
+        if (data != null && data.remaining() == 0 && size > 0) data = null; // nothing to copy
+        store(b, data == null ? null : directBytes(data, size), size);
+    }
+
+    @Override public void glBufferSubData (int target, int offset, int size, Buffer data) {
+        GlBuffer b = boundBuffer(target, "glBufferSubData");
+        if (b.nativeId < 0 || offset < 0 || offset + (long)size > b.size) throw new GdxRuntimeException("gdx-vulkan: glBufferSubData outside the store of the buffer");
+        // A sub-range update after the buffer was drawn this frame is applied in place: the whole-buffer rename (glBufferData, or a mesh
+        // upload) is the copy-on-write path. Stock libGDX only calls this from VertexBufferObjectSubData and IndexBufferObjectSubData.
+        ByteBuffer src = directBytes(data, size);
+        resources.writeBuffer(b.nativeId, offset, src, src.position(), size);
+    }
+
+    @Override public void glDeleteBuffer (int buffer) {
+        GlBuffer b = buffers.remove(buffer);
+        if (b != null && b.nativeId >= 0) resources.destroyBuffer(b.nativeId); // deferred until the GPU is done with it
+        if (boundArrayBuffer == buffer) boundArrayBuffer = 0;
+        if (boundElementBuffer == buffer) boundElementBuffer = 0;
+    }
+
+    @Override public void glDeleteBuffers (int n, IntBuffer names) {
+        for (int i = 0, p = names.position(); i < n; i++) glDeleteBuffer(names.get(p + i));
+    }
+
+    /** The bytes of a GL data argument as a direct buffer positioned at its start. A heap buffer is copied. */
+    private static ByteBuffer directBytes (Buffer data, int bytes) {
+        if (data instanceof ByteBuffer && data.isDirect()) return (ByteBuffer)data;
+        ByteBuffer out = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder());
+        if (data instanceof ByteBuffer) out.put(((ByteBuffer)data).duplicate());
+        else if (data instanceof FloatBuffer) out.asFloatBuffer().put(((FloatBuffer)data).duplicate());
+        else if (data instanceof ShortBuffer) out.asShortBuffer().put(((ShortBuffer)data).duplicate());
+        else if (data instanceof IntBuffer) out.asIntBuffer().put(((IntBuffer)data).duplicate());
+        else throw new GdxRuntimeException("gdx-vulkan: unsupported buffer data type " + data.getClass().getSimpleName());
+        out.position(0);
+        return out;
+    }
+
+    /** (Re)defines the store of a buffer: a new native buffer when the size changed or the old one was drawn this frame, the same one otherwise. */
+    private void store (GlBuffer b, ByteBuffer data, long size) {
+        if (size <= 0) {
+            if (b.nativeId >= 0) resources.destroyBuffer(b.nativeId);
+            b.nativeId = -1;
+            b.size = 0;
+            return;
+        }
+        if (b.nativeId < 0 || b.size != size || b.usedFrame == bufferFrame) {
+            if (b.nativeId >= 0) resources.destroyBuffer(b.nativeId); // retired, so draws already recorded keep what they read
+            b.nativeId = resources.createBuffer(size);
+            b.size = size;
+            b.usedFrame = -1;
+        }
+        if (data != null) resources.writeBuffer(b.nativeId, 0, data, data.position(), (int)Math.min(size, data.remaining()));
+    }
+
+    /**
+     * Stores {@code bytes} bytes from the start of {@code data} in the buffer behind a GL handle, creating or replacing the native buffer as
+     * {@code glBufferData} would. This is how the batches feed stock {@code Mesh} data in: a Vulkan batch never calls {@code bind(ShaderProgram)},
+     * which is where stock libGDX calls {@code glBufferData}. @return the native buffer id
+     */
+    public int uploadBuffer (int glHandle, ByteBuffer data, int bytes) {
+        GlBuffer b = buffers.get(glHandle);
+        if (b == null) throw new GdxRuntimeException("gdx-vulkan: no such GL buffer " + glHandle);
+        ByteBuffer d = data.duplicate();
+        d.position(0);
+        d.limit(Math.min(bytes, d.capacity())); // the caller's limit may be stale: stock only applies it inside bind(ShaderProgram)
+        store(b, bytes == 0 ? null : d, bytes);
+        return b.nativeId;
+    }
+
+    /** The native buffer behind a GL buffer name, or -1 while it has no data. Marks it as read by this frame's draws. */
+    public int nativeBuffer (int glHandle) {
+        GlBuffer b = buffers.get(glHandle);
+        if (b == null || b.nativeId < 0) return -1;
+        b.usedFrame = bufferFrame;
+        return b.nativeId;
+    }
+
+    /** Size in bytes of the store behind a GL buffer name, 0 if none. */
+    public long bufferSize (int glHandle) {
+        GlBuffer b = buffers.get(glHandle);
+        return b == null ? 0 : b.size;
     }
 }

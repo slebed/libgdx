@@ -13,7 +13,7 @@ import java.nio.IntBuffer;
  */
 public final class CommandStream {
     public static final int BIND_PIPELINE = 1, PUSH_CONSTANTS = 2, VIEWPORT = 3, SCISSOR = 4, SCISSOR_ENABLE = 5, CLEAR = 6, BIND_VERTEX = 7,
-        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13, BIND_TARGET = 14, DEPTH_STATE = 15, STENCIL_STATE = 16, CULL_MODE = 17, PUSH_RANGE = 18;
+        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13, BIND_TARGET = 14, DEPTH_STATE = 15, STENCIL_STATE = 16, CULL_MODE = 17, PUSH_RANGE = 18, BIND_VERTEX_BUFFER = 19, SET0_DATA = 20;
     public static final int INDEX_U16 = 0, INDEX_U32 = 1;
 
     private ByteBuffer buffer;   // the stream as the native side reads it
@@ -173,6 +173,29 @@ public final class CommandStream {
         w[p++] = CULL_MODE;
         w[p++] = vkCullMode;
         n = p;
+    }
+
+    /**
+     * Copies per-frame data into the frame ring and binds it as Set 0 for the draws that follow: {@code uniformBytes} for the uniform binding and
+     * {@code storageBytes} for the storage binding, both read from {@code words} (uniform words first). Ordered with the draws, so a later flush can
+     * bind different data. The uniform part is at most 16 KB.
+     */
+    public void set0Data(int[] words, int uniformBytes, int storageBytes) {
+        final int uw = (uniformBytes + 3) >> 2, sw = (storageBytes + 3) >> 2;
+        ensure(3 + uw + sw);
+        put(SET0_DATA);
+        put(uniformBytes);
+        put(storageBytes);
+        for (int i = 0; i < uw + sw; i++) put(words[i]);
+    }
+
+    /** Vertex data from a persistent resource buffer (a stock {@code Mesh}'s), starting {@code offset} bytes in. */
+    public void bindVertexBuffer(int resourceBuffer, long offset) {
+        ensure(4);
+        put(BIND_VERTEX_BUFFER);
+        put(resourceBuffer);
+        put((int)offset);
+        put((int)(offset >>> 32));
     }
 
     public void bindVertex(int block, long offset) {

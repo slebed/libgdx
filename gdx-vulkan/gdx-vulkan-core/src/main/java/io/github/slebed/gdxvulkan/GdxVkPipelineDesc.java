@@ -20,6 +20,11 @@ public final class GdxVkPipelineDesc {
     public int srcColor = 1, dstColor = 0, srcAlpha = 1, dstAlpha = 0; // GL_ONE, GL_ZERO
     /** Colour outputs the fragment shader writes (location 0..n-1): the render target it draws into must have as many attachments. */
     public int colorOutputs = 1;
+    /**
+     * Values of specialization constants 1..n (constant 0 is the presenter's pre-rotation) for both shaders, so one shader serves many material
+     * and lighting variants. A shader ignores ids it does not declare. Part of the pipeline's identity: use it in the cache key.
+     */
+    public int[] specConstants = new int[0];
     private final List<int[]> attributes = new ArrayList<int[]>();
 
     public GdxVkPipelineDesc attribute(int location, int vkFormat, int offset) {
@@ -28,7 +33,8 @@ public final class GdxVkPipelineDesc {
     }
 
     int[] encode() {
-        int[] d = new int[10 + attributes.size() * 3];
+        final int tail = 10 + attributes.size() * 3;
+        int[] d = new int[tail + 1 + specConstants.length];
         d[0] = stride;
         d[1] = topology;
         d[2] = cullMode;
@@ -40,6 +46,8 @@ public final class GdxVkPipelineDesc {
         d[8] = attributes.size();
         d[9] = colorOutputs;
         for (int i = 0; i < attributes.size(); i++) System.arraycopy(attributes.get(i), 0, d, 10 + i * 3, 3);
+        d[tail] = specConstants.length;
+        System.arraycopy(specConstants, 0, d, tail + 1, specConstants.length);
         return d;
     }
 }

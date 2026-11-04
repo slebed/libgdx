@@ -52,6 +52,7 @@ public final class GdxVkFrame {
         frameNumber++;
         stream.clear();
         gl.setCommandStream(stream);
+        gl.frameStarted();
         gl.replayState();
         return true;
     }

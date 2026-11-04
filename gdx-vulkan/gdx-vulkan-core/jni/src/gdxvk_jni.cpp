@@ -100,6 +100,10 @@ JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDebugFo
     reinterpret_cast<gdxvk::Presenter*>(presenter)->debugForceRotation(static_cast<int>(quarterTurns));
 }
 
+JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeSetDepth(JNIEnv*, jclass, jlong presenter, jint mode) {
+    reinterpret_cast<gdxvk::Presenter*>(presenter)->setDepth(static_cast<int>(mode));
+}
+
 // Memory pressure: runs what the GPU has finished with and frees idle staging blocks. Call it on the render thread.
 JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeTrimMemory(JNIEnv*, jclass, jlong handle) {
     const gdxvk::ContextHandles& h = reinterpret_cast<gdxvk::Context*>(handle)->handles();
@@ -317,6 +321,15 @@ JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeWri
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
+// The same, from a direct ByteBuffer (stock Mesh data lives in one): no copy through the Java heap.
+JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeWriteBufferDirect(JNIEnv* env, jclass, jlong ctx, jint id,
+                                                                                                jlong offset, jobject data, jint start,
+                                                                                                jint length) {
+    const uint8_t* p = static_cast<const uint8_t*>(env->GetDirectBufferAddress(data));
+    if (p == nullptr) return JNI_FALSE;
+    return res(ctx).writeBuffer(id, static_cast<uint64_t>(offset), p + start, static_cast<uint64_t>(length)) ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDestroyBuffer(JNIEnv*, jclass, jlong ctx, jint id) {
     res(ctx).destroyBuffer(id);
 }
@@ -510,6 +523,13 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateP
     pd.colorOutputs = static_cast<uint32_t>(d[9]);
     const int count = d[8];
     if (dn < 10 + count * 3) return -1;
+    // Optional tail: the number of specialization constants, then their values (ids 1..n).
+    const int tail = 10 + count * 3;
+    if (dn > tail) {
+        const int n = d[tail];
+        if (n < 0 || dn < tail + 1 + n) return -1;
+        for (int k = 0; k < n; ++k) pd.spec.push_back(d[tail + 1 + k]);
+    }
     for (int a = 0; a < count; ++a) {
         gdxvk::VertexAttribute attr;
         attr.location = static_cast<uint32_t>(d[10 + a * 3]);

@@ -12,16 +12,16 @@ the plan names.
 
 | Section | Done | Partial | Not started | Total |
 |---|---|---|---|---|
-| Core decisions | 44 | 4 | 8 | 56 |
+| Core decisions | 49 | 4 | 3 | 56 |
 | Phase 1a: Extraction, window surfaces and CI | 18 | 4 | 0 | 22 |
 | Phase 1b: Memory, layout and caches | 18 | 2 | 0 | 20 |
 | Phase 2: Unmodified 2D | 24 | 1 | 0 | 25 |
 | Phase 3: Stock FrameBuffer | 12 | 1 | 0 | 13 |
 | Phase 4: Android lifecycle | 7 | 3 | 2 | 12 |
-| Phase 5: 3D with stock models | 0 | 0 | 12 | 12 |
+| Phase 5: 3D with stock models | 3 | 3 | 6 | 12 |
 | Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **127** | **15** | **27** | **169** |
+| **All** | **135** | **18** | **16** | **169** |
 ---
 
 ## Core decisions
@@ -51,7 +51,7 @@ the plan names.
 - [x] `glGenTexture`, `glBindTexture`, `glActiveTexture`, `glTexImage2D`, `glTexSubImage2D`, `glTexParameteri/f`, `glGenerateMipmap`, `glDeleteTexture`, `glPixelStorei`, `glCompressedTexImage2D`/`SubImage2D` done and tested with stock `Texture`/`Pixmap`; only `GL_TEXTURE_2D` (no cube maps)
 - [x] Lazy `VkImage` creation at first use (`VulkanGL20.nativeTexture`), once the mip chain is known; level > 0 uploads; `glGenerateMipmap` by GPU blit chain
 - [x] Ordered state packets: `glClear` (colour, depth, stencil), `glClearColor`, `glViewport`, `glScissor`, `glEnable`/`glDisable` (scissor, depth, stencil, cull face), `glDepthFunc`/`Mask`, `glStencil*`, `glCullFace`, `glBindFramebuffer`: all stream packets, replayed in order with the draws
-- [ ] Buffers: `glGenBuffer`, `glBindBuffer`, `glBufferData`, `glBufferSubData`, `glDeleteBuffer`
+- [x] Buffers: `glGenBuffer`, `glBindBuffer`, `glBufferData`, `glBufferSubData`, `glDeleteBuffer(s)`: GL name to a native buffer, created on the first data; a whole-buffer redefinition after the buffer was drawn this frame gets a new native buffer (the old one is retired), `glBufferSubData` writes in place (`StockMeshTest`)
 - [x] Framebuffers: `glGenFramebuffer`, `glFramebufferTexture2D`, renderbuffers, `glCheckFramebufferStatus`, deletes (Phase 3)
 - [x] Query table (in `VulkanGL20`, not a separate `VulkanGL20Queries`): extension strings, `GL_MAX_TEXTURE_SIZE`, anisotropy, `GL_VIEWPORT` (last `glViewport`), `GL_FRAMEBUFFER_BINDING` (0), `glGetString(GL_VERSION)`; unknown enums log once and return 0
 - [x] `Gdx.gl30` always null: true in every test harness and in `VulkanAndroidApplication` (which installs `Gdx.gl`, `Gdx.gl20` and leaves `Gdx.gl30` null)
@@ -66,10 +66,10 @@ the plan names.
 - [x] Renames-per-frame counter: `Resources::renameCount` (cheap atomic), `GdxVkFrame.getRenamesLastFrame()` for a debug overlay to show, and `Stats.textureRenames`. Tested (`SpriteBatchTest.texturesRenamedDuringAFrameAreCounted`: creating an image is not a rename, two pixel changes are two)
 
 ### 5. Stock Mesh access (`StockMeshAccess`)
-- [ ] Reflected `Field`s for `bufferHandle` and `isDirty` on `VertexBufferObject`, `VertexBufferObjectSubData`, `IndexBufferObject`
-- [ ] Dirty meshes uploaded at draw time (with copy-on-write); `Mesh.dispose()` releases the native buffer
-- [ ] `VertexDataType.VertexArray` meshes copied into the per-frame ring each draw
-- [ ] Unit tests pinning the field names/types per supported libGDX version
+- [x] Reflected `Field`s for `bufferHandle`, `isDirty` and `byteBuffer` on `VertexBufferObject`, `VertexBufferObjectSubData`, `IndexBufferObject`, `IndexBufferObjectSubData`, and `Mesh.vertices`/`indices` (`StockMeshAccess`). The data size is the typed buffer's limit, not the byte buffer's: loaders fill the buffers through `getBuffer(true)` and stock only applies the limit inside `bind(ShaderProgram)`
+- [x] Dirty meshes uploaded at draw time (a new native buffer when the old one was already drawn this frame); `Mesh.dispose()` releases the native buffers through `glDeleteBuffer` (`StockMeshTest`)
+- [x] `VertexDataType.VertexArray` meshes (and index arrays) copied into the per-frame ring on each draw (`StockMeshTest.vertexArrayMeshesAreCopiedThroughTheRingEachDraw`)
+- [x] Unit tests pinning the field names/types (`StockMeshFieldsTest`, no GPU needed); `StockMeshAccess` also checks them when it is constructed. Per libGDX version: only 1.14.2 exists to pin
 - [ ] Upstream PR: public `getBufferHandle()` and dirty/version accessor (filed in Phase 5)
 
 ### 6. Coordinate, winding, depth and colour conventions
@@ -267,14 +267,14 @@ the plan names.
 ## Phase 5: 3D with stock models
 
 ### 1. Mesh data
-- [ ] Buffer shim calls with copy-on-write
-- [ ] `StockMeshAccess` uploads dirty stock meshes at draw time
+- [x] Buffer shim calls with copy-on-write (see Core decisions 3)
+- [x] `StockMeshAccess` uploads dirty stock meshes at draw time
 - [ ] File the upstream libGDX PR (public buffer handle + dirty accessor)
 
 ### 2. `VulkanModelBatch`
-- [ ] Accepts stock `RenderableProvider`s; `VulkanShaderProvider` maps `VertexAttributes` + `Material` to cached `VulkanShaderPipelineBundle`s
-- [ ] Lights, materials, bone matrices in the Set 0 SSBO
-- [ ] Sorted by pipeline, mesh, material; repeated meshes instanced or `vkCmdDrawIndexedIndirect`
+- [~] Accepts stock `RenderableProvider`s (`ModelInstance` and friends, stock `RenderableSorter`, `Environment`): `VulkanModelBatch`. It maps `VertexAttributes` + `Material` to pipelines itself (eight vertex shader variants for normal/colour/texcoord, times 0-4 bone weights, plus specialization constants for the material and light flags) instead of through `VulkanShaderProvider` + `VulkanShaderPipelineBundle`s, so custom `Shader`s and `ShaderProvider`s are not accepted. Supported: position, normal, colour, texcoord0, bones (up to 4 weights); diffuse colour/texture, specular, shininess, emissive colour, blending/opacity, alpha test, cull face, depth test; ambient cubemap, directional and point lights. Not yet: spot lights, fog, normal/specular/emissive textures, reflection, shadows. Tier B can sample only one texture per draw
+- [x] Lights, materials, bone matrices in the Set 0 SSBO: one blob per flush group (frame header + one record per renderable + bone matrices) written by a `Set0Data` stream op into the frame ring; draws pick their record through the push constants
+- [~] Sorted by the stock `DefaultRenderableSorter` (distance, blended last), draws are one per renderable with pipeline and mesh rebinds only on change; no instancing or `vkCmdDrawIndexedIndirect` yet
 
 ### 3. Lighting and shadows
 - [ ] Tiled/clustered point and spot light culling in compute
@@ -284,7 +284,7 @@ the plan names.
 - [ ] `VulkanComputeShader` with automatic barriers `COMPUTE_SHADER -> DRAW_INDIRECT | VERTEX_ATTRIBUTE_INPUT` (groundwork exists from `VulkanSpriteBatchInstanced`: compute pipelines on the shared layout, dispatches queued per frame and recorded ahead of the render pass, a buffer bound as Set 0 storage for compute and vertex shaders; no indirect draws or public API yet)
 
 ### Gate 5 and stress test 5
-- [ ] Animated `knight.g3db` via unmodified `G3dModelLoader` + a `ModelBuilder` scene: normal mapping, skeletal animation, directional shadows, vs stock GL within tolerance (own lavapipe golden for shadows)
+- [~] Animated `knight.g3db` via unmodified `G3dModelLoader` + a `ModelBuilder` scene vs stock GL: both scenes (`gate5_models`, `gate5_knight`) match stock `ModelBatch` on OpenGL with 0 differing pixels in both tiers, and have lavapipe goldens. Not yet: normal mapping and directional shadows (the plan's Gate 5 lists them)
 - [ ] 250,000 instanced textured meshes moved by compute boids, 500 point lights culled in compute
 - [ ] Pass: 60+ fps RTX 2080; 50,000 instances and 64 lights at 60 fps on the Galaxy S20; zero Java allocations per frame
 

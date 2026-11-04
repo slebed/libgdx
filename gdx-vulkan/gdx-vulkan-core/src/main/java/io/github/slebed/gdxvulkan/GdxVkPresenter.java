@@ -202,6 +202,19 @@ public final class GdxVkPresenter implements AutoCloseable {
         GdxVkNative.nativeDebugForceRotation(handle, quarterTurns);
     }
 
+    /** Depth-buffer choices for {@link #setDepth}. */
+    public static final int DEPTH_NONE = 0, DEPTH = 1, DEPTH_STENCIL = 2;
+
+    /**
+     * Gives the swapchain a depth (or depth-stencil) buffer, or takes it away, so 3D code can depth-test on screen ({@code glEnable(GL_DEPTH_TEST)},
+     * {@code glClear(GL_DEPTH_BUFFER_BIT)}). Off by default: it costs memory and bandwidth that 2D does not need. Takes effect at the next
+     * {@link #beginFrame}; pipelines are built for it as they are used.
+     */
+    public void setDepth(int mode) {
+        check();
+        GdxVkNative.nativeSetDepth(handle, mode);
+    }
+
     /** Tells the presenter the window size changed. The swapchain is rebuilt on the next {@link #beginFrame}. */
     public void resize(int width, int height) {
         check();

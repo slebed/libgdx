@@ -4,7 +4,7 @@ A Vulkan renderer for libGDX, built as a standalone library on **stock libGDX** 
 libGDX is needed: unmodified `Texture`, `Pixmap`, `SpriteBatch`, `FrameBuffer`, Scene2D, `BitmapFont` and friends run against Vulkan through a
 GL20 shim, and the result is compared with stock libGDX on OpenGL.
 
-`docs/PLAN.md` has the architecture and the phases; `docs/CHECKLIST.md` is the item-by-item state (127 done, 15 partial, 27 not started, of 169; what is left is Phases 5 and 6, the desktop `Application`, the Galaxy S20, or a stated limit),
+`docs/PLAN.md` has the architecture and the phases; `docs/CHECKLIST.md` is the item-by-item state (135 done, 18 partial, 16 not started, of 169; what is left is the rest of Phase 5 (shadows, normal maps, instancing, compute lighting), Phase 6, the desktop `Application`, the Galaxy S20, or a stated limit),
 marking only what has been built **and verified**.
 
 ## Status
@@ -16,7 +16,7 @@ marking only what has been built **and verified**.
 | 2 Unmodified 2D | done: sprite batches, polygon batch, shape renderer, compressed textures, shader bundles, `VulkanSpriteBatchInstanced` (1,000,000 sprites moved by compute); every Stress 2 target met |
 | 3 Stock `FrameBuffer` | done: colour, depth and stencil framebuffers, `VulkanMultiTargetFrameBuffer` (several and floating-point attachments), GL cull/depth/stencil state, pass scheduling, Gate 3 scenes, Stress test 3. Not done: reordering offscreen passes that come after a swapchain draw |
 | 4 Android lifecycle | done apart from Swappy frame pacing, `VK_KHR_swapchain_maintenance1` and an Android GPU Inspector capture: `VulkanAndroidApplication` (stock input, audio and files), surface loss and recreation with everything resident (2 ms average), pre-rotation verified at all four angles on the phone, `onTrimMemory`, stock `AssetManager` texture streaming, Stress test 4 at 50 cycles, the 21-check device suite with the swapchain pre-rotated (both tiers) |
-| 5 3D with stock models | not started |
+| 5 3D with stock models | started: stock `Mesh` data through the GL buffer shim, a swapchain depth buffer, and `VulkanModelBatch` (the stock `ModelBatch` API with a port of the default shader: lights, specular, textures, blending, skeletal animation). The animated knight and a `ModelBuilder` scene match stock GL exactly. Not yet: shadows, normal maps, instancing, compute |
 | 6 macOS / iOS | not started (stretch) |
 
 **Two tiers.** Tier A (Vulkan 1.3: dynamic rendering, a bindless texture table, dynamic raster state) and Tier B (Vulkan 1.1: render passes,
@@ -51,6 +51,18 @@ an Adreno 840 (Android 16). Not the Galaxy S20 the plan names.
 - `tools/` generators for the GL20 base class and the batch draw code (generated from stock libGDX source so the oracle stays honest); see `tools/README.md`
 - `test-assets/` the skin, fonts and particle effects the Gate 2 and Gate 3 scenes load (libGDX's own test assets; see `NOTICE`)
 - `docs/` the plan, the checklist and the notes for Claude Code (`CLAUDE.md`)
+
+## Using 3D
+```java
+GdxVkPresenter presenter = ...;
+presenter.setDepth(GdxVkPresenter.DEPTH);              // a depth buffer on the screen (off by default)
+VulkanModelBatch batch = new VulkanModelBatch(frame);   // the stock ModelBatch API
+Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+batch.begin(camera);
+batch.render(instances, environment);                   // stock ModelInstance, Environment, lights, animation
+batch.end();
+```
+Models come from stock `ModelBuilder` or `G3dModelLoader`; `Mesh.dispose()` releases the native buffers. `Gate5GoldenTest` compares scenes with stock `ModelBatch` on OpenGL.
 
 ## Using it on Android
 ```java
@@ -112,8 +124,8 @@ tools/stress4.sh [cycles=50] [--tier-b] [--no-prerotate] [--no-stream]          
 of the built `gdxvk` library). Environment `GDXVK_COMPLETION=fence|timeline` overrides the GPU completion tracking (diagnostics).
 
 ## Known gaps
-- No GL buffer calls yet (`glBufferData` and friends): they arrive with stock `Mesh` support in Phase 5, so 3D models are not drawable yet.
-- The swapchain has no depth buffer (framebuffers do); Phase 5 adds it.
+- 3D: `VulkanModelBatch` draws stock models with the default shader's features (lights, specular, emissive, diffuse texture, blending, alpha test, bones up to 4 weights). It does not yet do spot lights, fog, normal/specular/emissive textures, shadows, or custom shaders, and on Tier B a draw can sample one texture.
+- The swapchain has a depth buffer only when asked for (`GdxVkPresenter.setDepth`), so 2D keeps its memory and bandwidth.
 - Custom shaders are precompiled SPIR-V bundles (`VulkanShaderPipelineBundle`); there is no run-time GLSL compilation.
 - Natives run on Windows x64, Linux x64 and Android arm64-v8a. The Android library also compiles for armeabi-v7a and x86_64, which have never been run.
 - Android: the on-screen keyboard and native text input through `Gdx.input` do not work yet (stock `DefaultAndroidInput` casts the graphics object to its own GL class there). No Swappy frame pacing, and swapchains are rebuilt after `vkDeviceWaitIdle` (2-5 ms measured).

@@ -12,6 +12,9 @@ Source derived from libGDX
     gdx-vulkan-core/src/main/java/io/github/slebed/gdxvulkan/g2d/VulkanPolygonSpriteBatchDraws.java
     gdx-vulkan-core/src/main/java/io/github/slebed/gdxvulkan/g2d/VulkanShapeRenderer.java
     gdx-vulkan-core/src/main/java/io/github/slebed/gdxvulkan/gl/VulkanGL20Base.java
+  and these GLSL files are ports of libGDX's default.vertex.glsl and default.fragment.glsl (Apache-2.0): the lighting and material math is theirs, rewritten for
+  Vulkan with specialization constants in place of #define flags:
+    gdx-vulkan-core/src/main/shaders/model_default_vertex.glsl, model_default.frag and the generated model_default_v*.vert wrappers
 
 Test assets (test-assets/data)
   Taken unchanged from libGDX's repository (tests/gdx-tests-android/assets/data), where they are distributed with libGDX's own tests:
@@ -19,6 +22,8 @@ Test assets (test-assets/data)
     default.fnt, default.png               bitmap font rendered from Droid Sans (Apache-2.0)
     lsans-15.fnt, lsans-15_00.png, lsans.ttf  libGDX's built-in "LSans" font, which replaced Arial in the libGDX distribution
     test.p, particle*.png                  a particle effect and its images from libGDX's tests
+    g3d/knight.g3db, g3d/Knight.png        the animated knight model and its texture from libGDX's 3D tests (Gate 5); its authorship and licence are those of
+                                           libGDX's test assets, which this repository does not independently establish
   They are used only by the tests. Check the licence of a font before redistributing it outside this repository.
 
 Third-party code vendored in gdx-vulkan-core/jni/vendor (licence texts in jni/vendor/licenses)

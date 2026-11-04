@@ -59,6 +59,15 @@ transform; `Impl::rot` (quarter turns clockwise) rotates viewport and scissor re
 `LifecycleActivity` (+ `CoverActivity`) driven by `tools/stress4.sh` (50 cycles by default; the user judged 500 far too long). Unloading a texture between drawing it and flushing the batch throws
 "texture has no storage": dispose only between frames or after `end()`.
 
+Phase 5 (3D) so far: `VulkanGL20` buffer calls (GL name -> native buffer, a new native buffer when one is redefined after being drawn this frame), `g3d/StockMeshAccess` (reads `bufferHandle`/`isDirty`/`byteBuffer` of stock VBOs and IBOs by
+reflection, uploads dirty meshes at draw time, vertex/index arrays go through the ring; **the data size is the typed buffer's limit, never the byte buffer's**, and `uploadBuffer` must set the copy's limit, both were real bugs),
+`CommandStream.bindVertexBuffer` (op 19) and `set0Data` (op 20: payload copied into the frame ring and bound as Set 0), `GdxVkPipelineDesc.specConstants` (ids 1..n of both stages; id 0 stays the pre-rotation), a swapchain depth image
+(`Presenter::setDepth`, `beginSwapPassWithDepth`; Tier B uses the offscreen-pass family for the swapchain when it has depth, with the frame-start layout barrier Tier A also does) and `g3d/VulkanModelBatch`.
+The model shaders are ports of libGDX's default shaders: `model_default_vertex.glsl` (body) + generated wrappers `model_default_v<mask>[b<n>].vert` (mask bits normal=1 colour=2 uv=4, n bone weights; regenerate with the shell loop in
+the commit that added them, they only differ in two defines), `model_default.frag`; the blob layout is documented at the top of the vertex body. Tier B shaders reference the texture binding, so every Tier B draw binds a texture
+(a shared 1x1 white one when there is none). Do not destroy anything the recorded stream names before the frame is submitted (the white texture is per context for that reason). Gate 5: `Gate5Scenes` + `Gate5GoldenTest`
+(`GDXVK_G5_ONLY=knight` runs one scene); goldens come from the Docker lavapipe run (`UPDATE_GOLDENS=1`, then copy only the new files after checking the others are byte-identical).
+
 Open items: Adreno Tier A throughput (see below); Wayland/macOS; running armeabi-v7a/x86_64 (they compile); Linux arm64 natives (CI job `arm64-natives`); swapchain framebuffers still retire after waitIdle
 (2-5 ms measured, `VK_KHR_swapchain_maintenance1` would remove it); Swappy; a desktop `Application` (`Lwjgl3Window`'s constructor is package-private, so stock `Lwjgl3Input` cannot be reused cleanly); Phases 5-6.
 `./gradlew :gdx-vulkan-desktop:stressInstanced -Dgdxvulkan.device=1` is the instanced sprite stress test (1M sprites; not the plan's Stress test 3, which is Phase 3). `./gradlew :gdx-vulkan-desktop:stress2` is Stress test 2 (stock GL vs VulkanSpriteBatch, each in its own JVM). Note GL runs on the display GPU, so a

@@ -55,6 +55,14 @@ public final class GdxVkResources {
         }
     }
 
+    /** Writes {@code length} bytes starting at {@code start} of a direct buffer (its position and limit are ignored). */
+    public void writeBuffer(int id, long offset, java.nio.ByteBuffer direct, int start, int length) {
+        if (!direct.isDirect()) throw new IllegalArgumentException("writeBuffer needs a direct ByteBuffer");
+        if (!GdxVkNative.nativeWriteBufferDirect(context.nativeHandle(), id, offset, direct, start, length)) {
+            throw new IllegalArgumentException("writeBuffer failed: no such buffer " + id + " or range out of bounds");
+        }
+    }
+
     public void destroyBuffer(int id) {
         GdxVkNative.nativeDestroyBuffer(context.nativeHandle(), id);
     }

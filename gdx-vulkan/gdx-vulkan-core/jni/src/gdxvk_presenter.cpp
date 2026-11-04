@@ -106,6 +106,12 @@ struct Presenter::Impl {
     // Pre-rotation (Android): the swapchain is built with the display's current rotation so the compositor does not rotate it. The
     // application still sees the logical (unrotated) size; the output is rotated in clip space (specialization constant 0 of every vertex
     // shader that calls gdx_vk_clip) and viewport/scissor rectangles are rotated into the image. `rot` is quarter turns clockwise.
+    // Optional depth(-stencil) image of the swapchain's size (plan, Phase 5), so stock 3D code can depth-test on screen. It is a resource depth
+    // image like a framebuffer's, recreated with the swapchain. Its contents are not kept between frames: the first pass of a frame clears or
+    // discards it; a pass resumed after an offscreen pass loads it.
+    int swapDepthWanted = 0; // 0 none, 1 depth, 2 depth + stencil
+    int swapDepthId = -1;
+    VkFormat swapDepthFmt = VK_FORMAT_UNDEFINED;
     bool preRotate = false;
     int forcedRot = -1; // diagnostics/tests: render as if the display were rotated by this many quarter turns (the surface keeps its transform)
     uint32_t rot = 0;
@@ -281,13 +287,18 @@ struct Presenter::Impl {
         stages[0].module = rec.vs;
         stages[0].pName = "main";
         // Specialization constant 0 is the pre-rotation (gdx_vk_common.glsl). A shader without that constant ignores the entry.
-        const int32_t rotValue = static_cast<int32_t>(vrot);
-        const VkSpecializationMapEntry rotEntry{0, 0, sizeof(int32_t)};
-        const VkSpecializationInfo rotSpec{1, &rotEntry, sizeof(int32_t), &rotValue};
-        stages[0].pSpecializationInfo = &rotSpec;
+        // Constants 1..n are the pipeline's own flags (desc.spec), the same for both stages; a shader ignores ids it does not declare.
+        std::vector<int32_t> specData;
+        std::vector<VkSpecializationMapEntry> specEntries;
+        specData.push_back(static_cast<int32_t>(vrot));
+        for (size_t k = 0; k < desc.spec.size(); ++k) specData.push_back(desc.spec[k]);
+        for (uint32_t k = 0; k < specData.size(); ++k) specEntries.push_back({k, static_cast<uint32_t>(k * sizeof(int32_t)), sizeof(int32_t)});
+        const VkSpecializationInfo specInfo{static_cast<uint32_t>(specEntries.size()), specEntries.data(), specData.size() * sizeof(int32_t), specData.data()};
+        stages[0].pSpecializationInfo = &specInfo;
         stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
         stages[1].module = rec.fs;
         stages[1].pName = "main";
+        stages[1].pSpecializationInfo = &specInfo;
 
         VkVertexInputBindingDescription binding{0, desc.stride, VK_VERTEX_INPUT_RATE_VERTEX};
         std::vector<VkVertexInputAttributeDescription> attrs;
@@ -381,7 +392,7 @@ struct Presenter::Impl {
         gi.pDynamicState = &ds;
         gi.layout = h.layouts->pipelineLayout();
         if (!h.tierA) {
-            VkRenderPass pass = offscreen ? offscreenPass(colors, depthFmt, false, DepthOps()) : renderPass;
+            VkRenderPass pass = (offscreen || depthFmt != VK_FORMAT_UNDEFINED) ? offscreenPass(colors, depthFmt, false, DepthOps()) : renderPass;
             if (pass == VK_NULL_HANDLE) {
                 error = "no render pass for pipeline " + rec.name;
                 return VK_NULL_HANDLE;
@@ -603,7 +614,7 @@ struct Presenter::Impl {
         }
     }
     ColorSet targetColors() const { return curOff >= 0 ? off.colorSet() : swapColors(); }
-    VkFormat targetDepthFormat() const { return curOff >= 0 ? off.depthFormat : VK_FORMAT_UNDEFINED; }
+    VkFormat targetDepthFormat() const { return curOff >= 0 ? off.depthFormat : swapDepthFmt; }
     bool passOpen() const { return curOff >= 0 ? offOpen : swapOpen; }
 
     // A GL rectangle (origin bottom-left) as a Vulkan scissor rectangle on the current target, clamped into it. The swapchain is drawn
@@ -711,6 +722,76 @@ struct Presenter::Impl {
     // Starts a pass on the current target, clearing what `clear` names and loading the rest. False on failure (error set).
     bool passLabelOpen = false;
 
+    // The swapchain pass when the swapchain has a depth image. Colour is handled as in the other swapchain pass; depth is cleared by a clear
+    // that starts the pass, discarded when it is the frame's first pass without one (GL leaves it undefined too), and loaded when the pass
+    // resumes after an offscreen pass.
+    bool beginSwapPassWithDepth(VkCommandBuffer cmd, bool cc, bool dc, bool sc, const VkClearValue* cv, const VkRect2D& area) {
+        VkImage dimg;
+        VkImageView dview;
+        VkFormat dfmt;
+        bool dstencil, initialized, transient;
+        h.resources->depthImageInfo(swapDepthId, &dimg, &dview, &dfmt, &dstencil, &initialized, &transient);
+        const bool first = !swapStarted;
+        DepthOps ops;
+        ops.depthLoad = dc ? 1 : first ? 2 : 0;
+        ops.stencilLoad = !dstencil ? 2 : sc ? 1 : first ? 2 : 0;
+        ops.store = true; // a resumed pass needs it; not storing on the last pass of the frame is an optimisation for tile-based GPUs
+        const VkImageAspectFlags aspect = VK_IMAGE_ASPECT_DEPTH_BIT | (dstencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
+        const VkPipelineStageFlags tests = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        const VkAccessFlags rw = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        if (!initialized) {
+            imageBarrier(cmd, dimg, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, tests,
+                         rw, aspect);
+            h.resources->markDepthInitialized(swapDepthId);
+        } else {
+            imageBarrier(cmd, dimg, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, tests,
+                         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, tests, rw, aspect);
+        }
+        const VkAttachmentLoadOp loadOps[3] = {VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_LOAD_OP_DONT_CARE};
+        if (h.tierA) {
+            VkRenderingAttachmentInfo ca{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+            ca.imageView = views[imageIndex];
+            ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            ca.loadOp = cc ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+            ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            ca.clearValue = cv[0];
+            VkRenderingAttachmentInfo da{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+            da.imageView = dview;
+            da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            da.loadOp = loadOps[ops.depthLoad];
+            da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            da.clearValue = cv[1];
+            VkRenderingAttachmentInfo sa = da;
+            sa.loadOp = loadOps[ops.stencilLoad];
+            VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+            ri.renderArea = area;
+            ri.layerCount = 1;
+            ri.colorAttachmentCount = 1;
+            ri.pColorAttachments = &ca;
+            ri.pDepthAttachment = &da;
+            if (dstencil) ri.pStencilAttachment = &sa;
+            vkCmdBeginRendering(cmd, &ri);
+        } else {
+            VkRenderPass pass = offscreenPass(swapColors(), swapDepthFmt, cc, ops);
+            if (pass == VK_NULL_HANDLE) {
+                error = "vkCreateRenderPass failed for the swapchain with depth";
+                return false;
+            }
+            VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+            rp.renderPass = pass;
+            rp.framebuffer = framebuffers[imageIndex];
+            rp.renderArea = area;
+            VkClearValue cvs[2] = {cv[0], cv[1]};
+            rp.clearValueCount = 2;
+            rp.pClearValues = cvs;
+            vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
+        }
+        swapOpen = true;
+        swapStarted = true;
+        ++passCount[0];
+        return true;
+    }
+
     bool beginPass(VkCommandBuffer cmd, const PassClear* clear) {
         if (h.debugUtils) {
             const std::string label = curOff < 0 ? std::string("gdx: swapchain pass") : "gdx: render target pass (texture " + std::to_string(curOff) +
@@ -730,6 +811,7 @@ struct Presenter::Impl {
             for (int i = 0; i < 4; ++i) cv[0].color.float32[i] = frameClear[i];
         }
         const VkRect2D area{{0, 0}, {physW(), physH()}};
+        if (curOff < 0 && swapDepthFmt != VK_FORMAT_UNDEFINED) return beginSwapPassWithDepth(cmd, cc, dc, sc, cv, area);
         if (curOff < 0) {
             if (h.tierA) {
                 VkRenderingAttachmentInfo ca{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
@@ -903,6 +985,8 @@ struct Presenter::Impl {
         }
         vkDeviceWaitIdle(h.device);
         destroySwapchainViews();
+        if (swapDepthId >= 0) h.resources->destroyDepthImage(swapDepthId);
+        swapDepthId = -1;
         for (const PipelineRec& pl : pipelines) {
             for (const PipelineRec::Variant& v : pl.variants) vkDestroyPipeline(h.device, v.pipeline, nullptr);
             vkDestroyShaderModule(h.device, pl.vs, nullptr);
@@ -1137,13 +1221,31 @@ struct Presenter::Impl {
             VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
             if (vkCreateSemaphore(h.device, &si, nullptr, &renderDone[i]) != VK_SUCCESS) return fail("vkCreateSemaphore failed");
         }
+        // The depth image follows the swapchain's size.
+        if (swapDepthId >= 0) {
+            h.resources->destroyDepthImage(swapDepthId);
+            swapDepthId = -1;
+            swapDepthFmt = VK_FORMAT_UNDEFINED;
+        }
+        VkImageView swapDepthView = VK_NULL_HANDLE;
+        if (swapDepthWanted > 0) {
+            swapDepthId = h.resources->createDepthImage(ext.width, ext.height, swapDepthWanted > 1, 24, false);
+            if (swapDepthId < 0) return fail("could not create the swapchain depth image");
+            VkImage di;
+            bool st, init, tr;
+            h.resources->depthImageInfo(swapDepthId, &di, &swapDepthView, &swapDepthFmt, &st, &init, &tr);
+        }
         if (!h.tierA) {
             framebuffers.resize(n);
+            // With depth the pass objects are the offscreen kind (colour and depth both stay in their attachment layouts); the pipelines
+            // for the swapchain were built against the same family, so the framebuffer must be compatible with it.
+            const VkRenderPass fbPass = swapDepthFmt != VK_FORMAT_UNDEFINED ? offscreenPass(swapColors(), swapDepthFmt, false, DepthOps()) : renderPass;
             for (uint32_t i = 0; i < n; ++i) {
+                VkImageView fbViews[2] = {views[i], swapDepthView};
                 VkFramebufferCreateInfo fi{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-                fi.renderPass = renderPass;
-                fi.attachmentCount = 1;
-                fi.pAttachments = &views[i];
+                fi.renderPass = fbPass;
+                fi.attachmentCount = swapDepthFmt != VK_FORMAT_UNDEFINED ? 2 : 1;
+                fi.pAttachments = fbViews;
                 fi.width = ext.width;
                 fi.height = ext.height;
                 fi.layers = 1;
@@ -1223,6 +1325,15 @@ std::unique_ptr<Presenter> Presenter::create(Context& ctx, const SurfaceHandles&
     return p;
 }
 
+void Presenter::setDepth(int mode) {
+    if (mode < 0 || mode > 2) mode = 0;
+    if (impl_->swapDepthWanted == mode) return;
+    impl_->swapDepthWanted = mode;
+    impl_->dirty = true; // the depth image is (re)built with the swapchain, before the next frame
+}
+
+int Presenter::depthMode() const { return impl_->swapDepthWanted; }
+
 void Presenter::debugForceRotation(int quarterTurns) {
     impl_->forcedRot = quarterTurns;
     impl_->dirty = true;
@@ -1280,7 +1391,7 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
     s.curPipeline = -1;
     s.viewportSet = false;
     s.scissorOn = false;
-    if (h.tierA) {
+    if (h.tierA || s.swapDepthFmt != VK_FORMAT_UNDEFINED) { // Tier B without depth lets its first render pass leave UNDEFINED itself
         imageBarrier(f.cmd, s.images[s.imageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
@@ -1453,7 +1564,7 @@ int Presenter::createPipelineEx(const char* name, const uint32_t* vertSpv, size_
     const int id = static_cast<int>(s.pipelines.size() - 1);
     // The swapchain variant is built now, so a bad shader or state fails here and not in the middle of a frame. A pipeline that writes several
     // colour outputs can never draw to the swapchain: it is built when it is first bound to a target that has that many attachments.
-    if (desc.colorOutputs == 1 && s.pipelineFor(id, s.swapColors(), VK_FORMAT_UNDEFINED, false) == VK_NULL_HANDLE) {
+    if (desc.colorOutputs == 1 && s.pipelineFor(id, s.swapColors(), s.swapDepthFmt, false) == VK_NULL_HANDLE) {
         vkDestroyShaderModule(h.device, rec.vs, nullptr);
         vkDestroyShaderModule(h.device, rec.fs, nullptr);
         s.pipelines.pop_back();
@@ -1556,7 +1667,7 @@ FrameStatus Presenter::draw(int pipeline, uint32_t vertexCount, const float push
     if (pipeline < 0 || static_cast<size_t>(pipeline) >= s.pipelines.size()) return s.fail("draw: unknown pipeline id");
     VkCommandBuffer cmd = s.frames[s.frameIndex].cmd;
     if (!s.passOpen() && !s.beginPass(cmd, nullptr)) return s.fail(s.error);
-    VkPipeline vk = s.pipelineFor(pipeline, s.swapColors(), VK_FORMAT_UNDEFINED, false);
+    VkPipeline vk = s.pipelineFor(pipeline, s.swapColors(), s.swapDepthFmt, false);
     if (vk == VK_NULL_HANDLE) return FrameStatus::Error;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk);
     // Negative height flips Y so GL clip space (+Y up) lands the right way up (VK_KHR_maintenance1, core in 1.1).
@@ -1810,6 +1921,28 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 const VkDeviceSize off = offset64(w[i + 1], w[i + 2]);
                 i += 3;
                 if (buf == VK_NULL_HANDLE) return s.fail("command stream: unknown vertex block");
+                vkCmdBindVertexBuffers(cmd, 0, 1, &buf, &off);
+                break;
+            }
+            case cmd::Set0Data: {
+                if (!need(2)) return s.fail("command stream truncated (Set0Data)");
+                const uint32_t ubytes = static_cast<uint32_t>(w[i]), sbytes = static_cast<uint32_t>(w[i + 1]);
+                const uint32_t uwords = (ubytes + 3) / 4, swords = (sbytes + 3) / 4;
+                i += 2;
+                if (!need(uwords + swords)) return s.fail("command stream truncated (Set0Data payload)");
+                FrameRing::Binding b;
+                if (!ring.allocate(w + i, ubytes, w + i + uwords, sbytes, b)) return s.fail("command stream: Set0Data allocation failed (uniform data over 16 KB, or out of memory)");
+                i += uwords + swords;
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.h.layouts->pipelineLayout(), 0, 1, &b.set, 2, b.offsets);
+                break;
+            }
+            case cmd::BindVertexBuffer: {
+                if (!need(3)) return s.fail("command stream truncated (BindVertexBuffer)");
+                VkBuffer buf;
+                uint64_t base, size;
+                if (!s.h.resources->bufferInfo(w[i], buf, base, size)) return s.fail("command stream: unknown vertex buffer");
+                const VkDeviceSize off = base + offset64(w[i + 1], w[i + 2]);
+                i += 3;
                 vkCmdBindVertexBuffers(cmd, 0, 1, &buf, &off);
                 break;
             }
