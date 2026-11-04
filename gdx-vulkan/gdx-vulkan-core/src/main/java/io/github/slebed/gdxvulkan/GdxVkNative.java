@@ -35,12 +35,13 @@ final class GdxVkNative {
         int anisotropy);
     static native void nativeDestroyTexture(long ctx, int id);
     /** A depth (or depth+stencil) image for a framebuffer; -1 on failure. */
-    static native int nativeCreateDepthImage(long ctx, int width, int height, boolean stencil, int depthBits);
+    static native int nativeCreateDepthImage(long ctx, int width, int height, boolean stencil, int depthBits, boolean transientDepth);
     static native void nativeDestroyDepthImage(long ctx, int id);
     static native int nativeTextureSlot(long ctx, int id);
     static native boolean nativeFlushUploads(long ctx);
     static native int nativeCollectGarbage(long ctx);
     static native long[] nativeResourceStats(long ctx);
+    static native long nativeRenameCount(long ctx);
 
     static native boolean nativeBindFrameData(long presenter, byte[] uniform, int uniformBytes, byte[] storage, int storageBytes);
     static native int nativeBindTexture(long presenter, int texture);
@@ -56,6 +57,9 @@ final class GdxVkNative {
 
     /** @return pipeline id, or -1 (see nativeLastError) */
     static native int nativeCreatePipeline(long handle, String name, byte[] vertSpv, byte[] fragSpv);
+
+    /** Render passes begun in the last finished frame: {on the swapchain, on offscreen targets}. */
+    static native int[] nativeLastPassCounts(long handle);
 
     /** Stress test 3: nanoseconds to record `draws` state-change + push-constants + indexed-draw triples as a plain C++ loop; -1 on error. */
     static native long nativeBenchmarkRecord(long handle, int pipeline, int indexBuffer, int draws, float[] push);

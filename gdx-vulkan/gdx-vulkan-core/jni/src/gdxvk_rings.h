@@ -36,7 +36,7 @@ public:
     // into the mapped memory directly. Growth appends a block, so earlier (block, offset) pairs stay valid for the frame.
     bool allocVertex(uint64_t bytes, uint32_t* block, uint64_t* offset);
     uint8_t* vertexBlockPtr(uint32_t block, uint64_t* size);
-    VkBuffer vertexBlockBuffer(uint32_t block) const;
+    VkBuffer vertexBlockBuffer(uint32_t block) const; // what draws bind: the device-local mirror when the block has one, else the block itself
     void flushVertices(uint32_t block, uint64_t offset, uint64_t bytes);
 
     // The frame this ring belonged to has completed: rewind, keep only the largest block of each kind, reset the pool.
@@ -44,12 +44,19 @@ public:
 
     size_t blockCount() const { return uniform_.size() + storage_.size(); }
 
+    // On a discrete GPU the vertex blocks live in cached system memory (fast for the CPU to fill), which the GPU would read across PCIe for
+    // every vertex. Such a block has a device-local mirror, and this records the copies of what the CPU wrote into the command buffer that
+    // runs ahead of the frame, with the barrier that makes them visible as vertex and index data. Returns whether anything was recorded.
+    bool recordVertexCopies(VkCommandBuffer cmd);
+
 private:
     struct Block {
         VkBuffer buffer = VK_NULL_HANDLE;
         VmaAllocation alloc = nullptr;
         uint8_t* ptr = nullptr;
         VkDeviceSize size = 0, offset = 0;
+        VkBuffer mirror = VK_NULL_HANDLE; // vertex blocks only, when the block is not in device-local memory
+        VmaAllocation mirrorAlloc = nullptr;
     };
     bool addBlock(std::vector<Block>& list, VkBufferUsageFlags usage, VkDeviceSize size);
     void destroyBlock(const Block& b);

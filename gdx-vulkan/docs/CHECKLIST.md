@@ -12,16 +12,16 @@ the plan names.
 
 | Section | Done | Partial | Not started | Total |
 |---|---|---|---|---|
-| Core decisions | 41 | 5 | 10 | 56 |
-| Phase 1a: Extraction, window surfaces and CI | 16 | 5 | 1 | 22 |
-| Phase 1b: Memory, layout and caches | 15 | 3 | 2 | 20 |
-| Phase 2: Unmodified 2D | 21 | 3 | 1 | 25 |
-| Phase 3: Stock FrameBuffer | 9 | 1 | 3 | 13 |
+| Core decisions | 42 | 5 | 9 | 56 |
+| Phase 1a: Extraction, window surfaces and CI | 17 | 5 | 0 | 22 |
+| Phase 1b: Memory, layout and caches | 18 | 2 | 0 | 20 |
+| Phase 2: Unmodified 2D | 23 | 2 | 0 | 25 |
+| Phase 3: Stock FrameBuffer | 12 | 1 | 0 | 13 |
 | Phase 4: Android lifecycle | 0 | 2 | 10 | 12 |
 | Phase 5: 3D with stock models | 0 | 0 | 12 | 12 |
 | Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 1 | 0 | 4 | 5 |
-| **All** | **103** | **19** | **47** | **169** |
+| **All** | **113** | **17** | **39** | **169** |
 ---
 
 ## Core decisions
@@ -63,7 +63,7 @@ the plan names.
 - [x] Full-upload rename: same-shape `glTexImage2D` reload renames; a different size or format redefines the texture, as GL does
 - [x] Sub-image upload rename (`vkCmdCopyImage` from the old image, then the region); old image restored to read layout for draws recorded earlier in the frame
 - [~] Pending uploads queued per image/buffer request (not per GL handle); post-rename routing not applicable until renaming exists
-- [ ] Renames-per-frame counter in the debug overlay
+- [x] Renames-per-frame counter: `Resources::renameCount` (cheap atomic), `GdxVkFrame.getRenamesLastFrame()` for a debug overlay to show, and `Stats.textureRenames`. Tested (`SpriteBatchTest.texturesRenamedDuringAFrameAreCounted`: creating an image is not a rename, two pixel changes are two)
 
 ### 5. Stock Mesh access (`StockMeshAccess`)
 - [ ] Reflected `Field`s for `bufferHandle` and `isDirty` on `VertexBufferObject`, `VertexBufferObjectSubData`, `IndexBufferObject`
@@ -106,14 +106,14 @@ the plan names.
 - [x] Modules `gdx-vulkan-core` (Java + `jni/`), `gdx-vulkan-desktop`, `gdx-vulkan-android`
 - [~] Natives via plain CMake + hand-written JNI instead of gdx-jnigen (deliberate; revisit when jnigen cross-compile is verified)
 - [x] Natives built: Windows x64, Linux x64 (Docker), Android arm64-v8a
-- [ ] Natives: Linux arm64, Android armeabi-v7a, Android x86_64
+- [~] Natives: Android armeabi-v7a and x86_64 compile and link with the NDK (the library builds all three ABIs; fixed a 32-bit assumption in `VmaVirtualAllocation`); neither has been run, as the only device is arm64. Linux arm64 not built
 - [x] No copied audio classes; `Gdx.gl30` untouched from the first commit
 
 ### 2. Native core boot
 - [x] volk + `vk_mem_alloc.h` vendored, `VK_NO_PROTOTYPES`, no Vulkan SDK link libraries
 - [x] Instance and device creation with tier detection and `forceTierB`
 - [x] UNORM swapchain, negative-height viewport, begin/end rendering with the render-pass fallback on Tier B
-- [~] `VK_EXT_debug_utils`: validation messenger done; object names and RenderDoc markers per batch flush not done
+- [x] `VK_EXT_debug_utils`: enabled whenever the instance has it (the validation messenger only with the layer). Pipelines, textures, depth images, buffer pools and frame command buffers have names; render passes, the staged-upload batch and the compute section are labelled regions, so a RenderDoc or AGI capture reads. No per-batch-flush labels
 - [x] Typed Java exceptions: device lost, surface lost, out of memory (`OUT_OF_DATE` is handled inside the presenter, not thrown)
 
 ### 3. Surfaces from native handles
@@ -147,7 +147,7 @@ the plan names.
 - [x] Retired `VkBuffer` ranges, `VkImage`, `VkImageView` and Set 1 slots/sets freed once `completed >= retirement serial`
 - [~] Retired `VkFramebuffer`: offscreen framebuffers go through the deletion queue; swapchain framebuffers are still destroyed after `vkDeviceWaitIdle` at resize. Render passes live as long as the presenter
 - [x] Retirement thread-safe: `dispose()` from `create()`, between frames and from loader threads (soak: 4 worker threads)
-- [ ] Retirement across multiple windows (single presenter tested)
+- [x] Retirement across multiple windows: `MultiWindowTest` (two windows, two presenters, one context): textures drawn in one window and disposed before the other draws, and a rename while both windows have frames in flight; validation clean in both tiers
 
 ### 3. Allocators
 - [x] Per-frame dynamic ring for the Set 0 UBO and SSBO, persistently mapped, aligned to the device minimums, grows when exceeded
@@ -167,8 +167,8 @@ the plan names.
 - [x] 50,000 buffer sub-allocation cycles/s and 2,000 small textures/s at 60 fps, with background-thread disposals and repeated filter changes (15-60 s runs, both GPUs, both tiers)
 - [x] 10-minute run, RTX 5080, Tier A, strict (>=90% of target rates, >=55 fps): 36,000 frames at 60.0 fps, 50,000 buffer cycles/s, 2,000 textures/s, ~1,000 sampler changes/s, 33 M retirements, VMA flat at 176 MB from minute 1, 4 samplers, zero validation messages, clean shutdown
 - [x] 10-minute run, RTX 2080 (device index 1), Tier A, same strict criteria and the same flat result (36,001 frames, 60.0 fps)
-- [ ] 10-minute run in Tier B (fence completion path) on desktop
-- [~] Android device run: Adreno 840, both tiers, `DeviceSuite` (16 checks incl. instanced sprites and a 20 s texture-churn soak, flat native heap) passes. 10-minute soak, Tier A: 36,016 frames at 60 fps, native heap flat (24,939 -> 25,000 KB), zero validation messages. Not done: the 10-minute soak in Tier B, and the Galaxy S20. Found and fixed a real bug: `DeletionQueue::collect()` self-moved a `std::function` (empty on the NDK libc++, `bad_function_call` abort)
+- [x] 10-minute run in Tier B (fence completion path), RTX 5080: 36,001 frames at 60.0 fps, 50,000 buffer cycles/s, 2,000 textures/s, 998 sampler changes/s, 33 M retirements, VMA flat at 208 MB from the first minute, 4 samplers, no validation messages (core validation only: sync validation is off in fence mode, documented)
+- [x] Android device run: Adreno 840, both tiers, `DeviceSuite` (21 checks: sprite batches, shader bundle, ETC2/ASTC, instanced sprites, framebuffers with depth, stencil and multiple float attachments, the Gate 3 scenes, Stress test 3) passes. 10-minute soaks: Tier A 36,016 frames at 60 fps with the native heap flat (24,939 -> 25,000 KB); Tier B 35,984 frames at 59 fps, native heap 26,694 -> 26,798 KB; no validation messages. The Galaxy S20 the plan names is not available (this is the REDMAGIC)
 
 ---
 
@@ -205,8 +205,8 @@ the plan names.
 
 ### Stress test 2 (vs stock `SpriteBatch` on `gdx-backend-lwjgl3`)
 - [x] `VulkanSpriteBatch` Tier A, 128 textures: >= 3x stock fps. RTX 5080, 20,000 sprites/frame, 800x600, vsync off: 17.5 fps stock GL, 413 fps (23.6x). (`gradlew :gdx-vulkan-desktop:stress2`)
-- [ ] `VulkanSpriteBatch` Tier A, 1 texture: >= 1.0x. **Missed**: 950-965 fps vs 1,050-1,060 stock (0.91x) on the RTX 5080. CPU-bound (same fps with 3 px sprites); the vertex copy into mapped memory is the cost, down from 0.70x after the single-texture 20-byte path and cached host memory
-- [~] `VulkanSpriteBatch` Tier B (fence path), 128 textures: 55-70 fps vs 17.5 (3.1-4.1x) passes; 1 texture 0.91x misses like Tier A. RTX 2080 not compared: its Vulkan run is capped at its 120 Hz presentation while the GL run uses the display GPU
+- [x] `VulkanSpriteBatch` Tier A, 1 texture: >= 1.0x. RTX 5080: 1.23-1.26x stock GL (1,306-1,312 fps against 1,042-1,064); it was 0.91x. Cause found with `GDXVK_PROFILE=1` and sprite-size, present-mode, image-count and frames-in-flight sweeps: the GPU waited on vertex fetches across PCIe from the cached system-memory vertex ring (the CPU wait for a frame slot was 0.28 ms; empty frames were already faster than GL). The ring now has a device-local mirror, copied at the start of the frame, on discrete GPUs (not on unified-memory devices such as phones); the wait is 0.07 ms
+- [x] `VulkanSpriteBatch` Tier B (fence path): 128 textures 61-70 fps vs 17.5 (3.5-4.0x), 1 texture 1.22x. RTX 2080 not compared: its Vulkan run is capped at its 120 Hz presentation while the GL run uses the display GPU
 - [x] `VulkanSpriteBatchInstanced`, 1,000,000 sprites moved by compute: 60+ fps on RTX 2080. **722 fps** (Tier A) and 726 fps (Tier B) on the RTX 2080 at 1280x720, vsync off; 1,879 fps on the RTX 5080; 208-225 fps on the Adreno 840 at 1216x2688 (`gradlew :gdx-vulkan-desktop:stressInstanced -Dgdxvulkan.device=1`). 5 tests (`InstancedBatchTest`: pixel-exact against a CPU simulation of the same bouncing, upload-then-dispatch ordering in one frame, gravity, 1,000,000 sprites) pass on both GPUs, both tiers, lavapipe, and the Adreno (device suite)
 
 ---
@@ -220,14 +220,14 @@ the plan names.
 ### 2. Depth and stencil
 - [x] Packed depth-stencil reported supported; separate depth and stencil renderbuffers on one framebuffer are folded into one combined image (`depthImageOf` in the shim). Depth and stencil state (`glEnable`/`glDepthFunc`/`glDepthMask`/`glClearDepthf`/`glStencil*`/`glClearStencil`) are ordered stream packets: dynamic state on Tier A, pipeline variants on Tier B. 5 depth/stencil tests in `FrameBufferTest` (12 in all) pass on both GPUs, both tiers, lavapipe; the Adreno 840 device suite (18 checks) passes both tiers. The swapchain itself has no depth buffer yet (Phase 5), so depth state is ignored there
 - [x] Format by device support: `D24_UNORM_S8_UINT`, else `D32_SFLOAT_S8_UINT`; `DEPTH_COMPONENT16 -> D16_UNORM` (24/32-bit depth without stencil is `D32_SFLOAT`)
-- [~] Renderbuffers are ordinary device-local depth images that are loaded and stored: GL keeps a framebuffer's depth between its passes (`fb.begin()` twice), which a transient `STORE_OP_DONT_CARE` image cannot do. The transient optimisation needs to know the depth is not read again; Phase 4 mobile tuning
+- [x] Renderbuffers: by default ordinary device-local depth images that are loaded and stored (GL keeps a framebuffer's depth between its passes). The plan's transient, lazily allocated, `STORE_OP_DONT_CARE` depth is an explicit opt-in per framebuffer, `VulkanGL20.setFramebufferDepthTransient(handle, true)`: every pass must clear the depth, and nothing is kept. Tested on both GPUs, both tiers; lazily allocated memory only exists on tile-based GPUs
 
 ### 3. Pass scheduling
-- [ ] Offscreen passes recorded before the swapchain pass where stream order allows
-- [ ] Explicit load/store ops (`CLEAR` / `DONT_CARE` / `LOAD`)
+- [~] Offscreen passes before the swapchain pass: the frame's swapchain pass now begins at the first swapchain draw or clear, not at `beginFrame`, so framebuffer passes that come first (post-processing chains, shadow maps) never suspend and resume it; `lastPassCounts()` proves it (4 framebuffer passes then the screen = 1 swapchain pass; a screen draw between them = 2). Offscreen passes that come after a swapchain draw are not reordered ahead of it
+- [x] Explicit load/store ops: a full clear that starts a pass is its CLEAR load op, a pass otherwise LOADs, and a depth image with nothing in it yet or a transient one uses DONT_CARE; transient depth also stores nothing (`FrameBufferTest`)
 
 ### 4. Extras
-- [ ] `VulkanMultiTargetFrameBuffer` (multiple render targets, float attachments)
+- [x] `VulkanMultiTargetFrameBuffer` (1-8 colour attachments of RGBA8888, RGBA16F or RGBA32F, optional depth/stencil; built from stock GL calls, `Gdx.gl30` stays null): a pipeline writes as many outputs as its target has attachments (a mismatch is refused with a message that says so), a clear reaches every attachment, and floating-point attachments keep values above 1.0. `FrameBufferTest` on both GPUs, both tiers, lavapipe; the Adreno 840 device suite. A 32-bit float attachment that the device cannot filter is sampled nearest. Images need no zero upload
 - [x] Tier B render-pass cache keyed by colour and depth format and the clear flags (samples are always 1); pipelines are built per target variant and cached on their record
 
 ### Gate 3 and stress test 3

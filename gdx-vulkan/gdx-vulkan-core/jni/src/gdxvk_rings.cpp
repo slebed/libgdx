@@ -46,16 +46,53 @@ bool FrameRing::addBlock(std::vector<Block>& list, VkBufferUsageFlags usage, VkD
     // Random access asks for cached memory, which the Java side can also fill faster than write-combined memory.
     ai.flags = ((usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ? VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT : VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT) |
                VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    const bool vertexBlock = (usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) != 0;
+    if (vertexBlock) bi.usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT; // the source of the copy to a device-local mirror, if it gets one
     VmaAllocationInfo info{};
     Block b;
     if (vmaCreateBuffer(h_.allocator, &bi, &ai, &b.buffer, &b.alloc, &info) != VK_SUCCESS) return false;
     b.ptr = static_cast<uint8_t*>(info.pMappedData);
     b.size = size;
+    if (vertexBlock) {
+        VkMemoryPropertyFlags props = 0;
+        vmaGetAllocationMemoryProperties(h_.allocator, b.alloc, &props);
+        if (!(props & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) { // system memory: a discrete GPU would read every vertex over PCIe
+            VkBufferCreateInfo mi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+            mi.size = size;
+            mi.usage = (usage & ~VK_BUFFER_USAGE_TRANSFER_SRC_BIT) | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+            VmaAllocationCreateInfo mai{};
+            mai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+            if (vmaCreateBuffer(h_.allocator, &mi, &mai, &b.mirror, &b.mirrorAlloc, nullptr) != VK_SUCCESS) {
+                b.mirror = VK_NULL_HANDLE; // no room in device memory: draw from system memory instead
+                b.mirrorAlloc = nullptr;
+            }
+        }
+    }
     list.push_back(b);
     return true;
 }
 
-void FrameRing::destroyBlock(const Block& b) { vmaDestroyBuffer(h_.allocator, b.buffer, b.alloc); }
+void FrameRing::destroyBlock(const Block& b) {
+    vmaDestroyBuffer(h_.allocator, b.buffer, b.alloc);
+    if (b.mirror != VK_NULL_HANDLE) vmaDestroyBuffer(h_.allocator, b.mirror, b.mirrorAlloc);
+}
+
+bool FrameRing::recordVertexCopies(VkCommandBuffer cmd) {
+    bool any = false;
+    for (const Block& b : vertex_) {
+        if (b.mirror == VK_NULL_HANDLE || b.offset == 0) continue;
+        const VkBufferCopy c{0, 0, b.offset};
+        vkCmdCopyBuffer(cmd, b.buffer, b.mirror, 1, &c);
+        any = true;
+    }
+    if (any) {
+        VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+        mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        mb.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr);
+    }
+    return any;
+}
 
 bool FrameRing::writeSet(VkDescriptorSet& set) {
     VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
@@ -184,7 +221,10 @@ uint8_t* FrameRing::vertexBlockPtr(uint32_t block, uint64_t* size) {
     return vertex_[block].ptr;
 }
 
-VkBuffer FrameRing::vertexBlockBuffer(uint32_t block) const { return block < vertex_.size() ? vertex_[block].buffer : VK_NULL_HANDLE; }
+VkBuffer FrameRing::vertexBlockBuffer(uint32_t block) const {
+    if (block >= vertex_.size()) return VK_NULL_HANDLE;
+    return vertex_[block].mirror != VK_NULL_HANDLE ? vertex_[block].mirror : vertex_[block].buffer;
+}
 
 void FrameRing::flushVertices(uint32_t block, uint64_t offset, uint64_t bytes) {
     if (block < vertex_.size()) vmaFlushAllocation(h_.allocator, vertex_[block].alloc, offset, bytes);

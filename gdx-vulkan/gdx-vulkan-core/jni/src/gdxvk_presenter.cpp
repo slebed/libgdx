@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <utility>
 #include <vector>
 
@@ -112,12 +113,24 @@ struct Presenter::Impl {
     VkRenderPass renderPass = VK_NULL_HANDLE;       // Tier B only
     std::vector<VkFramebuffer> framebuffers;        // Tier B only
 
+    // The colour attachment formats of a render target (the swapchain has one). A pipeline writes exactly as many colour outputs as its target has.
+    static constexpr uint32_t kMaxColor = 8;
+    struct ColorSet {
+        uint32_t count = 1;
+        VkFormat f[kMaxColor] = {};
+        bool operator==(const ColorSet& o) const {
+            if (count != o.count) return false;
+            for (uint32_t i = 0; i < count; ++i) if (f[i] != o.f[i]) return false;
+            return true;
+        }
+    };
+
     struct PipelineRec {
         VkShaderModule vs = VK_NULL_HANDLE, fs = VK_NULL_HANDLE;
         PipelineDesc desc;
         std::string name;
         struct Variant {
-            VkFormat format;
+            ColorSet colors;
             VkFormat depthFormat;
             bool offscreen;  // Tier B only: the front face is baked in
             uint32_t ds;     // Tier B only: the packed depth/stencil state (see DsState::pack)
@@ -150,6 +163,19 @@ struct Presenter::Impl {
     uint32_t imageIndex = 0;
     bool frameOpen = false;
     std::string error;
+
+    // GDXVK_PROFILE=1 prints, when the presenter closes, where a frame's CPU time went in beginFrame and endFrame (milliseconds per frame).
+    const bool profOn = std::getenv("GDXVK_PROFILE") != nullptr;
+    double prof[8] = {};
+    uint64_t profFrames = 0;
+    std::chrono::steady_clock::time_point profLast;
+    void profStart() { if (profOn) profLast = std::chrono::steady_clock::now(); }
+    void profLap(int slot) {
+        if (!profOn) return;
+        const auto n = std::chrono::steady_clock::now();
+        prof[slot] += std::chrono::duration<double, std::milli>(n - profLast).count();
+        profLast = n;
+    }
 
     explicit Impl(Context& c) : ctx(c), h(c.handles()) {}
 
@@ -207,22 +233,38 @@ struct Presenter::Impl {
     int cullOverride = -1;
     uint32_t effectiveCull(int id) const { return cullOverride >= 0 ? static_cast<uint32_t>(cullOverride) : pipelines[id].desc.cullMode; }
 
-    VkPipeline pipelineFor(int id, VkFormat fmt, VkFormat depthFmt, bool offscreen) {
+    ColorSet swapColors() const {
+        ColorSet c;
+        c.count = 1;
+        c.f[0] = format;
+        return c;
+    }
+
+    VkPipeline pipelineFor(int id, const ColorSet& colors, VkFormat depthFmt, bool offscreen) {
         PipelineRec& rec = pipelines[id];
         const bool bakedKind = !h.tierA && offscreen;
         // Without a depth attachment the depth and stencil state does nothing: one variant serves every state.
         const uint32_t bakedDs = (!h.tierA && depthFmt != VK_FORMAT_UNDEFINED) ? dsState.pack() : 0u;
         const uint32_t bakedCull = h.tierA ? 0u : effectiveCull(id); // Tier A sets the cull mode dynamically
         for (const PipelineRec::Variant& v : rec.variants) {
-            if (v.format == fmt && v.depthFormat == depthFmt && v.offscreen == bakedKind && v.ds == bakedDs && v.cull == bakedCull) return v.pipeline;
+            if (v.colors == colors && v.depthFormat == depthFmt && v.offscreen == bakedKind && v.ds == bakedDs && v.cull == bakedCull) return v.pipeline;
         }
-        VkPipeline p = buildPipeline(rec, fmt, depthFmt, offscreen, bakedDs, bakedCull);
-        if (p != VK_NULL_HANDLE) rec.variants.push_back({fmt, depthFmt, bakedKind, bakedDs, bakedCull, p});
+        VkPipeline p = buildPipeline(rec, colors, depthFmt, offscreen, bakedDs, bakedCull);
+        if (p != VK_NULL_HANDLE) {
+            rec.variants.push_back({colors, depthFmt, bakedKind, bakedDs, bakedCull, p});
+            nameObject(h, VK_OBJECT_TYPE_PIPELINE, (uint64_t)p,
+                       (rec.name + (offscreen ? " (render target, " : " (swapchain, ") + std::to_string(colors.count) + " colour" + (depthFmt != VK_FORMAT_UNDEFINED ? ", depth)" : ")")).c_str());
+        }
         return p;
     }
 
-    VkPipeline buildPipeline(const PipelineRec& rec, VkFormat fmt, VkFormat depthFmt, bool offscreen, uint32_t bakedDs, uint32_t bakedCull) {
+    VkPipeline buildPipeline(const PipelineRec& rec, const ColorSet& colors, VkFormat depthFmt, bool offscreen, uint32_t bakedDs, uint32_t bakedCull) {
         const PipelineDesc& desc = rec.desc;
+        if (desc.colorOutputs != colors.count) {
+            error = "pipeline " + rec.name + " writes " + std::to_string(desc.colorOutputs) + " colour output(s) but its render target has " +
+                    std::to_string(colors.count) + " colour attachment(s)";
+            return VK_NULL_HANDLE;
+        }
         VkPipelineShaderStageCreateInfo stages[2]{{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO},
                                                   {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
         stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -267,9 +309,11 @@ struct Presenter::Impl {
             cba.dstAlphaBlendFactor = blendFactor(desc.dstAlpha);
             cba.alphaBlendOp = VK_BLEND_OP_ADD;
         }
+        VkPipelineColorBlendAttachmentState cbas[kMaxColor];
+        for (uint32_t i = 0; i < colors.count; ++i) cbas[i] = cba; // the same blend state on every attachment
         VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-        cb.attachmentCount = 1;
-        cb.pAttachments = &cba;
+        cb.attachmentCount = colors.count;
+        cb.pAttachments = cbas;
 
         const bool hasDepth = depthFmt != VK_FORMAT_UNDEFINED;
         const bool hasStencil = depthFmt == VK_FORMAT_D24_UNORM_S8_UINT || depthFmt == VK_FORMAT_D32_SFLOAT_S8_UINT;
@@ -303,8 +347,8 @@ struct Presenter::Impl {
         ds.pDynamicStates = dyn;
 
         VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-        rendering.colorAttachmentCount = 1;
-        rendering.pColorAttachmentFormats = &fmt;
+        rendering.colorAttachmentCount = colors.count;
+        rendering.pColorAttachmentFormats = colors.f;
         rendering.depthAttachmentFormat = depthFmt;
         rendering.stencilAttachmentFormat = hasStencil ? depthFmt : VK_FORMAT_UNDEFINED;
 
@@ -322,7 +366,7 @@ struct Presenter::Impl {
         gi.pDynamicState = &ds;
         gi.layout = h.layouts->pipelineLayout();
         if (!h.tierA) {
-            VkRenderPass pass = offscreen ? offscreenPass(fmt, depthFmt, false, false, false) : renderPass;
+            VkRenderPass pass = offscreen ? offscreenPass(colors, depthFmt, false, DepthOps()) : renderPass;
             if (pass == VK_NULL_HANDLE) {
                 error = "no render pass for pipeline " + rec.name;
                 return VK_NULL_HANDLE;
@@ -349,9 +393,18 @@ struct Presenter::Impl {
     // what was drawn. Offscreen colour images rest in SHADER_READ_ONLY_OPTIMAL and are moved to COLOR_ATTACHMENT_OPTIMAL for the pass and
     // back after it; depth images stay in DEPTH_STENCIL_ATTACHMENT_OPTIMAL, they are never sampled.
 
+    // What a pass does with the depth/stencil attachment at its start and end. Load: 0 load, 1 clear, 2 do not care. A framebuffer's depth is
+    // loaded and stored, as GL keeps it between passes; a transient one (opt-in) and a depth image never used before are not.
+    struct DepthOps {
+        uint8_t depthLoad = 0, stencilLoad = 0;
+        bool store = true;
+        bool operator==(const DepthOps& o) const { return depthLoad == o.depthLoad && stencilLoad == o.stencilLoad && store == o.store; }
+    };
     struct OffPass {
-        VkFormat color = VK_FORMAT_UNDEFINED, depth = VK_FORMAT_UNDEFINED;
-        bool clearColor = false, clearDepth = false, clearStencil = false;
+        ColorSet colors;
+        VkFormat depth = VK_FORMAT_UNDEFINED;
+        bool clearColor = false;
+        DepthOps ops;
         VkRenderPass pass = VK_NULL_HANDLE;
     };
     std::vector<OffPass> offPasses;               // Tier B
@@ -366,21 +419,35 @@ struct Presenter::Impl {
     };
 
     struct OffTarget {
-        VkImage image = VK_NULL_HANDLE;
-        VkImageView view = VK_NULL_HANDLE;
-        VkFormat format = VK_FORMAT_UNDEFINED;
+        uint32_t count = 0; // colour attachments, all the same size
+        VkImage image[kMaxColor] = {};
+        VkImageView view[kMaxColor] = {};
+        VkFormat format[kMaxColor] = {};
         uint32_t w = 0, h = 0;
+        ColorSet colorSet() const {
+            ColorSet c;
+            c.count = count;
+            for (uint32_t i = 0; i < count; ++i) c.f[i] = format[i];
+            return c;
+        }
         int depthId = -1;                           // the depth image, -1 = none
         VkImage depthImage = VK_NULL_HANDLE;
         VkImageView depthView = VK_NULL_HANDLE;
         VkFormat depthFormat = VK_FORMAT_UNDEFINED;
         bool hasStencil = false;
+        bool depthTransient = false; // never loaded, never stored: lives in on-chip memory on tile-based GPUs (opt-in, see Resources::createDepthImage)
     };
-    int curOff = -1;           // texture id of the offscreen target, -1 = the swapchain
+    int curOff = -1;           // texture id of the offscreen target's first colour attachment, -1 = the swapchain
+    int offIds[kMaxColor] = {}; // texture ids of all its colour attachments
     OffTarget off;             // valid while curOff >= 0
     bool swapOpen = false;     // a pass on the swapchain image is recording
     bool offOpen = false;      // a pass on the offscreen image is recording
     VkFramebuffer offFb = VK_NULL_HANDLE; // Tier B, for the open offscreen pass
+    // Pass scheduling: the frame's swapchain pass starts at the first thing drawn or cleared on the swapchain, not at beginFrame, so framebuffer
+    // passes that come first (post-processing chains, shadow maps) cost no suspend and resume of the main pass (expensive on tile-based GPUs).
+    bool swapStarted = false;  // the frame's first swapchain pass has begun
+    float frameClear[4] = {};  // what beginFrame was asked to clear to
+    uint32_t passCount[2] = {}, lastPassCount[2] = {}; // passes begun this frame and in the last finished one: swapchain, offscreen
     int curPipeline = -1;      // last pipeline bound by the stream
     int32_t pushShadow[32] = {}; // the push-constant block as the stream built it (raw words); pushed in full before a draw when it changed
     bool pushDirty = false;
@@ -440,37 +507,44 @@ struct Presenter::Impl {
 
     // Offscreen render pass: a colour attachment, and a depth(-stencil) one when `depth` is given. Colour and depth stay in their attachment
     // layouts at both ends; the clear flags choose the load ops, everything else loads. All variants share the same dependency.
-    VkRenderPass offscreenPass(VkFormat color, VkFormat depth, bool clearColor, bool clearDepth, bool clearStencil) {
-        if (depth == VK_FORMAT_UNDEFINED) clearDepth = clearStencil = false;
-        if (!formatHasStencil(depth)) clearStencil = false;
+    VkRenderPass offscreenPass(const ColorSet& colors, VkFormat depth, bool clearColor, DepthOps ops) {
+        if (depth == VK_FORMAT_UNDEFINED) ops = DepthOps();
+        if (!formatHasStencil(depth)) ops.stencilLoad = 2; // no stencil aspect: nothing to load
         for (const OffPass& p : offPasses) {
-            if (p.color == color && p.depth == depth && p.clearColor == clearColor && p.clearDepth == clearDepth && p.clearStencil == clearStencil) return p.pass;
+            if (p.colors == colors && p.depth == depth && p.clearColor == clearColor && p.ops == ops) return p.pass;
         }
-        VkAttachmentDescription att[2]{};
-        att[0].format = color;
-        att[0].samples = VK_SAMPLE_COUNT_1_BIT;
-        att[0].loadOp = clearColor ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-        att[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        att[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        att[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        att[0].initialLayout = att[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        const uint32_t n = colors.count;
+        VkAttachmentDescription att[kMaxColor + 1]{};
+        VkAttachmentReference crefs[kMaxColor];
+        for (uint32_t i = 0; i < n; ++i) {
+            att[i].format = colors.f[i];
+            att[i].samples = VK_SAMPLE_COUNT_1_BIT;
+            att[i].loadOp = clearColor ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD; // every attachment, as GL clears every draw buffer
+            att[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            att[i].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            att[i].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            att[i].initialLayout = att[i].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            crefs[i] = {i, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+        }
         const bool hasDepth = depth != VK_FORMAT_UNDEFINED;
         const bool stencil = formatHasStencil(depth);
+        VkAttachmentDescription& da = att[n];
         if (hasDepth) {
-            att[1].format = depth;
-            att[1].samples = VK_SAMPLE_COUNT_1_BIT;
-            att[1].loadOp = clearDepth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-            att[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            att[1].stencilLoadOp = stencil ? (clearStencil ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD) : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-            att[1].stencilStoreOp = stencil ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
-            att[1].initialLayout = att[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            da.format = depth;
+            da.samples = VK_SAMPLE_COUNT_1_BIT;
+            const VkAttachmentLoadOp loadOps[3] = {VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_LOAD_OP_DONT_CARE};
+            const VkAttachmentStoreOp storeOp = ops.store ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            da.loadOp = loadOps[ops.depthLoad];
+            da.storeOp = storeOp;
+            da.stencilLoadOp = loadOps[ops.stencilLoad];
+            da.stencilStoreOp = stencil ? storeOp : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            da.initialLayout = da.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
         }
-        VkAttachmentReference cref{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-        VkAttachmentReference dref{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+        VkAttachmentReference dref{n, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
         VkSubpassDescription sub{};
         sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        sub.colorAttachmentCount = 1;
-        sub.pColorAttachments = &cref;
+        sub.colorAttachmentCount = n;
+        sub.pColorAttachments = crefs;
         if (hasDepth) sub.pDepthStencilAttachment = &dref;
         const VkPipelineStageFlags stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
                                             VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
@@ -482,18 +556,17 @@ struct Presenter::Impl {
         dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
                             VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
         VkRenderPassCreateInfo ri{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-        ri.attachmentCount = hasDepth ? 2 : 1;
+        ri.attachmentCount = n + (hasDepth ? 1 : 0);
         ri.pAttachments = att;
         ri.subpassCount = 1;
         ri.pSubpasses = &sub;
         ri.dependencyCount = 1;
         ri.pDependencies = &dep;
         OffPass p;
-        p.color = color;
+        p.colors = colors;
         p.depth = depth;
         p.clearColor = clearColor;
-        p.clearDepth = clearDepth;
-        p.clearStencil = clearStencil;
+        p.ops = ops;
         if (vkCreateRenderPass(h.device, &ri, nullptr, &p.pass) != VK_SUCCESS) return VK_NULL_HANDLE;
         offPasses.push_back(p);
         return p.pass;
@@ -501,7 +574,7 @@ struct Presenter::Impl {
 
     uint32_t targetW() const { return curOff >= 0 ? off.w : extent.width; }
     uint32_t targetH() const { return curOff >= 0 ? off.h : extent.height; }
-    VkFormat targetFormat() const { return curOff >= 0 ? off.format : format; }
+    ColorSet targetColors() const { return curOff >= 0 ? off.colorSet() : swapColors(); }
     VkFormat targetDepthFormat() const { return curOff >= 0 ? off.depthFormat : VK_FORMAT_UNDEFINED; }
     bool passOpen() const { return curOff >= 0 ? offOpen : swapOpen; }
 
@@ -561,7 +634,7 @@ struct Presenter::Impl {
 
     // Binds the pipeline variant for the current target and state. False on failure (error set).
     bool bindPipelineVariant(VkCommandBuffer cmd, int id) {
-        VkPipeline vk = pipelineFor(id, targetFormat(), targetDepthFormat(), curOff >= 0);
+        VkPipeline vk = pipelineFor(id, targetColors(), targetDepthFormat(), curOff >= 0);
         if (vk == VK_NULL_HANDLE) return false;
         curPipeline = id;
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk);
@@ -577,13 +650,19 @@ struct Presenter::Impl {
         if (swapOpen) {
             if (h.tierA) vkCmdEndRendering(cmd); else vkCmdEndRenderPass(cmd);
             swapOpen = false;
+            if (passLabelOpen) endLabel(h, cmd);
+            passLabelOpen = false;
         }
         if (offOpen) {
             if (h.tierA) vkCmdEndRendering(cmd); else vkCmdEndRenderPass(cmd);
             offOpen = false;
-            imageBarrier(cmd, off.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+            if (passLabelOpen) endLabel(h, cmd);
+            passLabelOpen = false;
+            for (uint32_t i = 0; i < off.count; ++i) {
+                imageBarrier(cmd, off.image[i], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+            }
             if (offFb != VK_NULL_HANDLE) {
                 VkDevice dev = h.device;
                 VkFramebuffer fb = offFb;
@@ -594,12 +673,25 @@ struct Presenter::Impl {
     }
 
     // Starts a pass on the current target, clearing what `clear` names and loading the rest. False on failure (error set).
+    bool passLabelOpen = false;
+
     bool beginPass(VkCommandBuffer cmd, const PassClear* clear) {
-        const bool cc = clear && clear->color, dc = clear && clear->depth, sc = clear && clear->stencil;
+        if (h.debugUtils) {
+            const std::string label = curOff < 0 ? std::string("gdx: swapchain pass") : "gdx: render target pass (texture " + std::to_string(curOff) +
+                                                                                           (off.count > 1 ? " and " + std::to_string(off.count - 1) + " more)" : ")");
+            beginLabel(h, cmd, label.c_str(), curOff < 0 ? 0.3f : 0.9f, 0.5f, curOff < 0 ? 0.9f : 0.4f);
+            passLabelOpen = true;
+        }
+        bool cc = clear && clear->color;
+        const bool dc = clear && clear->depth, sc = clear && clear->stencil;
         VkClearValue cv[2]{};
         if (clear) {
             for (int i = 0; i < 4; ++i) cv[0].color.float32[i] = clear->rgba[i];
             cv[1].depthStencil = {clear->depthValue, clear->stencilValue};
+        }
+        if (curOff < 0 && !swapStarted && !cc) { // the frame's first swapchain pass clears to the frame's colour, unless a clear that starts it names another
+            cc = true;
+            for (int i = 0; i < 4; ++i) cv[0].color.float32[i] = frameClear[i];
         }
         const VkRect2D area{{0, 0}, {targetW(), targetH()}};
         if (curOff < 0) {
@@ -626,19 +718,30 @@ struct Presenter::Impl {
                 vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
             }
             swapOpen = true;
+            swapStarted = true;
+            ++passCount[0];
             return true;
         }
 
-        imageBarrier(cmd, off.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0,
-                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT);
+        for (uint32_t i = 0; i < off.count; ++i) {
+            imageBarrier(cmd, off.image[i], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT);
+        }
         const bool hasDepth = off.depthFormat != VK_FORMAT_UNDEFINED;
+        DepthOps ops;
         if (hasDepth) {
             VkImage img;
             VkImageView view;
             VkFormat fmt;
-            bool stencil, initialized;
-            h.resources->depthImageInfo(off.depthId, &img, &view, &fmt, &stencil, &initialized);
+            bool stencil, initialized, transient;
+            h.resources->depthImageInfo(off.depthId, &img, &view, &fmt, &stencil, &initialized, &transient);
+            // Clear what the pass clears; otherwise load, except where there is nothing worth loading: a depth image no pass has used yet
+            // (its contents are undefined, as in GL) and a transient one, which keeps nothing between passes.
+            const bool nothingToLoad = !initialized || transient;
+            ops.depthLoad = dc ? 1 : nothingToLoad ? 2 : 0;
+            ops.stencilLoad = sc ? 1 : nothingToLoad ? 2 : 0;
+            ops.store = !transient;
             const VkImageAspectFlags aspect = VK_IMAGE_ASPECT_DEPTH_BIT | (off.hasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
             const VkPipelineStageFlags tests = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
             const VkAccessFlags rw = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
@@ -653,39 +756,46 @@ struct Presenter::Impl {
         }
 
         if (h.tierA) {
-            VkRenderingAttachmentInfo ca{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-            ca.imageView = off.view;
-            ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            ca.loadOp = cc ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-            ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            ca.clearValue = cv[0];
+            VkRenderingAttachmentInfo cas[kMaxColor];
+            for (uint32_t i = 0; i < off.count; ++i) {
+                VkRenderingAttachmentInfo& ca = cas[i];
+                ca = {VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+                ca.imageView = off.view[i];
+                ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                ca.loadOp = cc ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD; // a clear reaches every attachment, as GL clears every draw buffer
+                ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                ca.clearValue = cv[0];
+            }
             VkRenderingAttachmentInfo da{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
             da.imageView = off.depthView;
             da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-            da.loadOp = dc ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
-            da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            const VkAttachmentLoadOp loadOps[3] = {VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_LOAD_OP_DONT_CARE};
+            da.loadOp = loadOps[ops.depthLoad];
+            da.storeOp = ops.store ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
             da.clearValue = cv[1];
             VkRenderingAttachmentInfo sa = da;
-            sa.loadOp = sc ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+            sa.loadOp = loadOps[ops.stencilLoad];
             VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
             ri.renderArea = area;
             ri.layerCount = 1;
-            ri.colorAttachmentCount = 1;
-            ri.pColorAttachments = &ca;
+            ri.colorAttachmentCount = off.count;
+            ri.pColorAttachments = cas;
             if (hasDepth) ri.pDepthAttachment = &da;
             if (hasDepth && off.hasStencil) ri.pStencilAttachment = &sa;
             vkCmdBeginRendering(cmd, &ri);
         } else {
-            VkRenderPass pass = offscreenPass(off.format, off.depthFormat, cc, dc, sc);
-            VkRenderPass compatible = offscreenPass(off.format, off.depthFormat, false, false, false);
+            VkRenderPass pass = offscreenPass(off.colorSet(), off.depthFormat, cc, ops);
+            VkRenderPass compatible = offscreenPass(off.colorSet(), off.depthFormat, false, DepthOps());
             if (pass == VK_NULL_HANDLE || compatible == VK_NULL_HANDLE) {
                 error = "vkCreateRenderPass failed for a render target";
                 return false;
             }
-            VkImageView atts[2] = {off.view, off.depthView};
+            VkImageView atts[kMaxColor + 1];
+            for (uint32_t i = 0; i < off.count; ++i) atts[i] = off.view[i];
+            atts[off.count] = off.depthView;
             VkFramebufferCreateInfo fi{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
             fi.renderPass = compatible;
-            fi.attachmentCount = hasDepth ? 2 : 1;
+            fi.attachmentCount = off.count + (hasDepth ? 1 : 0);
             fi.pAttachments = atts;
             fi.width = off.w;
             fi.height = off.h;
@@ -698,17 +808,22 @@ struct Presenter::Impl {
             rp.renderPass = pass;
             rp.framebuffer = offFb;
             rp.renderArea = area;
-            rp.clearValueCount = hasDepth ? 2 : 1;
-            rp.pClearValues = cv;
+            VkClearValue cvs[kMaxColor + 1];
+            for (uint32_t i = 0; i < off.count; ++i) cvs[i] = cv[0];
+            cvs[off.count] = cv[1];
+            rp.clearValueCount = off.count + (hasDepth ? 1 : 0);
+            rp.pClearValues = cvs;
             vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
         }
         offOpen = true;
+        ++passCount[1];
         return true;
     }
 
     // Records the frame's queued dispatches (after the staged uploads, in `cmd`). Returns whether anything was recorded.
     bool recordCompute(VkCommandBuffer cmd) {
         if (computeQueue.empty()) return false;
+        beginLabel(h, cmd, "gdx: compute", 0.9f, 0.6f, 0.2f);
         constexpr VkPipelineStageFlags kShaderStages = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
         auto barrier = [&](VkPipelineStageFlags srcStage, VkAccessFlags srcAccess, VkPipelineStageFlags dstStage, VkAccessFlags dstAccess) {
             VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
@@ -736,11 +851,20 @@ struct Presenter::Impl {
         // The frame's draws (the next command buffer in the submit) read the results in their vertex shaders.
         barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, kShaderStages, kRw);
         computeQueue.clear();
+        endLabel(h, cmd);
         return true;
     }
 
     void destroyAll() {
         if (h.device == VK_NULL_HANDLE) return;
+        if (profOn && profFrames > 0) {
+            const double n = static_cast<double>(profFrames);
+            std::fprintf(stderr,
+                         "[gdx-vulkan][profile] per frame over %llu frames (ms): begin: wait for the frame slot %.3f, deletion/staging/ring %.3f, acquire %.3f, "
+                         "command buffer setup %.3f | end: close passes %.3f, uploads+compute record %.3f, submit %.3f, present %.3f\n",
+                         static_cast<unsigned long long>(profFrames), prof[0] / n, prof[1] / n, prof[2] / n, prof[3] / n, prof[4] / n, prof[5] / n, prof[6] / n,
+                         prof[7] / n);
+        }
         vkDeviceWaitIdle(h.device);
         destroySwapchainViews();
         for (const PipelineRec& pl : pipelines) {
@@ -788,6 +912,9 @@ struct Presenter::Impl {
             ai.commandBufferCount = 1;
             if (vkAllocateCommandBuffers(h.device, &ai, &f.cmd) != VK_SUCCESS) return false;
             if (vkAllocateCommandBuffers(h.device, &ai, &f.uploadCmd) != VK_SUCCESS) return false;
+            const std::string idx = std::to_string(&f - frames);
+            nameObject(h, VK_OBJECT_TYPE_COMMAND_BUFFER, reinterpret_cast<uint64_t>(f.cmd), ("gdx frame " + idx).c_str());
+            nameObject(h, VK_OBJECT_TYPE_COMMAND_BUFFER, reinterpret_cast<uint64_t>(f.uploadCmd), ("gdx uploads and compute " + idx).c_str());
             VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
             if (vkCreateSemaphore(h.device, &si, nullptr, &f.acquired) != VK_SUCCESS) return false;
         }
@@ -875,11 +1002,16 @@ struct Presenter::Impl {
         auto has = [&](VkPresentModeKHR m) { return std::find(modes.begin(), modes.end(), m) != modes.end(); };
         VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR; // always available
         if (!vsync) {
-            if (has(VK_PRESENT_MODE_MAILBOX_KHR)) mode = VK_PRESENT_MODE_MAILBOX_KHR;
+            // GDXVK_PRESENT=immediate|mailbox picks the mode for diagnosis (immediate may tear; mailbox never does but adds a frame of latency).
+            const char* want = std::getenv("GDXVK_PRESENT");
+            const bool preferImmediate = want != nullptr && std::string(want) == "immediate";
+            if (preferImmediate && has(VK_PRESENT_MODE_IMMEDIATE_KHR)) mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            else if (has(VK_PRESENT_MODE_MAILBOX_KHR)) mode = VK_PRESENT_MODE_MAILBOX_KHR;
             else if (has(VK_PRESENT_MODE_IMMEDIATE_KHR)) mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
         }
 
         uint32_t count = caps.minImageCount + 1;
+        if (const char* images = std::getenv("GDXVK_IMAGES")) count = std::max<uint32_t>(caps.minImageCount, static_cast<uint32_t>(std::atoi(images))); // diagnosis
         if (caps.maxImageCount > 0) count = std::min(count, caps.maxImageCount);
 
         VkCompositeAlphaFlagBitsKHR alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -1033,15 +1165,19 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
         if (st != FrameStatus::Ok) return st;
     }
 
+    s.profStart();
     Frame& f = s.frames[s.frameIndex];
     VkResult r = h.timeline->waitSerial(f.serial);
+    s.profLap(0);
     if (r != VK_SUCCESS) return mapResult(r);
     h.deletion->collect(); // the GPU has finished with everything retired before the frames that are now complete
     h.staging->collect(h.timeline->completed());
     s.rings[s.frameIndex]->reset(); // this slot's previous frame has completed
     s.computeQueue.clear();
+    s.profLap(1);
 
     r = vkAcquireNextImageKHR(h.device, s.swapchain, UINT64_MAX, f.acquired, VK_NULL_HANDLE, &s.imageIndex);
+    s.profLap(2);
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
         s.dirty = true;
         return FrameStatus::Skipped;
@@ -1071,10 +1207,9 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
                      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
     }
-    Impl::PassClear first;
-    first.color = true;
-    for (int c = 0; c < 4; ++c) first.rgba[c] = rgba[c];
-    if (!s.beginPass(f.cmd, &first)) return s.fail(s.error);
+    s.swapStarted = false; // the pass begins at the first swapchain draw or clear, with this colour
+    for (int c = 0; c < 4; ++c) s.frameClear[c] = rgba[c];
+    s.passCount[0] = s.passCount[1] = 0;
     // Defaults for the command stream: the whole target, GL-style (Y up) through the negative-height viewport.
     s.applyViewport(f.cmd);
     s.applyScissor(f.cmd);
@@ -1084,6 +1219,7 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
     std::memset(s.pushShadow, 0, sizeof(s.pushShadow));
     s.applyDepthStencil(f.cmd);
     s.frameOpen = true;
+    s.profLap(3);
     return FrameStatus::Ok;
 }
 
@@ -1091,6 +1227,7 @@ FrameStatus Presenter::endFrame(bool capture) {
     Impl& s = *impl_;
     const ContextHandles& h = s.h;
     if (!s.frameOpen) return s.fail("endFrame called without beginFrame");
+    s.profStart();
     if (capture) {
         if (!s.canCapture) return s.fail("Swapchain images do not support TRANSFER_SRC; cannot capture");
         if (!s.ensureCaptureBuffer()) return s.fail("Allocating the capture buffer failed");
@@ -1101,7 +1238,16 @@ FrameStatus Presenter::endFrame(bool capture) {
 
     // Both tiers leave the swapchain image in COLOR_ATTACHMENT_OPTIMAL (the passes end there, so a pass can be resumed). Whichever
     // pass is still open ends here; if the stream left an offscreen target bound, that image goes back to being sampleable.
+    if (!s.swapStarted) { // nothing was drawn to the swapchain: it still shows the frame's clear colour
+        s.endPass(f.cmd);
+        const int bound = s.curOff;
+        s.curOff = -1;
+        if (!s.beginPass(f.cmd, nullptr)) return s.fail(s.error);
+        s.endPass(f.cmd);
+        s.curOff = bound;
+    }
     s.endPass(f.cmd);
+    std::memcpy(s.lastPassCount, s.passCount, sizeof(s.lastPassCount));
     const VkImageLayout layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     if (capture) {
         imageBarrier(f.cmd, image, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -1136,6 +1282,7 @@ FrameStatus Presenter::endFrame(bool capture) {
                      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0);
     }
     vkEndCommandBuffer(f.cmd);
+    s.profLap(4);
 
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -1148,16 +1295,21 @@ FrameStatus Presenter::endFrame(bool capture) {
     VkCommandBufferBeginInfo ubi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     ubi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(f.uploadCmd, &ubi);
+    beginLabel(h, f.uploadCmd, "gdx: staged uploads", 0.5f, 0.8f, 0.4f);
     s.stagingRecorded = h.staging->recordPending(f.uploadCmd);
+    endLabel(h, f.uploadCmd);
+    const bool mirrored = s.rings[s.frameIndex]->recordVertexCopies(f.uploadCmd);
     const bool computed = s.recordCompute(f.uploadCmd);
     vkEndCommandBuffer(f.uploadCmd);
-    const bool preCmd = s.stagingRecorded || computed; // the upload command buffer has something in it
+    s.profLap(5);
+    const bool preCmd = s.stagingRecorded || computed || mirrored; // the upload command buffer has something in it
     VkCommandBuffer cmds[2] = {f.uploadCmd, f.cmd};
     si.commandBufferCount = preCmd ? 2 : 1;
     si.pCommandBuffers = preCmd ? cmds : &f.cmd;
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = &s.renderDone[s.imageIndex];
     VkResult r = h.timeline->submit(si, &f.serial);
+    s.profLap(6);
     if (r == VK_SUCCESS && s.stagingRecorded) h.staging->markSubmitted(f.serial);
     s.stagingRecorded = false;
     if (r != VK_SUCCESS) return mapResult(r) == FrameStatus::Error ? s.fail("vkQueueSubmit failed (VkResult " + std::to_string(r) + ")") : mapResult(r);
@@ -1172,6 +1324,8 @@ FrameStatus Presenter::endFrame(bool capture) {
         std::lock_guard<std::mutex> queueLock(h.queueMutex);
         r = vkQueuePresentKHR(h.graphicsQueue, &pi);
     }
+    s.profLap(7);
+    ++s.profFrames;
     s.frameIndex = (s.frameIndex + 1) % kFramesInFlight;
     FrameStatus result = FrameStatus::Ok;
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
@@ -1219,8 +1373,9 @@ int Presenter::createPipelineEx(const char* name, const uint32_t* vertSpv, size_
     // The modules stay alive with the record: the same pipeline is built again for each other render target it is used with.
     s.pipelines.push_back(rec);
     const int id = static_cast<int>(s.pipelines.size() - 1);
-    // The swapchain variant is built now, so a bad shader or state fails here and not in the middle of a frame.
-    if (s.pipelineFor(id, s.format, VK_FORMAT_UNDEFINED, false) == VK_NULL_HANDLE) {
+    // The swapchain variant is built now, so a bad shader or state fails here and not in the middle of a frame. A pipeline that writes several
+    // colour outputs can never draw to the swapchain: it is built when it is first bound to a target that has that many attachments.
+    if (desc.colorOutputs == 1 && s.pipelineFor(id, s.swapColors(), VK_FORMAT_UNDEFINED, false) == VK_NULL_HANDLE) {
         vkDestroyShaderModule(h.device, rec.vs, nullptr);
         vkDestroyShaderModule(h.device, rec.fs, nullptr);
         s.pipelines.pop_back();
@@ -1256,6 +1411,7 @@ int Presenter::createComputePipeline(const char* name, const uint32_t* spv, size
         s.error = "vkCreateComputePipelines failed (VkResult " + std::to_string(r) + ")";
         return -1;
     }
+    nameObject(h, VK_OBJECT_TYPE_PIPELINE, (uint64_t)pipeline, (std::string(name ? name : "compute") + " (compute)").c_str());
     s.computePipelines.push_back(pipeline);
     return static_cast<int>(s.computePipelines.size() - 1);
 }
@@ -1321,7 +1477,8 @@ FrameStatus Presenter::draw(int pipeline, uint32_t vertexCount, const float push
     if (!s.frameOpen) return s.fail("draw called outside beginFrame/endFrame");
     if (pipeline < 0 || static_cast<size_t>(pipeline) >= s.pipelines.size()) return s.fail("draw: unknown pipeline id");
     VkCommandBuffer cmd = s.frames[s.frameIndex].cmd;
-    VkPipeline vk = s.pipelineFor(pipeline, s.format, VK_FORMAT_UNDEFINED, false);
+    if (!s.passOpen() && !s.beginPass(cmd, nullptr)) return s.fail(s.error);
+    VkPipeline vk = s.pipelineFor(pipeline, s.swapColors(), VK_FORMAT_UNDEFINED, false);
     if (vk == VK_NULL_HANDLE) return FrameStatus::Error;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk);
     // Negative height flips Y so GL clip space (+Y up) lands the right way up (VK_KHR_maintenance1, core in 1.1).
@@ -1404,21 +1561,43 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 break;
             }
             case cmd::BindTarget: {
-                if (!need(2)) return s.fail("command stream truncated (BindTarget)");
-                const int tex = w[i], depth = w[i + 1];
-                i += 2;
-                if (tex == s.curOff && (tex < 0 || depth == s.off.depthId)) break;
+                if (!need(1)) return s.fail("command stream truncated (BindTarget)");
+                const int count = w[i];
+                if (count < 0 || count > static_cast<int>(Impl::kMaxColor)) return s.fail("command stream: BindTarget with a bad colour attachment count");
+                if (!need(static_cast<size_t>(count) + 2)) return s.fail("command stream truncated (BindTarget)");
+                const int32_t* ids = w + i + 1;
+                const int depth = w[i + 1 + count];
+                i += static_cast<size_t>(count) + 2;
+                const int tex = count > 0 ? ids[0] : -1; // the swapchain is count 0
+                bool same = tex == s.curOff;
+                if (same && count > 0) {
+                    same = depth == s.off.depthId && static_cast<uint32_t>(count) == s.off.count;
+                    for (int k = 0; same && k < count; ++k) same = ids[k] == s.offIds[k];
+                }
+                if (same) break;
                 s.endPass(cmd);
                 s.curOff = tex;
                 if (tex >= 0) {
                     Impl::OffTarget t;
-                    if (!s.h.resources->renderTargetInfo(tex, &t.image, &t.view, &t.format, &t.w, &t.h)) {
-                        s.curOff = -1;
-                        return s.fail("command stream: BindTarget names a texture that is not a render target");
+                    t.count = static_cast<uint32_t>(count);
+                    for (int k = 0; k < count; ++k) {
+                        uint32_t tw, th;
+                        if (!s.h.resources->renderTargetInfo(ids[k], &t.image[k], &t.view[k], &t.format[k], &tw, &th)) {
+                            s.curOff = -1;
+                            return s.fail("command stream: BindTarget names a texture that is not a render target");
+                        }
+                        if (k == 0) {
+                            t.w = tw;
+                            t.h = th;
+                        } else if (tw != t.w || th != t.h) {
+                            s.curOff = -1;
+                            return s.fail("command stream: the colour attachments of a target must all be the same size");
+                        }
+                        s.offIds[k] = ids[k];
                     }
                     if (depth >= 0) {
                         bool initialized;
-                        if (!s.h.resources->depthImageInfo(depth, &t.depthImage, &t.depthView, &t.depthFormat, &t.hasStencil, &initialized)) {
+                        if (!s.h.resources->depthImageInfo(depth, &t.depthImage, &t.depthView, &t.depthFormat, &t.hasStencil, &initialized, &t.depthTransient)) {
                             s.curOff = -1;
                             return s.fail("command stream: BindTarget names an unknown depth image");
                         }
@@ -1430,8 +1609,12 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 s.applyViewport(cmd);
                 s.applyScissor(cmd);
                 if (s.h.tierA) vkCmdSetFrontFace(cmd, s.frontFace());
-                // Pipelines belong to a colour/depth format (and on Tier B to a render pass): bind the variant for this target
-                if (s.curPipeline >= 0 && !s.bindPipelineVariant(cmd, s.curPipeline)) return s.fail(s.error);
+                // Pipelines belong to a colour/depth format (and on Tier B to a render pass): bind the variant for this target. One that writes a
+                // different number of outputs than this target has attachments does not fit it: the stream binds the right pipeline before drawing.
+                if (s.curPipeline >= 0) {
+                    if (s.pipelines[s.curPipeline].desc.colorOutputs != s.targetColors().count) s.curPipeline = -1;
+                    else if (!s.bindPipelineVariant(cmd, s.curPipeline)) return s.fail(s.error);
+                }
                 break;
             }
             case cmd::CullMode: {
@@ -1522,13 +1705,15 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                     break;
                 }
                 if (!s.passOpen() && !s.beginPass(cmd, nullptr)) return s.fail(s.error);
-                VkClearAttachment atts[2]{};
+                VkClearAttachment atts[Impl::kMaxColor + 1]{};
                 uint32_t count = 0;
-                if (pc.color) {
-                    atts[count].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                    atts[count].colorAttachment = 0;
-                    for (int c = 0; c < 4; ++c) atts[count].clearValue.color.float32[c] = pc.rgba[c];
-                    ++count;
+                if (pc.color) { // GL clears every draw buffer
+                    const uint32_t n = s.curOff >= 0 ? s.off.count : 1;
+                    for (uint32_t a = 0; a < n; ++a, ++count) {
+                        atts[count].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                        atts[count].colorAttachment = a;
+                        for (int c = 0; c < 4; ++c) atts[count].clearValue.color.float32[c] = pc.rgba[c];
+                    }
                 }
                 if (pc.depth || pc.stencil) {
                     atts[count].aspectMask = (pc.depth ? VK_IMAGE_ASPECT_DEPTH_BIT : 0) | (pc.stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
@@ -1609,6 +1794,10 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
     return FrameStatus::Ok;
 }
 
+void Presenter::lastPassCounts(uint32_t out[2]) const {
+    out[0] = impl_->lastPassCount[0];
+    out[1] = impl_->lastPassCount[1];
+}
 const std::vector<uint8_t>& Presenter::capturedPixels() const { return impl_->captured; }
 
 uint32_t Presenter::width() const { return impl_->extent.width; }

@@ -337,6 +337,35 @@ class SpriteBatchTest {
         orange.dispose();
     }
 
+    @Test void texturesRenamedDuringAFrameAreCounted() {
+        Texture t = solid(1, 0, 0, 1);
+        render(BLACK, b -> { // the first draw creates the image: not a rename
+            b.begin();
+            b.draw(t, 0, 0, 8, 8);
+            b.end();
+        });
+        assertEquals(0, frame.getRenamesLastFrame(), "creating the image is not a rename");
+        Pixmap green = new Pixmap(2, 2, Pixmap.Format.RGBA8888);
+        green.setColor(0, 1, 0, 1);
+        green.fill();
+        render(BLACK, b -> {
+            b.begin();
+            b.draw(t, 0, 0, 8, 8);
+            t.draw(green, 0, 0); // each pixel change after the image exists gives the texture a new image
+            t.draw(green, 0, 0);
+            b.end();
+        });
+        assertEquals(2, frame.getRenamesLastFrame(), "two pixel changes, two renames");
+        render(BLACK, b -> {
+            b.begin();
+            b.draw(t, 0, 0, 8, 8);
+            b.end();
+        });
+        assertEquals(0, frame.getRenamesLastFrame(), "a frame with no pixel changes renames nothing");
+        green.dispose();
+        t.dispose();
+    }
+
     @Test void apiContractAroundShadersAndDrawing() {
         assertEquals(Color.WHITE_FLOAT_BITS, new VulkanSpriteBatch(frame).getPackedColor());
         GLFW.glfwPollEvents();

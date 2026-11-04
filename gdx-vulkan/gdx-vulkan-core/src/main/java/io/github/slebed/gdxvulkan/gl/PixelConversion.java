@@ -35,6 +35,14 @@ final class PixelConversion {
         }
     }
 
+    static final int GL_HALF_FLOAT = 0x140B, GL_HALF_FLOAT_OES = 0x8D61;
+
+    /**
+     * What {@code convert} returns as the data of a texture defined with no pixels (glTexImage2D with null): the contents are undefined until
+     * something draws into the texture or uploads to it, so nothing is allocated. Compare by identity.
+     */
+    static final byte[] NO_CONTENTS = new byte[0];
+
     /** The native format a GL (format, type) pair is stored as. */
     static int nativeFormat(int glFormat, int glType) {
         if (glType == GL20.GL_UNSIGNED_BYTE) {
@@ -46,6 +54,10 @@ final class PixelConversion {
             case GL20.GL_LUMINANCE: return GdxVkResources.FORMAT_RGBA8;
             default: break;
             }
+        } else if (glFormat == GL20.GL_RGBA && (glType == GL_HALF_FLOAT || glType == GL_HALF_FLOAT_OES)) {
+            return GdxVkResources.FORMAT_RGBA16F; // a floating-point framebuffer attachment: no pixel data can be given for it
+        } else if (glFormat == GL20.GL_RGBA && glType == GL20.GL_FLOAT) {
+            return GdxVkResources.FORMAT_RGBA32F;
         } else if (glType == GL20.GL_UNSIGNED_SHORT_5_6_5 && glFormat == GL20.GL_RGB) {
             return GdxVkResources.FORMAT_RGBA8;
         } else if (glType == GL20.GL_UNSIGNED_SHORT_4_4_4_4 && glFormat == GL20.GL_RGBA) {
@@ -71,8 +83,11 @@ final class PixelConversion {
     static Converted convert(int glFormat, int glType, int width, int height, int alignment, Buffer pixels) {
         int format = nativeFormat(glFormat, glType);
         int outBpp = GdxVkResources.bytesPerTexel(format);
+        if (pixels == null) return new Converted(format, NO_CONTENTS);
+        if (format == GdxVkResources.FORMAT_RGBA16F || format == GdxVkResources.FORMAT_RGBA32F) {
+            throw new GdxRuntimeException("gdx-vulkan: floating-point textures can only be framebuffer attachments: pixel data cannot be uploaded to one");
+        }
         byte[] out = new byte[width * height * outBpp];
-        if (pixels == null) return new Converted(format, out);
         if (!(pixels instanceof ByteBuffer)) {
             throw new GdxRuntimeException("gdx-vulkan: texture data must be a ByteBuffer, was " + pixels.getClass().getSimpleName());
         }

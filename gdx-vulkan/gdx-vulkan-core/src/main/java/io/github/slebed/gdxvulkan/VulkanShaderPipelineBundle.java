@@ -15,6 +15,7 @@ public final class VulkanShaderPipelineBundle {
     /** Pushed as {@code u_custom1}. */
     public final float[] custom1 = new float[4];
 
+    private int colorOutputs = 1;
     private final String key;
     private final String vertName, fragName; // resource names, or null when the SPIR-V was passed in
     private final byte[] vertB, vertA, fragB, fragA;
@@ -37,6 +38,20 @@ public final class VulkanShaderPipelineBundle {
     /** SPIR-V you built yourself. @param key identifies the bundle in the pipeline cache: use a different key for different shaders */
     public static VulkanShaderPipelineBundle fromSpirv(String key, byte[] vertTierB, byte[] vertTierA, byte[] fragTierB, byte[] fragTierA) {
         return new VulkanShaderPipelineBundle(key, null, null, vertTierB, vertTierA, fragTierB, fragTierA);
+    }
+
+    /**
+     * How many colour outputs the fragment shader writes (default 1). A shader that writes several (location 0..n-1) draws into a framebuffer with
+     * as many colour attachments, such as a {@code VulkanMultiTargetFrameBuffer}.
+     */
+    public VulkanShaderPipelineBundle withColorOutputs(int count) {
+        if (count < 1 || count > 8) throw new IllegalArgumentException("colour outputs must be 1 to 8");
+        colorOutputs = count;
+        return this;
+    }
+
+    public int colorOutputs() {
+        return colorOutputs;
     }
 
     public String key() {

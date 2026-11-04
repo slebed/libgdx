@@ -101,6 +101,7 @@ int Resources::createBuffer(uint64_t size) {
             vmaDestroyBuffer(h_.allocator, p.buffer, p.alloc);
             return -1;
         }
+        nameObject(h_, VK_OBJECT_TYPE_BUFFER, (uint64_t)p.buffer, ("gdx buffer pool " + std::to_string(pools_.size())).c_str());
         pools_.push_back(p);
         if (vmaVirtualAllocate(p.block, &ci, &e.allocation, &e.offset) != VK_SUCCESS) return -1;
         e.pool = static_cast<uint32_t>(pools_.size() - 1);
@@ -250,18 +251,41 @@ void Resources::retireImage(VkImage image, VmaAllocation alloc, VkImageView view
         1);
 }
 
+// A format the device cannot filter linearly (a 32-bit float target on some GPUs) is sampled with nearest filtering, as GL does for
+// textures that are not "texture complete" for linear sampling: a linear sampler on it would be invalid.
+static SamplerKey clampFilters(SamplerKey k, bool linearOk) {
+    if (!linearOk) {
+        k.minFilter = k.magFilter = VK_FILTER_NEAREST;
+        k.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    }
+    return k;
+}
+
 int Resources::createTexture(const TextureDesc& d, const void* data, uint64_t dataBytes, const SamplerKey& sampler) {
-    if (d.width == 0 || d.height == 0 || data == nullptr || d.uploadedLevels == 0) return -1;
+    if (d.width == 0 || d.height == 0 || (data == nullptr && !d.renderTarget) || d.uploadedLevels == 0) return -1;
     if (d.generateMips && d.uploadedLevels != 1) return -1;
     if (d.renderTarget && (d.format != TexFormat::Rgba8 || d.generateMips || d.uploadedLevels != 1)) return -1;
-    const TexFormatInfo fi = formatInfo(d.format, d);
+    if (data == nullptr && dataBytes != 0) return -1;
+    TexFormatInfo fi = formatInfo(d.format, d);
+    bool linearOk = true;
+    if (d.renderTarget && d.vkFormat != 0) { // a floating-point target
+        const VkFormat vf = static_cast<VkFormat>(d.vkFormat);
+        if (vf != VK_FORMAT_R16G16B16A16_SFLOAT && vf != VK_FORMAT_R32G32B32A32_SFLOAT) return -1;
+        VkFormatProperties fp;
+        vkGetPhysicalDeviceFormatProperties(h_.physical, vf, &fp);
+        const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+        if ((fp.optimalTilingFeatures & need) != need) return -1; // this device cannot render to it and sample it
+        linearOk = (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0;
+        fi.vk = vf;
+        fi.blockBytes = vf == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 16;
+    }
     if (fi.compressed && (d.generateMips || d.blockW == 0 || d.blockH == 0 || d.blockBytes == 0 || !formatSupported(d.vkFormat))) return -1;
     const uint32_t levels = d.generateMips ? fullChain(d.width, d.height) : d.uploadedLevels;
     if (levels > fullChain(d.width, d.height)) return -1;
 
     std::vector<ImageRegion> regions;
     uint64_t offset = 0;
-    for (uint32_t l = 0; l < d.uploadedLevels; ++l) {
+    for (uint32_t l = 0; data != nullptr && l < d.uploadedLevels; ++l) { // no data: the image only gets its sampling layout
         ImageRegion r;
         r.level = l;
         r.width = levelExtent(d.width, l);
@@ -280,10 +304,11 @@ int Resources::createTexture(const TextureDesc& d, const void* data, uint64_t da
     t.height = d.height;
     t.info = fi;
     t.levels = levels;
-    t.sampler = sampler;
+    t.linearFilter = linearOk;
+    t.sampler = clampFilters(sampler, linearOk);
     t.renderTarget = d.renderTarget;
     if (!makeImage(d.width, d.height, fi, levels, t.image, t.alloc, t.view, d.renderTarget)) return -1;
-    if (!bindSampler(t.view, sampler, &t.slot, &t.set)) {
+    if (!bindSampler(t.view, t.sampler, &t.slot, &t.set)) {
         retireImage(t.image, t.alloc, t.view);
         return -1;
     }
@@ -305,6 +330,8 @@ int Resources::createTexture(const TextureDesc& d, const void* data, uint64_t da
         textures_.push_back(t);
     }
     ++texturesLive_;
+    nameObject(h_, VK_OBJECT_TYPE_IMAGE, (uint64_t)t.image, ("gdx texture " + std::to_string(id) + (d.renderTarget ? " (render target)" : "")).c_str());
+    nameObject(h_, VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)t.view, ("gdx texture " + std::to_string(id) + " view").c_str());
     return id;
 }
 
@@ -348,6 +375,7 @@ bool Resources::updateTexture(int id, uint32_t level, uint32_t x, uint32_t y, ui
     t = fresh;
     retireBinding(old.slot, old.set);
     retireImage(old.image, old.alloc, old.view);
+    renames_.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 
@@ -379,6 +407,7 @@ bool Resources::regenerateMips(int id) {
     t = fresh;
     retireBinding(old.slot, old.set);
     retireImage(old.image, old.alloc, old.view);
+    renames_.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 
@@ -388,12 +417,13 @@ bool Resources::setTextureSampler(int id, const SamplerKey& sampler) {
     TextureEntry& t = textures_[id];
     int newSlot = -1;
     DescriptorLayouts::TextureSet newSet;
-    if (!bindSampler(t.view, sampler, &newSlot, &newSet)) return false;
+    const SamplerKey clamped = clampFilters(sampler, t.linearFilter);
+    if (!bindSampler(t.view, clamped, &newSlot, &newSet)) return false;
     const int oldSlot = t.slot;
     const DescriptorLayouts::TextureSet oldSet = t.set;
     t.slot = newSlot;
     t.set = newSet;
-    t.sampler = sampler;
+    t.sampler = clamped;
     retireBinding(oldSlot, oldSet);
     return true;
 }
@@ -443,7 +473,7 @@ bool Resources::textureInfo(int id, uint32_t* width, uint32_t* height, uint32_t*
 
 // ---------------------------------------------------------------- depth/stencil images
 
-int Resources::createDepthImage(uint32_t w, uint32_t h, bool stencil, uint32_t depthBits) {
+int Resources::createDepthImage(uint32_t w, uint32_t h, bool stencil, uint32_t depthBits, bool transient) {
     if (w == 0 || h == 0) return -1;
     auto usable = [&](VkFormat f) {
         VkFormatProperties p;
@@ -467,10 +497,11 @@ int Resources::createDepthImage(uint32_t w, uint32_t h, bool stencil, uint32_t d
     ii.samples = VK_SAMPLE_COUNT_1_BIT;
     ii.tiling = VK_IMAGE_TILING_OPTIMAL;
     // Not transient: a framebuffer's depth survives between its passes (GL keeps it), so the passes load and store it.
-    ii.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    ii.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | (transient ? VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT : 0u);
     ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VmaAllocationCreateInfo ai{};
     ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    if (transient) ai.preferredFlags = VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT; // on-chip on tile-based GPUs; ordinary memory elsewhere
     DepthEntry e;
     if (vmaCreateImage(h_.allocator, &ii, &ai, &e.image, &e.alloc, nullptr) != VK_SUCCESS) return -1;
     VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -482,8 +513,10 @@ int Resources::createDepthImage(uint32_t w, uint32_t h, bool stencil, uint32_t d
         vmaDestroyImage(h_.allocator, e.image, e.alloc);
         return -1;
     }
+    nameObject(h_, VK_OBJECT_TYPE_IMAGE, (uint64_t)e.image, transient ? "gdx depth image (transient)" : "gdx depth image");
     e.live = true;
     e.stencil = stencil;
+    e.transient = transient;
     e.format = fmt;
     std::lock_guard<std::mutex> lock(mutex_);
     if (!freeDepthIds_.empty()) {
@@ -508,7 +541,7 @@ void Resources::destroyDepthImage(int id) {
     retireImage(e.image, e.alloc, e.view);
 }
 
-bool Resources::depthImageInfo(int id, VkImage* image, VkImageView* view, VkFormat* format, bool* hasStencil, bool* initialized) {
+bool Resources::depthImageInfo(int id, VkImage* image, VkImageView* view, VkFormat* format, bool* hasStencil, bool* initialized, bool* transient) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (id < 0 || static_cast<size_t>(id) >= depths_.size() || !depths_[id].live) return false;
     const DepthEntry& e = depths_[id];
@@ -517,6 +550,7 @@ bool Resources::depthImageInfo(int id, VkImage* image, VkImageView* view, VkForm
     *format = e.format;
     *hasStencil = e.stencil;
     *initialized = e.initialized;
+    *transient = e.transient;
     return true;
 }
 
@@ -581,6 +615,7 @@ Resources::Stats Resources::stats() {
     vmaCalculateStatistics(h_.allocator, &total);
     s.vmaBlockBytes = total.total.statistics.blockBytes;
     s.vmaAllocationBytes = total.total.statistics.allocationBytes;
+    s.textureRenames = renames_.load(std::memory_order_relaxed);
     return s;
 }
 

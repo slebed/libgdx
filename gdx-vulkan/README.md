@@ -4,7 +4,7 @@ A Vulkan renderer for libGDX, built as a standalone library on **stock libGDX** 
 libGDX is needed: unmodified `Texture`, `Pixmap`, `SpriteBatch`, `FrameBuffer`, Scene2D, `BitmapFont` and friends run against Vulkan through a
 GL20 shim, and the result is compared with stock libGDX on OpenGL.
 
-`docs/PLAN.md` has the architecture and the phases; `docs/CHECKLIST.md` is the item-by-item state (103 done, 19 partial, 47 not started, of 169),
+`docs/PLAN.md` has the architecture and the phases; `docs/CHECKLIST.md` is the item-by-item state (113 done, 17 partial, 39 not started, of 169; every remaining open item is in Phases 4 to 6, the Galaxy S20, or a stated limit),
 marking only what has been built **and verified**.
 
 ## Status
@@ -12,9 +12,9 @@ marking only what has been built **and verified**.
 | Phase | State |
 |---|---|
 | 1a Surfaces, swapchain, golden harness, CI | done; Windows, Linux (lavapipe) and Android; the only gaps are other ABIs and Wayland/macOS |
-| 1b Memory, layout and caches | done: two-set layout, deferred deletion, frame rings, staging, pipeline cache, shader reflection, 10-minute soaks (RTX 5080, RTX 2080 and the Adreno 840 in Tier A) |
-| 2 Unmodified 2D | done except one number: `VulkanSpriteBatch` with a single texture runs at 0.91x stock GL's fps (target 1.0x). Sprite batches, polygon batch, shape renderer, compressed textures, shader bundles, `VulkanSpriteBatchInstanced` (1,000,000 sprites moved by compute) |
-| 3 Stock `FrameBuffer` | colour, depth and stencil framebuffers, GL cull/depth/stencil state, Gate 3 scenes, Stress test 3; pass scheduling and multi-target framebuffers in progress |
+| 1b Memory, layout and caches | done: two-set layout, deferred deletion, frame rings, staging, pipeline cache, shader reflection, 10-minute soaks (RTX 5080 in both tiers, RTX 2080 in Tier A, Adreno 840 in both tiers) |
+| 2 Unmodified 2D | done: sprite batches, polygon batch, shape renderer, compressed textures, shader bundles, `VulkanSpriteBatchInstanced` (1,000,000 sprites moved by compute); every Stress 2 target met |
+| 3 Stock `FrameBuffer` | done: colour, depth and stencil framebuffers, `VulkanMultiTargetFrameBuffer` (several and floating-point attachments), GL cull/depth/stencil state, pass scheduling, Gate 3 scenes, Stress test 3. Not done: reordering offscreen passes that come after a swapchain draw |
 | 4 Android lifecycle | not started (the test app only checks the renderer on a device) |
 | 5 3D with stock models | not started |
 | 6 macOS / iOS | not started (stretch) |
@@ -37,10 +37,10 @@ an Adreno 840 (Android 16). Not the Galaxy S20 the plan names.
 
 | What | Result |
 |---|---|
-| Stress 2, 20,000 sprites, 128 textures, Tier A | 23.6x stock GL (413 fps against 17.5) on the RTX 5080; Tier B 3-4x |
-| Stress 2, 1 texture | **0.91x** stock GL (target 1.0x, missed): CPU-bound in the vertex copy |
+| Stress 2, 20,000 sprites, 128 textures, Tier A | 24x stock GL (423 fps against 17.5) on the RTX 5080; Tier B 3.5-4x |
+| Stress 2, 1 texture | 1.2x stock GL (1,306 fps against 1,064; the target is 1.0x). It was 0.91x until the vertex ring got a device-local mirror |
 | 1,000,000 sprites moved by compute | 722 fps on the RTX 2080, 1,879 fps on the RTX 5080, 208-225 fps on the Adreno 840 (target 60+) |
-| Stress 3, 100,000 draws through the Java command stream | 1.0-1.3x a plain C++ loop on both GPUs (limit 1.3x); the phone is 1.2-1.8x |
+| Stress 3, 100,000 draws through the Java command stream | 1.0-1.3x a plain C++ loop on both GPUs (limit 1.3x); the phone is 1.2-1.8x run to run |
 
 ## Layout
 - `gdx-vulkan-core/` Java API and the C++ core (`jni/`: CMake, vendored volk, VMA, SPIRV-Reflect and Vulkan headers); shaders in `src/main/shaders`
@@ -91,11 +91,12 @@ adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log    
 of the built `gdxvk` library). Environment `GDXVK_COMPLETION=fence|timeline` overrides the GPU completion tracking (diagnostics).
 
 ## Known gaps
-- `VulkanSpriteBatch` with one texture is 9% behind stock GL on the RTX 5080 (see the table above).
 - No GL buffer calls yet (`glBufferData` and friends): they arrive with stock `Mesh` support in Phase 5, so 3D models are not drawable yet.
 - The swapchain has no depth buffer (framebuffers do); Phase 5 adds it.
 - Custom shaders are precompiled SPIR-V bundles (`VulkanShaderPipelineBundle`); there is no run-time GLSL compilation.
-- Natives are built for Windows x64, Linux x64 and Android arm64-v8a only.
+- Natives run on Windows x64, Linux x64 and Android arm64-v8a. The Android library also compiles for armeabi-v7a and x86_64, which have never been run.
+- Offscreen passes that come after a swapchain draw are not reordered ahead of it (a framebuffer pass in the middle of a frame still suspends the main pass).
+- A framebuffer's depth keeps its contents between passes, as in GL; the on-chip (transient) depth of tile-based GPUs is an opt-in that needs every pass to clear it.
 
 ## Third-party code (vendored in `gdx-vulkan-core/jni/vendor`)
 volk, Vulkan-Headers, Vulkan Memory Allocator, SPIRV-Reflect. Each is under its own permissive licence; see the upstream repositories for versions

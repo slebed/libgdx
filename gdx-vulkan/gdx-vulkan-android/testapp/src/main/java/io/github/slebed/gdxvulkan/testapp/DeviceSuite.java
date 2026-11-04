@@ -82,6 +82,7 @@ final class DeviceSuite {
         s.check("instancedSpritesComputeAndDraw", s::instanced);
         s.check("frameBufferColor", s::frameBufferColor);
         s.check("frameBufferDepthAndStencil", s::frameBufferDepthAndStencil);
+        s.check("multiTargetFrameBuffer", s::multiTargetFrameBuffer);
         s.check("gate3Scenes", s::gate3);
         s.check("stress3Recording", s::stress3);
         s.check("soakTextureChurn", () -> s.soak(soakSeconds));
@@ -707,6 +708,51 @@ final class DeviceSuite {
         TestLog.i(TAG, String.format("stress3: Java encoding %.2f ms (%.0f ns per draw), native replay %.2f ms (%.0f ns per draw); floor %.0f ns per draw", encode[frames / 2] / 1e6,
             encode[frames / 2] / (double)draws, (stream[frames / 2] - encode[frames / 2]) / 1e6, (stream[frames / 2] - encode[frames / 2]) / (double)draws, floor[frames / 2] / (double)draws));
         require(ratio < 2.0, "recording through the command stream is far above the floor: " + ratio);
+    }
+
+    /** Three colour attachments (RGBA8, RGBA16F, RGBA32F) from one draw; the float ones keep a value above 1.0 that scaling by a quarter then recovers. */
+    private void multiTargetFrameBuffer() {
+        Texture white = solid(1, 1, 1, 1);
+        io.github.slebed.gdxvulkan.glutils.VulkanMultiTargetFrameBuffer.ColorFormat[] fmts = {
+            io.github.slebed.gdxvulkan.glutils.VulkanMultiTargetFrameBuffer.ColorFormat.RGBA8888,
+            io.github.slebed.gdxvulkan.glutils.VulkanMultiTargetFrameBuffer.ColorFormat.RGBA16F,
+            io.github.slebed.gdxvulkan.glutils.VulkanMultiTargetFrameBuffer.ColorFormat.RGBA32F};
+        io.github.slebed.gdxvulkan.glutils.VulkanMultiTargetFrameBuffer mt = new io.github.slebed.gdxvulkan.glutils.VulkanMultiTargetFrameBuffer(S, S, true,
+            false, fmts);
+        VulkanShaderPipelineBundle mrt = VulkanShaderPipelineBundle.fromResources("mrt3", "sprite.vert", "sprite_mrt.frag").withColorOutputs(3);
+        VulkanShaderPipelineBundle scale = VulkanShaderPipelineBundle.fromResources("scale", "sprite.vert", "fx_scale.frag");
+        beginFrame(0, 0, 0);
+        VulkanSpriteBatch b = new VulkanSpriteBatch(frame);
+        b.getProjectionMatrix().setToOrtho2D(0, 0, S, S);
+        mt.begin();
+        Gdx.gl.glClearColor(0.2f, 0.4f, 0.6f, 1);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        mrt.custom0[0] = 4f;
+        b.setShaderBundle(mrt);
+        b.begin();
+        b.setColor(0.5f, 0.25f, 0.75f, 1);
+        b.draw(white, 0, 0, 32, 64);
+        b.end();
+        b.setShaderBundle(null);
+        mt.end();
+        b.begin();
+        b.setColor(1, 1, 1, 1);
+        scale.custom0[0] = 0.25f;
+        for (int i = 0; i < 3; i++) {
+            TextureRegion r = new TextureRegion(mt.getColorBufferTexture(i), 0, 0, S / 2, S);
+            r.flip(false, true);
+            b.setShaderBundle(i == 0 ? null : scale);
+            b.draw(r, i * 21, 0, i == 2 ? 22 : 21, 64);
+        }
+        b.setShaderBundle(null);
+        b.end();
+        byte[] f = frame.endAndCapture();
+        assertPx(f, 10, 32, 128, 64, 191, 2, "RGBA8888 attachment");
+        assertPx(f, 31, 32, 128, 64, 191, 2, "RGBA16F attachment keeps values above 1.0");
+        assertPx(f, 52, 32, 128, 64, 191, 2, "RGBA32F attachment keeps values above 1.0");
+        b.dispose();
+        mt.dispose();
+        white.dispose();
     }
 
     // -------------------------------------------------------------------------------------------------------------- soak / perf

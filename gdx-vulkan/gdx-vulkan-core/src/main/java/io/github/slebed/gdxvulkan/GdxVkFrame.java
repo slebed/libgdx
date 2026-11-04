@@ -48,6 +48,7 @@ public final class GdxVkFrame {
         if (open) throw new IllegalStateException("begin called twice without end");
         if (!presenter.beginFrame(r, g, b, a)) return false;
         open = true;
+        renamesAtBegin = context.resources().renameCount();
         frameNumber++;
         stream.clear();
         gl.setCommandStream(stream);
@@ -55,8 +56,19 @@ public final class GdxVkFrame {
         return true;
     }
 
+    private long renamesAtBegin, renamesLastFrame;
+
+    /**
+     * Textures renamed during the last finished frame (copy-on-write: each pixel change to a texture that already has an image allocates a new
+     * one). A steady non-zero figure on textures that are not meant to change is the thing to look for in a debug overlay.
+     */
+    public long getRenamesLastFrame() {
+        return renamesLastFrame;
+    }
+
     /** Replays what the application issued, then submits and presents. */
     public void end() {
+        renamesLastFrame = context.resources().renameCount() - renamesAtBegin;
         presenter.submit(stream);
         presenter.endFrame();
         open = false;
@@ -64,6 +76,7 @@ public final class GdxVkFrame {
 
     /** Like {@link #end()}, returning the frame as RGBA8 (row 0 at the top). For tests and goldens. */
     public byte[] endAndCapture() {
+        renamesLastFrame = context.resources().renameCount() - renamesAtBegin;
         presenter.submit(stream);
         byte[] px = presenter.endFrameAndCapture();
         open = false;

@@ -46,6 +46,7 @@ struct PipelineDesc {
     uint32_t cullMode = 2; // VK_CULL_MODE_BACK_BIT (0 = none, 1 = front, 2 = back)
     bool blend = false;
     uint32_t srcColor = 1, dstColor = 0, srcAlpha = 1, dstAlpha = 0; // GL_ONE, GL_ZERO
+    uint32_t colorOutputs = 1; // colour outputs the fragment shader writes; the render target it is used with must have as many attachments
 };
 
 class Presenter {
@@ -94,6 +95,10 @@ public:
 
     // Replays a command stream (gdxvk_commands.h) into the open frame. Many streams may be replayed per frame.
     FrameStatus submitCommandStream(const uint8_t* data, size_t bytes);
+
+    // Render passes begun in the last finished frame: out[0] on the swapchain, out[1] on offscreen targets. The swapchain count is 1 when the
+    // frame's offscreen passes all came before its first swapchain draw (pass scheduling), 2 or more when they interrupted it.
+    void lastPassCounts(uint32_t out[2]) const;
 
     // Stress test 3 (plan, Phase 3): the cost of recording `draws` indexed draws, each with a state change (the cull mode, alternating) and
     // a full 128-byte push-constant block, as one plain C++ loop straight into the frame's command buffer. This is the floor the command

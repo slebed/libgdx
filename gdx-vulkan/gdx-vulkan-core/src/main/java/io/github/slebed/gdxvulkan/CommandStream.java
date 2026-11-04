@@ -216,16 +216,24 @@ public final class CommandStream {
     }
 
     /**
-     * Draws go to this render-target texture (a native texture id) from here on, or to the swapchain with -1. The open pass ends; the
-     * next one starts at the first draw or clear, and a full clear that starts it becomes its load op. The depth image (from
-     * {@code GdxVkResources.createDepthImage}) may be -1.
+     * Draws go to these render-target textures (native texture ids, one colour attachment each, all the same size) from here on, or to the
+     * swapchain with a count of 0. The open pass ends; the next one starts at the first draw or clear, and a full clear that starts it becomes
+     * its load op. The depth image (from {@code GdxVkResources.createDepthImage}) may be -1.
      */
-    public void bindTarget(int nativeTextureOrMinus1, int depthImageOrMinus1) {
-        ensure(3);
+    public void bindTarget(int[] colorTextures, int count, int depthImageOrMinus1) {
+        ensure(3 + count);
         put(BIND_TARGET);
-        put(nativeTextureOrMinus1);
+        put(count);
+        for (int i = 0; i < count; i++) put(colorTextures[i]);
         put(depthImageOrMinus1);
     }
+
+    /** The swapchain. */
+    public void bindSwapchain() {
+        bindTarget(NO_TEXTURES, 0, -1);
+    }
+
+    private static final int[] NO_TEXTURES = new int[0];
 
     public void drawIndexed(int indexCount, int firstIndex, int vertexOffset) {
         ensure(4);

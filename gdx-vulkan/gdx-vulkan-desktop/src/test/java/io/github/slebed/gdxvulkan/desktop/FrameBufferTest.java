@@ -17,7 +17,9 @@ import io.github.slebed.gdxvulkan.GdxVkConfig;
 import io.github.slebed.gdxvulkan.GdxVkContext;
 import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkPresenter;
+import io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle;
 import io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch;
+import io.github.slebed.gdxvulkan.glutils.VulkanMultiTargetFrameBuffer;
 import io.github.slebed.gdxvulkan.gl.VulkanGL20;
 
 import org.junit.jupiter.api.AfterAll;
@@ -476,6 +478,219 @@ class FrameBufferTest {
         assertPx(f, 40, 52, 255, 255, 255, "the depth framebuffer's white square (GL (8..24, 8..24) mapped into the right half)");
         b.dispose();
         fb.dispose();
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------- load / store ops
+
+    /** A transient depth buffer (opt-in) behaves like any other inside a pass, as long as every pass clears it. */
+    @Test void transientDepthWorksWhenEveryPassClearsIt() {
+        FrameBuffer fb = new FrameBuffer(Pixmap.Format.RGBA8888, S, S, true, true);
+        gl.setFramebufferDepthTransient(fb.getFramebufferHandle(), true);
+        VulkanSpriteBatch b = batch();
+        for (int frameNo = 0; frameNo < 2; frameNo++) { // twice: the second pass must not depend on what the first left behind
+            assertTrue(begin(0, 0, 0));
+            fb.begin();
+            clearAll();
+            Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
+            drawAt(b, -0.5f, 0, 0, 32, 64, 1, 0, 0);
+            drawAt(b, 0.5f, 0, 0, 32, 64, 0, 0, 1); // far, drawn second: hidden by the near one
+            drawAt(b, 0.5f, 32, 0, 32, 64, 0, 1, 0);
+            drawAt(b, -0.5f, 32, 0, 32, 64, 1, 1, 0); // near, drawn second: wins
+            Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+            fb.end();
+            byte[] f = show(b, fb);
+            assertPx(f, 16, 32, 255, 0, 0, "transient depth: near first stays (pass " + frameNo + ")");
+            assertPx(f, 48, 32, 255, 255, 0, "transient depth: near last wins (pass " + frameNo + ")");
+        }
+        b.dispose();
+        fb.dispose();
+    }
+
+    /** A pass that never touches the depth buffer of a framebuffer that has one (nothing to load the first time) is fine. */
+    @Test void aDepthFramebufferUsedWithoutEverClearingItsDepth() {
+        FrameBuffer fb = new FrameBuffer(Pixmap.Format.RGBA8888, S, S, true);
+        VulkanSpriteBatch b = batch();
+        for (int i = 0; i < 2; i++) {
+            assertTrue(begin(0, 0, 0));
+            fb.begin();
+            Gdx.gl.glClearColor(0, 0, 0, 1);
+            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT); // colour only: the depth image has never held anything
+            drawAt(b, 0f, 8, 8, 48, 48, 0, 1, 1);
+            fb.end();
+            byte[] f = show(b, fb);
+            assertPx(f, 32, 32, 0, 255, 255, "colour-only use of a depth framebuffer, pass " + i);
+        }
+        b.dispose();
+        fb.dispose();
+    }
+
+    // ------------------------------------------------------------------------------------------------------------ multi-target framebuffer
+
+    private TextureRegion halfOf(Texture t, boolean left) {
+        TextureRegion r = new TextureRegion(t, left ? 0 : t.getWidth() / 2, 0, t.getWidth() / 2, t.getHeight());
+        r.flip(false, true);
+        return r;
+    }
+
+    /**
+     * One draw writes three attachments (RGBA8, RGBA16F, RGBA32F) of a framebuffer that also has a depth buffer. The shader multiplies the colour by
+     * 4 for the float ones; scaling them by a quarter afterwards gives the colour back only if the value above 1.0 was kept. Clamped to 1.0 it would
+     * come back as 64.
+     */
+    @Test void threeColourAttachmentsAreWrittenByOneDrawAndFloatsKeepValuesAboveOne() {
+        VulkanMultiTargetFrameBuffer mt = new VulkanMultiTargetFrameBuffer(S, S, true, false, VulkanMultiTargetFrameBuffer.ColorFormat.RGBA8888,
+            VulkanMultiTargetFrameBuffer.ColorFormat.RGBA16F, VulkanMultiTargetFrameBuffer.ColorFormat.RGBA32F);
+        VulkanShaderPipelineBundle mrt = VulkanShaderPipelineBundle.fromResources("mrt3", "sprite.vert", "sprite_mrt.frag").withColorOutputs(3);
+        VulkanShaderPipelineBundle scale = VulkanShaderPipelineBundle.fromResources("scale", "sprite.vert", "fx_scale.frag");
+        VulkanSpriteBatch b = batch();
+        assertEquals(3, mt.getColorBufferCount());
+
+        assertTrue(begin(0, 0, 0));
+        mt.begin();
+        Gdx.gl.glClearColor(0.2f, 0.4f, 0.6f, 1);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT); // every attachment is cleared
+        mrt.custom0[0] = 4f;
+        b.setShaderBundle(mrt);
+        b.begin();
+        b.setColor(0.5f, 0.25f, 0.75f, 1);
+        b.draw(white, 0, 0, 32, 64); // the left half of all three attachments
+        b.end();
+        b.setShaderBundle(null);
+        mt.end();
+
+        // the sprite, from each attachment: plain from the 8-bit one, scaled by a quarter from the float ones
+        b.begin();
+        b.setColor(1, 1, 1, 1);
+        b.draw(halfOf(mt.getColorBufferTexture(0), true), 0, 0, 21, 64);
+        scale.custom0[0] = 0.25f;
+        b.setShaderBundle(scale);
+        b.draw(halfOf(mt.getColorBufferTexture(1), true), 21, 0, 21, 64);
+        b.draw(halfOf(mt.getColorBufferTexture(2), true), 42, 0, 22, 64);
+        b.setShaderBundle(null);
+        b.end();
+        byte[] f = frame.endAndCapture();
+        assertPx(f, 10, 32, 128, 64, 191, "RGBA8888 attachment");
+        assertPx(f, 31, 32, 128, 64, 191, "RGBA16F attachment: 4x the colour, kept above 1.0, scaled back");
+        assertPx(f, 52, 32, 128, 64, 191, "RGBA32F attachment: the same");
+
+        // and the clear reached all three, outside the sprite
+        assertTrue(begin(0, 0, 0));
+        b.begin();
+        b.setColor(1, 1, 1, 1);
+        b.draw(halfOf(mt.getColorBufferTexture(0), false), 0, 0, 21, 64);
+        scale.custom0[0] = 1f;
+        b.setShaderBundle(scale);
+        b.draw(halfOf(mt.getColorBufferTexture(1), false), 21, 0, 21, 64);
+        b.draw(halfOf(mt.getColorBufferTexture(2), false), 42, 0, 22, 64);
+        b.setShaderBundle(null);
+        b.end();
+        f = frame.endAndCapture();
+        assertPx(f, 10, 32, 51, 102, 153, "the clear colour in the RGBA8888 attachment");
+        assertPx(f, 31, 32, 51, 102, 153, "the clear colour in the RGBA16F attachment");
+        assertPx(f, 52, 32, 51, 102, 153, "the clear colour in the RGBA32F attachment");
+        b.dispose();
+        mt.dispose();
+    }
+
+    /** A pipeline writes as many outputs as its target has attachments; anything else is refused with a message that says so. */
+    @Test void aPipelineWithTheWrongNumberOfOutputsIsRefusedClearly() {
+        VulkanMultiTargetFrameBuffer mt = new VulkanMultiTargetFrameBuffer(S, S, false, false, VulkanMultiTargetFrameBuffer.ColorFormat.RGBA8888,
+            VulkanMultiTargetFrameBuffer.ColorFormat.RGBA16F);
+        VulkanSpriteBatch b = batch();
+        assertTrue(begin(0, 0, 0));
+        mt.begin();
+        b.begin();
+        rect(b, 0, 0, 32, 32, 1, 0, 0); // the default sprite shader writes one output, the target has two
+        b.end();
+        RuntimeException e = org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, () -> frame.flush());
+        assertTrue(e.getMessage().contains("colour output") && e.getMessage().contains("2 colour attachment"), e.getMessage());
+        mt.end();
+        frame.end();
+        b.dispose();
+        mt.dispose();
+    }
+
+    // ------------------------------------------------------------------------------------------------------------- pass scheduling
+
+    /** Four framebuffer passes, then the screen: the swapchain pass begins once, after them, instead of being suspended and resumed. */
+    @Test void framebufferPassesBeforeTheFirstSwapchainDrawNeverSuspendIt() {
+        FrameBuffer a = new FrameBuffer(Pixmap.Format.RGBA8888, S, S, false), c = new FrameBuffer(Pixmap.Format.RGBA8888, S, S, false);
+        VulkanSpriteBatch b = batch();
+        assertTrue(begin(0, 0, 0.5f));
+        FrameBuffer[] chain = {a, c, a, c};
+        for (int i = 0; i < chain.length; i++) {
+            chain[i].begin();
+            Gdx.gl.glClearColor(0, i == 0 ? 1 : 0, 0, 1); // only the first pass has green of its own; the others copy it forward
+            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+            if (i > 0) { // sample the previous pass's result
+                b.begin();
+                b.draw(chain[i - 1].getColorBufferTexture(), 0, 0, S, S);
+                b.end();
+            }
+            chain[i].end();
+        }
+        byte[] f = show(b, c);
+        int[] passes = presenter.lastPassCounts();
+        assertEquals(1, passes[0], "the swapchain pass began once, after the framebuffer passes");
+        assertEquals(4, passes[1], "four framebuffer passes");
+        assertPx(f, 32, 32, 0, 255, 0, "the first pass's green travelled through the chain to the screen");
+        b.dispose();
+        a.dispose();
+        c.dispose();
+    }
+
+    @Test void drawingToTheScreenBetweenFramebufferPassesDoesSuspendIt() {
+        FrameBuffer fb = new FrameBuffer(Pixmap.Format.RGBA8888, S, S, false);
+        VulkanSpriteBatch b = batch();
+        assertTrue(begin(0, 0, 0));
+        b.begin();
+        rect(b, 0, 0, 16, 64, 1, 0, 0);
+        b.end();
+        fb.begin();
+        Gdx.gl.glClearColor(0, 1, 0, 1);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        fb.end();
+        b.begin();
+        rect(b, 48, 0, 16, 64, 0, 0, 1);
+        b.end();
+        byte[] f = frame.endAndCapture();
+        int[] passes = presenter.lastPassCounts();
+        assertEquals(2, passes[0], "the swapchain pass was interrupted by the framebuffer pass and resumed");
+        assertEquals(1, passes[1]);
+        assertPx(f, 8, 32, 255, 0, 0, "drawn before the interruption");
+        assertPx(f, 56, 32, 0, 0, 255, "drawn after it");
+        b.dispose();
+        fb.dispose();
+    }
+
+    @Test void aFrameThatNeverDrawsToTheScreenStillShowsItsClearColour() {
+        FrameBuffer fb = new FrameBuffer(Pixmap.Format.RGBA8888, S, S, false);
+        assertTrue(begin(0, 0, 1));
+        fb.begin();
+        Gdx.gl.glClearColor(1, 0, 0, 1);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        fb.end();
+        byte[] f = frame.endAndCapture();
+        assertEquals(1, presenter.lastPassCounts()[0], "an otherwise empty swapchain pass clears the image");
+        assertPx(f, 32, 32, 0, 0, 255, "the frame's clear colour");
+
+        assertTrue(begin(0, 1, 0));
+        fb.begin(); // and the framebuffer is left bound at the end of the frame
+        Gdx.gl.glClearColor(1, 0, 0, 1);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        f = frame.endAndCapture();
+        assertPx(f, 32, 32, 0, 255, 0, "the clear colour with a framebuffer still bound");
+        fb.end();
+        fb.dispose();
+    }
+
+    @Test void aFullClearThatStartsTheSwapchainPassReplacesTheFrameClear() {
+        assertTrue(begin(1, 0, 0));
+        Gdx.gl.glClearColor(0, 1, 0, 1);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        byte[] f = frame.endAndCapture();
+        assertEquals(1, presenter.lastPassCounts()[0], "one pass: the clear became its load op");
+        assertPx(f, 32, 32, 0, 255, 0, "the application's clear colour");
     }
 
     /**

@@ -114,7 +114,8 @@ std::unique_ptr<Context> Context::create(const ContextConfig& cfg, std::string& 
         enabledLayers.push_back("VK_LAYER_KHRONOS_validation");
         validation = true;
     }
-    const bool debugUtils = validation && hasExt(instExts, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    // Enabled whenever it exists (it is cheap), so object names and labels reach RenderDoc and AGI; only the message callback needs validation.
+    const bool debugUtils = hasExt(instExts, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     if (debugUtils) enabledExts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     // Surface extensions, when the loader has them, so the swapchain device extension below is valid.
     // The platform extension is the one that matches the window-system handle Java passes to createSurface.
@@ -166,7 +167,8 @@ std::unique_ptr<Context> Context::create(const ContextConfig& cfg, std::string& 
     }
     volkLoadInstanceOnly(s.instance);
 
-    if (debugUtils) {
+    s.debugUtils = debugUtils;
+    if (debugUtils && validation) {
         VkDebugUtilsMessengerCreateInfoEXT mci{VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
         mci.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
         mci.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |

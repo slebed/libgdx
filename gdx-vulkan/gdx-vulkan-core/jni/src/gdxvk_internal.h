@@ -31,6 +31,7 @@ struct ContextHandles {
     bool swapchainEnabled = false; // VK_KHR_swapchain (and the instance surface extensions) are enabled
     uint32_t effectiveApi = 0;
     VkPhysicalDeviceLimits limits{};
+    bool debugUtils = false;       // VK_EXT_debug_utils is enabled: objects get names and passes get labels, for RenderDoc and AGI
 
     // vkQueueSubmit and vkQueuePresentKHR need external synchronisation on the one graphics queue.
     mutable std::mutex queueMutex;
@@ -44,5 +45,31 @@ struct ContextHandles {
     StagingRing* staging = nullptr;
     Resources* resources = nullptr;
 };
+
+// Debug names and labels (no-ops without VK_EXT_debug_utils). They make a RenderDoc or Android GPU Inspector capture readable: every pipeline,
+// image and buffer pool has a name, and each render pass, upload batch and compute section is a labelled region.
+inline void nameObject(const ContextHandles& h, VkObjectType type, uint64_t handle, const char* name) {
+    if (!h.debugUtils || name == nullptr || handle == 0) return;
+    VkDebugUtilsObjectNameInfoEXT info{VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT};
+    info.objectType = type;
+    info.objectHandle = handle;
+    info.pObjectName = name;
+    vkSetDebugUtilsObjectNameEXT(h.device, &info);
+}
+
+inline void beginLabel(const ContextHandles& h, VkCommandBuffer cmd, const char* name, float r = 0.4f, float g = 0.6f, float b = 0.9f) {
+    if (!h.debugUtils) return;
+    VkDebugUtilsLabelEXT label{VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT};
+    label.pLabelName = name;
+    label.color[0] = r;
+    label.color[1] = g;
+    label.color[2] = b;
+    label.color[3] = 1.0f;
+    vkCmdBeginDebugUtilsLabelEXT(cmd, &label);
+}
+
+inline void endLabel(const ContextHandles& h, VkCommandBuffer cmd) {
+    if (h.debugUtils) vkCmdEndDebugUtilsLabelEXT(cmd);
+}
 
 } // namespace gdxvk

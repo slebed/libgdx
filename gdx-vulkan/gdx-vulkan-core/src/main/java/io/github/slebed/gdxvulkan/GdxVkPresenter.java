@@ -116,6 +116,15 @@ public final class GdxVkPresenter implements AutoCloseable {
         translate(status);
     }
 
+    /**
+     * Render passes begun in the last finished frame: {@code [0]} on the swapchain, {@code [1]} on offscreen targets. The swapchain count is 1
+     * when the frame's offscreen passes all came before its first swapchain draw (pass scheduling) and more when they interrupted it.
+     */
+    public int[] lastPassCounts() {
+        check();
+        return GdxVkNative.nativeLastPassCounts(handle);
+    }
+
     /** Stress test 3 floor: see {@code Presenter::benchmarkRecord}. Inside an open frame; returns nanoseconds. */
     public long benchmarkRecord(int pipeline, int indexBuffer, int draws, float[] push) {
         check();

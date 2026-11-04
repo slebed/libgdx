@@ -98,6 +98,10 @@ public final class Stress2Main {
         private double worst;
         private long last = start;
 
+        boolean measuring() {
+            return measureStart != 0;
+        }
+
         /** @return true when the run is finished */
         boolean frame() {
             long now = System.nanoTime();
@@ -147,11 +151,24 @@ public final class Stress2Main {
                 System.out.println("[stress2] gl " + Gdx.gl.glGetString(com.badlogic.gdx.graphics.GL20.GL_RENDERER));
             }
 
+            long clearNanos, drawNanos;
+
             @Override public void render() {
+                long t0 = System.nanoTime();
                 ScreenUtils.clear(0.1f, 0.1f, 0.1f, 1f);
                 batch.getProjectionMatrix().setToOrtho2D(0, 0, WIDTH, HEIGHT);
+                long t1 = System.nanoTime();
                 work.draw(batch);
+                long t2 = System.nanoTime();
+                if (meter.measuring()) {
+                    clearNanos += t1 - t0;
+                    drawNanos += t2 - t1;
+                }
                 if (meter.frame()) {
+                    if (Boolean.getBoolean("gdxvulkan.stress2.breakdown")) {
+                        System.out.printf("[stress2] gl breakdown (ms/frame, measured frames): clear %.3f draw+flush %.3f; the buffer swap is outside render()%n",
+                            clearNanos / 1e6 / meter.totalFrames(), drawNanos / 1e6 / meter.totalFrames());
+                    }
                     meter.report("gl", textures);
                     code[0] = 0;
                     Gdx.app.exit();
@@ -194,13 +211,15 @@ public final class Stress2Main {
             long t2 = System.nanoTime();
             frame.end();
             long t3 = System.nanoTime();
-            tBegin += t1 - t0;
-            tDraw += t2 - t1;
-            tEnd += t3 - t2;
+            if (meter.measuring()) {
+                tBegin += t1 - t0;
+                tDraw += t2 - t1;
+                tEnd += t3 - t2;
+            }
             if (meter.frame()) break;
         }
         if (Boolean.getBoolean("gdxvulkan.stress2.breakdown")) {
-            System.out.printf("[stress2] breakdown (ms/frame, whole run): begin %.3f draw %.3f end %.3f%n", tBegin / 1e6 / meter.totalFrames(),
+            System.out.printf("[stress2] vk breakdown (ms/frame, measured frames): begin %.3f draw %.3f end %.3f%n", tBegin / 1e6 / meter.totalFrames(),
                 tDraw / 1e6 / meter.totalFrames(), tEnd / 1e6 / meter.totalFrames());
         }
         meter.report(ctx.caps().tier + "", textures);
@@ -238,7 +257,7 @@ public final class Stress2Main {
                 if (line.startsWith("RESULT")) {
                     fps = Double.parseDouble(line.substring(line.indexOf("fps=") + 4, line.indexOf(" worstMs")));
                     System.out.println("    " + line);
-                } else if (line.startsWith("[stress2]")) {
+                } else if (line.startsWith("[stress2]") || line.contains("[profile]")) {
                     System.out.println("    " + line);
                 }
             }

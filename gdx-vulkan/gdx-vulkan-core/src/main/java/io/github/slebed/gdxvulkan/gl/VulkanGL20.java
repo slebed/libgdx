@@ -405,6 +405,7 @@ public class VulkanGL20 extends VulkanGL20Base {
             int[] info = resources.textureInfo(t.nativeId);
             boolean sameShape = c.format == t.format && level < info[2] && width == levelExtent(info[0], level) && height == levelExtent(info[1], level);
             if (sameShape) { // a reload of the same storage: rewrite the level (the native side renames the image)
+                if (c.data == PixelConversion.NO_CONTENTS) return; // contents undefined: nothing to write
                 resources.updateTexture(t.nativeId, level, 0, 0, width, height, c.data);
                 rebound(t);
                 return;
@@ -442,6 +443,9 @@ public class VulkanGL20 extends VulkanGL20Base {
         byte[] dst = t.levelData[level];
         if (dst == null) throw new GdxRuntimeException("gdx-vulkan: glTexSubImage2D into level " + level + " that has no storage");
         int bpp = GdxVkResources.bytesPerTexel(t.format);
+        if (dst == PixelConversion.NO_CONTENTS) { // defined with no pixels: it now gets some, and the rest is zero
+            dst = t.levelData[level] = new byte[t.levelW[level] * t.levelH[level] * bpp];
+        }
         for (int y = 0; y < height; y++) {
             System.arraycopy(c.data, y * width * bpp, dst, ((yoffset + y) * t.levelW[level] + xoffset) * bpp, width * bpp);
         }
@@ -599,13 +603,23 @@ public class VulkanGL20 extends VulkanGL20Base {
 
     private static final int GL_FRAMEBUFFER = 0x8D40, GL_RENDERBUFFER = 0x8D41, GL_COLOR_ATTACHMENT0 = 0x8CE0, GL_DEPTH_ATTACHMENT = 0x8D00,
         GL_STENCIL_ATTACHMENT = 0x8D20, GL_DEPTH_STENCIL_ATTACHMENT = 0x821A, GL_FRAMEBUFFER_COMPLETE = 0x8CD5,
-        GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT = 0x8CD7, GL_FRAMEBUFFER_UNSUPPORTED = 0x8CDD;
+        GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT = 0x8CD7, GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS = 0x8CD9, GL_FRAMEBUFFER_UNSUPPORTED = 0x8CDD;
 
     private static final class GlFramebuffer {
         final int handle;
-        int colorTexture; // GL handle of the texture on COLOR_ATTACHMENT0, 0 = none
+        static final int MAX_COLOR = 8;
+        final int[] colorTextures = new int[MAX_COLOR]; // GL handles of the textures on COLOR_ATTACHMENT0..7, 0 = none
+
+        /** Attachments from 0 up to the first gap, or -1 if there is one after the first gap (not supported: attach them in order). */
+        int colorCount() {
+            int n = 0;
+            while (n < MAX_COLOR && colorTextures[n] != 0) n++;
+            for (int i = n; i < MAX_COLOR; i++) if (colorTextures[i] != 0) return -1;
+            return n;
+        }
         int depthRenderbuffer, stencilRenderbuffer, depthStencilRenderbuffer;
         int depthImage = -1; // the native depth(-stencil) image, created at first use and recreated if the attachments change
+        boolean depthTransient; // opt-in: see setFramebufferDepthTransient
         long depthSignature;
 
         GlFramebuffer(int handle) {
@@ -689,12 +703,12 @@ public class VulkanGL20 extends VulkanGL20Base {
     @Override public void glFramebufferTexture2D (int target, int attachment, int textarget, int texture, int level) {
         GlFramebuffer fb = framebuffers.get(boundFramebuffer);
         if (target != GL_FRAMEBUFFER || fb == null) throw new GdxRuntimeException("gdx-vulkan: glFramebufferTexture2D with no framebuffer bound");
-        if (attachment != GL_COLOR_ATTACHMENT0) {
-            throw unsupported("glFramebufferTexture2D(attachment 0x" + Integer.toHexString(attachment) + "): one colour attachment is supported; "
-                + "use VulkanMultiTargetFrameBuffer for more");
+        final int index = attachment - GL_COLOR_ATTACHMENT0;
+        if (index < 0 || index >= GlFramebuffer.MAX_COLOR) {
+            throw unsupported("glFramebufferTexture2D(attachment 0x" + Integer.toHexString(attachment) + "): colour attachments 0 to " + (GlFramebuffer.MAX_COLOR - 1) + " only");
         }
         if (texture != 0 && (textarget != GL_TEXTURE_2D || level != 0)) throw unsupported("glFramebufferTexture2D(textarget/level other than 2D level 0)");
-        fb.colorTexture = texture;
+        fb.colorTextures[index] = texture;
         if (texture != 0) makeRenderTarget(textures.get(texture));
         if (boundFramebuffer == fb.handle) emitTarget();
     }
@@ -715,9 +729,22 @@ public class VulkanGL20 extends VulkanGL20Base {
         GlFramebuffer fb = framebuffers.get(boundFramebuffer);
         if (target != GL_FRAMEBUFFER) throw unsupported("glCheckFramebufferStatus(target 0x" + Integer.toHexString(target) + ")");
         if (fb == null) return GL_FRAMEBUFFER_COMPLETE; // the default framebuffer
-        if (fb.colorTexture == 0) return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
-        GlTexture t = textures.get(fb.colorTexture);
-        if (t == null || t.format != GdxVkResources.FORMAT_RGBA8) return GL_FRAMEBUFFER_UNSUPPORTED; // only RGBA8 colour targets
+        final int count = fb.colorCount();
+        if (count == 0) return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
+        if (count < 0) return GL_FRAMEBUFFER_UNSUPPORTED; // a gap between colour attachments
+        int w = -1, h = -1;
+        for (int i = 0; i < count; i++) {
+            GlTexture t = textures.get(fb.colorTextures[i]);
+            if (t == null || (t.format != GdxVkResources.FORMAT_RGBA8 && t.format != GdxVkResources.FORMAT_RGBA16F && t.format != GdxVkResources.FORMAT_RGBA32F)) {
+                return GL_FRAMEBUFFER_UNSUPPORTED; // colour targets are RGBA8, RGBA16F or RGBA32F
+            }
+            if (i == 0) {
+                w = t.width;
+                h = t.height;
+            } else if (t.width != w || t.height != h) {
+                return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+            }
+        }
         return GL_FRAMEBUFFER_COMPLETE;
     }
 
@@ -729,10 +756,22 @@ public class VulkanGL20 extends VulkanGL20Base {
         // The image exists without attachment usage: replace it (nothing has been rendered into it, so zeroed storage is faithful).
         resources.destroyTexture(t.nativeId);
         t.nativeId = -1;
-        t.levelData[0] = new byte[t.width * t.height * 4];
+        t.levelData[0] = PixelConversion.NO_CONTENTS;
         t.levelW[0] = t.width;
         t.levelH[0] = t.height;
         rebound(t);
+    }
+
+    /**
+     * Opts a framebuffer's depth and stencil out of GL's rule that they keep their contents between passes: every pass must clear them (or not
+     * read them), and nothing is stored when the pass ends. In exchange the attachment is a transient image in lazily allocated memory, which on
+     * tile-based GPUs (Mali, Adreno, ...) stays in on-chip memory and costs no bandwidth or RAM (plan, Phase 3). Call it before the framebuffer is
+     * first used; stock {@code FrameBuffer.getFramebufferHandle()} is the handle.
+     */
+    public void setFramebufferDepthTransient (int framebuffer, boolean transientDepth) {
+        GlFramebuffer fb = framebuffers.get(framebuffer);
+        if (fb == null) throw new GdxRuntimeException("gdx-vulkan: no framebuffer with handle " + framebuffer);
+        fb.depthTransient = transientDepth;
     }
 
     private static final int GL_DEPTH_COMPONENT16_ = 0x81A5, GL_DEPTH_COMPONENT24_ = 0x81A6, GL_DEPTH_COMPONENT32_ = 0x81A7;
@@ -759,10 +798,10 @@ public class VulkanGL20 extends VulkanGL20Base {
         if (depth != null && (depth.format == GL_DEPTH_COMPONENT24_ || depth.format == GL_DEPTH_COMPONENT32_)) bits = 32;
         if (packed != null) bits = 24;
         if (sized.width <= 0 || sized.height <= 0) throw new GdxRuntimeException("gdx-vulkan: a framebuffer's renderbuffer has no storage (glRenderbufferStorage was not called)");
-        long signature = ((long)sized.width << 40) | ((long)sized.height << 16) | (wantStencil ? 1L << 8 : 0) | bits;
+        long signature = ((long)sized.width << 40) | ((long)sized.height << 16) | (fb.depthTransient ? 1L << 9 : 0) | (wantStencil ? 1L << 8 : 0) | bits;
         if (fb.depthImage < 0 || fb.depthSignature != signature) {
             if (fb.depthImage >= 0) resources.destroyDepthImage(fb.depthImage);
-            fb.depthImage = resources.createDepthImage(sized.width, sized.height, wantStencil, bits);
+            fb.depthImage = resources.createDepthImage(sized.width, sized.height, wantStencil, bits, fb.depthTransient);
             fb.depthSignature = signature;
         }
         return fb.depthImage;
@@ -772,14 +811,19 @@ public class VulkanGL20 extends VulkanGL20Base {
     private void emitTarget () {
         if (stream == null) return;
         if (boundFramebuffer == 0) {
-            stream.bindTarget(-1, -1);
+            stream.bindSwapchain();
             return;
         }
         GlFramebuffer fb = framebuffers.get(boundFramebuffer);
-        if (fb == null || fb.colorTexture == 0) return; // still being assembled: the attachment call emits the target
-        int id = nativeTexture(fb.colorTexture);
-        if (id < 0) throw new GdxRuntimeException("gdx-vulkan: the framebuffer's colour texture has no storage (nothing was uploaded to it)");
-        stream.bindTarget(id, depthImageOf(fb));
+        final int count = fb == null ? 0 : fb.colorCount();
+        if (count == 0) return; // still being assembled: the attachment call emits the target
+        if (count < 0) throw new GdxRuntimeException("gdx-vulkan: the framebuffer's colour attachments must be attached in order, from COLOR_ATTACHMENT0, with no gap");
+        final int[] ids = new int[count];
+        for (int i = 0; i < count; i++) {
+            ids[i] = nativeTexture(fb.colorTextures[i]);
+            if (ids[i] < 0) throw new GdxRuntimeException("gdx-vulkan: the framebuffer's colour texture " + i + " has no storage (glTexImage2D was not called for it)");
+        }
+        stream.bindTarget(ids, count, depthImageOf(fb));
     }
 
     /**
@@ -797,26 +841,35 @@ public class VulkanGL20 extends VulkanGL20Base {
             while (levels < MAX_LEVELS && t.levelData[levels] != null) levels++;
         }
         int bpp = GdxVkResources.bytesPerTexel(t.format);
+        final boolean floatFormat = t.format == GdxVkResources.FORMAT_RGBA16F || t.format == GdxVkResources.FORMAT_RGBA32F;
+        if (floatFormat && !t.renderTarget) {
+            throw new GdxRuntimeException("gdx-vulkan: a floating-point texture can only be a framebuffer attachment (it was never attached to one)");
+        }
         int total = 0;
         for (int l = 0; l < levels; l++) {
             if (t.levelW[l] != levelExtent(t.width, l) || t.levelH[l] != levelExtent(t.height, l)) {
                 throw new GdxRuntimeException("gdx-vulkan: mip level " + l + " is " + t.levelW[l] + "x" + t.levelH[l] + ", expected "
                     + levelExtent(t.width, l) + "x" + levelExtent(t.height, l));
             }
-            total += t.levelData[l].length;
-        }
-        byte[] data = new byte[total];
-        int at = 0;
-        for (int l = 0; l < levels; l++) {
-            System.arraycopy(t.levelData[l], 0, data, at, t.levelData[l].length);
-            at += t.levelData[l].length;
+            total += t.levelData[l] == PixelConversion.NO_CONTENTS ? t.levelW[l] * t.levelH[l] * bpp : t.levelData[l].length;
         }
         GdxVkSampler s = samplerOf(t);
-        if (t.renderTarget) {
-            if (t.format != GdxVkResources.FORMAT_RGBA8 || levels != 1) {
-                throw new GdxRuntimeException("gdx-vulkan: a framebuffer colour texture must be RGBA8 with one level");
+        byte[] data = null;
+        if (!(t.renderTarget && t.levelData[0] == PixelConversion.NO_CONTENTS)) { // a render target with undefined contents gets no upload at all
+            data = new byte[total]; // levels with no contents stay zero
+            int at = 0;
+            for (int l = 0; l < levels; l++) {
+                if (t.levelData[l] != PixelConversion.NO_CONTENTS) System.arraycopy(t.levelData[l], 0, data, at, t.levelData[l].length);
+                at += t.levelData[l] == PixelConversion.NO_CONTENTS ? t.levelW[l] * t.levelH[l] * bpp : t.levelData[l].length;
             }
-            t.nativeId = resources.createTexture(t.width, t.height, GdxVkResources.FORMAT_RENDER_TARGET, 1, false, data, s);
+        }
+        if (t.renderTarget) {
+            if (levels != 1) throw new GdxRuntimeException("gdx-vulkan: a framebuffer colour texture must have one level");
+            int code = t.format == GdxVkResources.FORMAT_RGBA8 ? GdxVkResources.FORMAT_RENDER_TARGET : t.format;
+            if (code != GdxVkResources.FORMAT_RENDER_TARGET && !floatFormat) {
+                throw new GdxRuntimeException("gdx-vulkan: a framebuffer colour texture must be RGBA8, RGBA16F or RGBA32F");
+            }
+            t.nativeId = resources.createTexture(t.width, t.height, code, 1, false, data, s);
         } else if (t.format == GdxVkResources.FORMAT_COMPRESSED) {
             t.nativeId = resources.createCompressedTexture(t.width, t.height, t.vkFormat, t.blockW, t.blockH, t.blockBytes, levels, data, s);
         } else {

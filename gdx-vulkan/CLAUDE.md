@@ -6,7 +6,7 @@ Work happens on branch `gdx-vulkan-phase1` (pushed to the fork `slebed/libgdx`; 
 
 ## Status
 Phase 1a is complete on Windows, Linux (lavapipe) and Android. Phase 1b is implemented and verified on desktop GPUs and lavapipe; the
-Android side of 1b and Phase 2 runs on the Adreno 840 (`DeviceSuite`, both tiers; 10-minute Tier A soak passed). Open items are at the end of this section.
+Android side of 1b to 3 runs on the Adreno 840 (`DeviceSuite`, 21 checks, both tiers; 10-minute soaks passed in both tiers). Open items are at the end of this section.
 
 Native core (`gdx-vulkan-core/jni/src`), one file per subsystem, all owned by `Context` (`gdxvk_internal.h` has `ContextHandles`):
 - `gdxvk_context` instance/device/VMA/tier; `gdxvk_presenter` surface + swapchain + per-frame loop (+ Phase 1a-only `createPipeline`/`draw`).
@@ -33,7 +33,15 @@ Native core (`gdx-vulkan-core/jni/src`), one file per subsystem, all owned by `C
   Phase 3 stage 1 (colour framebuffers): `CommandStream.bindTarget` + `BindTarget` op; `Presenter::Impl` owns the pass state machine (`beginPass`/`endPass`,
   lazy begin, viewport/scissor/front face re-derived per target), pipelines are built per (colour format, offscreen) variant from kept shader modules,
   Tier B render pass variants must have identical subpass dependencies to stay compatible. Depth/stencil: `Resources::createDepthImage` (one combined image per framebuffer), `BindTarget` carries the depth id, `DepthState`/`StencilState` ops, `Impl::dsState` (Tier A dynamic, Tier B baked into pipeline variants; stencil reference and masks dynamic on both), render pass variants per clear flags. Gate 3: `Gate3Scenes` (2D+3D into framebuffers; Scene2D UI through four ping-pong post passes; GLSL `Fx` on stock GL, SPIR-V `fx_*.frag` bundles on gdx-vulkan), `Gate3GoldenTest`, `GlReferenceMain` renders the references; exact vs stock GL everywhere. Note: Docker runs need `-v <repo>/tests/gdx-tests-android/assets:/assets:ro` or Gate 2/3 are skipped. Stress 3 (`gradlew :gdx-vulkan-desktop:stress3`): `Presenter::benchmarkRecord` is the C++ floor; `CommandStream` encodes into an `int[]` and copies in bulk (buffer views cost ~80 ns per put on ART), `PushRange` sends only changed push words and the native side keeps the block (`pushShadow`) and pushes it before each draw; `CullMode` is an ordered op (GL cull state replaces the pipelines' own). Not done: swapchain depth (Phase 5), pass scheduling, `VulkanMultiTargetFrameBuffer`. Device suite: 20 checks incl. Gate 3 (needs `android.useAndroidX=true`, set).
-  Not done: Tier A 1-texture parity with stock GL (0.91x)
+  Phase 3 is done apart from true reordering of offscreen passes: `BindTarget` takes 0-8 colour textures plus a depth image; the swapchain pass starts at the
+  first swapchain draw or clear (pass scheduling, `lastPassCounts()`); `Impl::ColorSet` is part of the pipeline variant key and a pipeline writes exactly as many
+  outputs as its target has attachments (`PipelineDesc::colorOutputs`); float targets are `TextureDesc::vkFormat`; render-target images need no upload (null data).
+  `VulkanMultiTargetFrameBuffer` (package `glutils`) builds a multi-attachment framebuffer from stock GL calls. Transient depth is an opt-in
+  (`VulkanGL20.setFramebufferDepthTransient`). Vertex ring: cached system memory plus, on discrete GPUs, a device-local mirror copied at the start of the frame
+  (`FrameRing::recordVertexCopies`): reading vertices across PCIe was the whole 1-texture gap (now 1.2x stock GL). Debug names and labels
+  (`nameObject`/`beginLabel` in `gdxvk_internal.h`) need `VK_EXT_debug_utils`, enabled whenever present. Diagnostics: `GDXVK_PROFILE=1` prints per-frame CPU time of
+  beginFrame/endFrame at close, `GDXVK_PRESENT=immediate|mailbox`, `GDXVK_IMAGES=n`. The Gradle `test` task rebuilds natives; run `:gdx-vulkan-core:buildNatives` first when
+  only C++ changed and you run a single test. `transient` is a Java keyword: do not use it as a parameter name.
 
 Tests (`gdx-vulkan-desktop`): `TextureShimTest`, `SpriteBatchTest`, `InstancedBatchTest`, `FrameBufferTest`, `Gate2GoldenTest` (7 scenes: stock-GL oracle with tolerance, then exact lavapipe goldens),
 `PresenterTest`, `TriangleTest`, `GoldenTest` (lavapipe goldens, exact on lavapipe, tolerance on GPUs),
@@ -41,7 +49,7 @@ Tests (`gdx-vulkan-desktop`): `TextureShimTest`, `SpriteBatchTest`, `InstancedBa
 via its own Gradle task `soakTest` (`-Dgdxvulkan.soakSeconds=600` for the full run). CI: `.github/workflows/gdx-vulkan.yml` ->
 `ci/Dockerfile` + `ci/run-checks.sh` (see `ci/README.md`). Android: `gdx-vulkan-android` (separate Gradle 8.14/AGP 8.13 build).
 
-Open items: 10-minute soak in Tier B (desktop and Android); Adreno Tier A throughput (see below); Wayland/macOS; debug-utils object names; armeabi-v7a/x86_64;
+Open items: Adreno Tier A throughput (see below); Wayland/macOS; running armeabi-v7a/x86_64 (they compile); Linux arm64 natives; swapchain framebuffers still retire after waitIdle;
 `VulkanSpriteBatchInstanced`; Phases 3-6.
 `./gradlew :gdx-vulkan-desktop:stressInstanced -Dgdxvulkan.device=1` is the instanced sprite stress test (1M sprites; not the plan's Stress test 3, which is Phase 3). `./gradlew :gdx-vulkan-desktop:stress2` is Stress test 2 (stock GL vs VulkanSpriteBatch, each in its own JVM). Note GL runs on the display GPU, so a
 second-GPU Vulkan comparison is capped by presentation and means nothing.
@@ -52,7 +60,7 @@ second-GPU Vulkan comparison is capped by presentation and means nothing.
 - Windows RTX 5080 and RTX 2080, both tiers: `gradlew check -Dgdxvulkan.requireDriver=true [-Dgdxvulkan.forceTierB=true] [-Dgdxvulkan.device=1]`
   passes with validation + sync validation clean, goldens within tolerance. Soak (15 s): ~50,000 buffer cycles/s, 2,000 textures/s,
   60.0 fps, flat memory, 4 samplers, on both GPUs and both tiers. A 60 s run on the 5080 Tier A was flat after warm-up.
-  The full 10-minute soak has not been run yet.
+  The 10-minute soak: RTX 5080 Tier A and Tier B, RTX 2080 Tier A, Adreno 840 Tier A and Tier B, all flat; not run: RTX 2080 Tier B.
 - Linux: `ci/run-checks.sh` in the Docker image passes on lavapipe, Mesa 25.2.8-0ubuntu0.24.04.4, both tiers, exact goldens. Soak rates are
   scaled down 10x on software devices (it checks hazards and leaks there, not throughput).
 - Android (REDMAGIC NX809J, Adreno 840, Android 16, Vulkan 1.4; **not** the Galaxy S20 in the plan): Phase 1a SelfTest passed in both tiers

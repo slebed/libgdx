@@ -210,6 +210,15 @@ JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeBenchm
     return static_cast<jlong>(reinterpret_cast<gdxvk::Presenter*>(handle)->benchmarkRecord(pipeline, indexBuffer, static_cast<uint32_t>(draws), block));
 }
 
+JNIEXPORT jintArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeLastPassCounts(JNIEnv* env, jclass, jlong handle) {
+    uint32_t c[2];
+    reinterpret_cast<gdxvk::Presenter*>(handle)->lastPassCounts(c);
+    jint v[2] = {static_cast<jint>(c[0]), static_cast<jint>(c[1])};
+    jintArray out = env->NewIntArray(2);
+    env->SetIntArrayRegion(out, 0, 2, v);
+    return out;
+}
+
 JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDraw(JNIEnv* env, jclass, jlong handle, jint pipeline,
                                                                                jint vertexCount, jfloatArray push) {
     float block[32];
@@ -306,15 +315,21 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateT
                                                                                         jboolean generateMips, jbyteArray data,
                                                                                         jint minFilter, jint magFilter, jint mipFilter,
                                                                                         jint wrapU, jint wrapV, jint anisotropy) {
-    // format 0..2 are the TexFormat values; 4 = an RGBA8 render target (a colour attachment as well as sampled)
-    if (data == nullptr || format < 0 || format > 4 || format == 3) return -1;
+    // format 0..2 are the TexFormat values; 4 = an RGBA8 render target (a colour attachment as well as sampled), 5 = RGBA16F, 6 = RGBA32F targets.
+    // A render target may come without data (null): it is then only given its sampling layout.
+    const bool target = format >= 4 && format <= 6;
+    if ((data == nullptr && !target) || format < 0 || format > 6 || format == 3) return -1;
     gdxvk::TextureDesc desc;
     desc.width = static_cast<uint32_t>(width);
     desc.height = static_cast<uint32_t>(height);
-    desc.renderTarget = format == 4;
-    desc.format = static_cast<gdxvk::TexFormat>(format == 4 ? 0 : format);
+    desc.renderTarget = target;
+    desc.vkFormat = format == 5 ? 97 : format == 6 ? 109 : 0; // VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT
+    desc.format = static_cast<gdxvk::TexFormat>(target ? 0 : format);
     desc.uploadedLevels = static_cast<uint32_t>(uploadedLevels);
     desc.generateMips = generateMips == JNI_TRUE;
+    if (data == nullptr) { // a render target with no initial contents
+        return res(ctx).createTexture(desc, nullptr, 0, samplerKey(minFilter, magFilter, mipFilter, wrapU, wrapV, anisotropy));
+    }
     const jsize bytes = env->GetArrayLength(data);
     jbyte* p = static_cast<jbyte*>(env->GetPrimitiveArrayCritical(data, nullptr));
     if (p == nullptr) return -1;
@@ -340,6 +355,9 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateC
     desc.blockH = static_cast<uint32_t>(blockH);
     desc.blockBytes = static_cast<uint32_t>(blockBytes);
     desc.uploadedLevels = static_cast<uint32_t>(levels);
+    if (data == nullptr) { // a render target with no initial contents
+        return res(ctx).createTexture(desc, nullptr, 0, samplerKey(minFilter, magFilter, mipFilter, wrapU, wrapV, anisotropy));
+    }
     const jsize bytes = env->GetArrayLength(data);
     jbyte* p = static_cast<jbyte*>(env->GetPrimitiveArrayCritical(data, nullptr));
     if (p == nullptr) return -1;
@@ -387,8 +405,9 @@ JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeSet
 }
 
 JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateDepthImage(JNIEnv*, jclass, jlong ctx, jint width, jint height,
-                                                                                          jboolean stencil, jint depthBits) {
-    return res(ctx).createDepthImage(static_cast<uint32_t>(width), static_cast<uint32_t>(height), stencil == JNI_TRUE, static_cast<uint32_t>(depthBits));
+                                                                                          jboolean stencil, jint depthBits, jboolean transient) {
+    return res(ctx).createDepthImage(static_cast<uint32_t>(width), static_cast<uint32_t>(height), stencil == JNI_TRUE, static_cast<uint32_t>(depthBits),
+                                     transient == JNI_TRUE);
 }
 
 JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeDestroyDepthImage(JNIEnv*, jclass, jlong ctx, jint id) {
@@ -419,16 +438,21 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCollect
 }
 
 // [buffersLive, texturesLive, slotsInUse, samplers, stagingBlocks, bufferBytesLive, poolBytes, retiredPending, totalRetired,
-//  vmaBlockBytes, vmaAllocationBytes, completedSerial]
+//  vmaBlockBytes, vmaAllocationBytes, completedSerial, textureRenames]
 JNIEXPORT jlongArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeResourceStats(JNIEnv* env, jclass, jlong ctx) {
     const gdxvk::Resources::Stats s = res(ctx).stats();
-    const jlong v[12] = {s.buffersLive, s.texturesLive, s.slotsInUse, s.samplers, s.stagingBlocks,
+    const jlong v[13] = {s.buffersLive, s.texturesLive, s.slotsInUse, s.samplers, s.stagingBlocks,
                          static_cast<jlong>(s.bufferBytesLive), static_cast<jlong>(s.poolBytes), static_cast<jlong>(s.retiredPending),
                          static_cast<jlong>(s.totalRetired), static_cast<jlong>(s.vmaBlockBytes),
-                         static_cast<jlong>(s.vmaAllocationBytes), static_cast<jlong>(s.completedSerial)};
-    jlongArray out = env->NewLongArray(12);
-    env->SetLongArrayRegion(out, 0, 12, v);
+                         static_cast<jlong>(s.vmaAllocationBytes), static_cast<jlong>(s.completedSerial), static_cast<jlong>(s.textureRenames)};
+    jlongArray out = env->NewLongArray(13);
+    env->SetLongArrayRegion(out, 0, 13, v);
     return out;
+}
+
+// Textures renamed so far (see Resources::renameCount): the per-frame renames counter reads it at the start and end of a frame.
+JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeRenameCount(JNIEnv*, jclass, jlong ctx) {
+    return static_cast<jlong>(res(ctx).renameCount());
 }
 
 // ---- Presenter: Set 0 and Set 1 -------------------------------------------------------------------------------------------
@@ -456,7 +480,7 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateP
                                                                                            jbyteArray vert, jbyteArray frag,
                                                                                            jintArray desc) {
     const jsize vn = env->GetArrayLength(vert), fn = env->GetArrayLength(frag), dn = env->GetArrayLength(desc);
-    if (vn % 4 != 0 || fn % 4 != 0 || dn < 9) return -1;
+    if (vn % 4 != 0 || fn % 4 != 0 || dn < 10) return -1;
     std::vector<uint32_t> v(static_cast<size_t>(vn) / 4), f(static_cast<size_t>(fn) / 4);
     env->GetByteArrayRegion(vert, 0, vn, reinterpret_cast<jbyte*>(v.data()));
     env->GetByteArrayRegion(frag, 0, fn, reinterpret_cast<jbyte*>(f.data()));
@@ -471,13 +495,14 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateP
     pd.dstColor = static_cast<uint32_t>(d[5]);
     pd.srcAlpha = static_cast<uint32_t>(d[6]);
     pd.dstAlpha = static_cast<uint32_t>(d[7]);
+    pd.colorOutputs = static_cast<uint32_t>(d[9]);
     const int count = d[8];
-    if (dn < 9 + count * 3) return -1;
+    if (dn < 10 + count * 3) return -1;
     for (int a = 0; a < count; ++a) {
         gdxvk::VertexAttribute attr;
-        attr.location = static_cast<uint32_t>(d[9 + a * 3]);
-        attr.format = static_cast<uint32_t>(d[10 + a * 3]);
-        attr.offset = static_cast<uint32_t>(d[11 + a * 3]);
+        attr.location = static_cast<uint32_t>(d[10 + a * 3]);
+        attr.format = static_cast<uint32_t>(d[11 + a * 3]);
+        attr.offset = static_cast<uint32_t>(d[12 + a * 3]);
         pd.attributes.push_back(attr);
     }
     std::string label = "(unnamed)";

@@ -17,7 +17,7 @@ final class SpritePipelines {
      */
     static int get (GdxVkFrame frame, VulkanShaderPipelineBundle bundle, boolean single, boolean blendingDisabled, int srcColor, int dstColor, int srcAlpha, int dstAlpha) {
         final boolean tierA = frame.isTierA();
-        final String prefix = bundle != null ? "sprite:" + bundle.key() + "|" : single ? "sprite1|" : "sprite|";
+        final String prefix = bundle != null ? "sprite:" + bundle.key() + "x" + bundle.colorOutputs() + "|" : single ? "sprite1|" : "sprite|";
         final String key = blendingDisabled ? prefix + "opaque" : prefix + srcColor + "," + dstColor + "," + srcAlpha + "," + dstAlpha;
         GdxVkPipelineDesc d = new GdxVkPipelineDesc();
         d.stride = single ? VERTEX_BYTES - 4 : VERTEX_BYTES;
@@ -25,6 +25,7 @@ final class SpritePipelines {
             .attribute(2, GdxVkPipelineDesc.FORMAT_R32G32_SFLOAT, 12);
         if (tierA && !single) d.attribute(3, GdxVkPipelineDesc.FORMAT_R32_UINT, 20); // the slot only exists in the Tier A shaders
         d.cullMode = GdxVkPipelineDesc.CULL_NONE;
+        if (bundle != null) d.colorOutputs = bundle.colorOutputs();
         if (!blendingDisabled) {
             d.blend = true;
             d.srcColor = srcColor;

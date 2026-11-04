@@ -8,6 +8,7 @@
 //    slot/set, and for pixel changes a new image too, and retires the old ones (plan, Core decision 4: copy-on-write renaming).
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <mutex>
@@ -34,7 +35,9 @@ struct TextureDesc {
     uint32_t vkFormat = 0, blockW = 4, blockH = 4, blockBytes = 8;
     uint32_t uploadedLevels = 1; // levels present in the data, packed level 0 first, no padding
     bool generateMips = false;   // build the rest of the chain by blitting (then uploadedLevels must be 1)
-    // Rgba8 only, one level: the image can also be a colour attachment (a stock FrameBuffer's texture). It is never renamed.
+    // One level: the image can also be a colour attachment (a stock FrameBuffer's texture). It is never renamed. The data may be null: the image
+    // is then only moved into its sampling layout and holds undefined contents until a pass writes it. Format Rgba8, or with `vkFormat` set
+    // to R16G16B16A16_SFLOAT / R32G32B32A32_SFLOAT (a floating-point target, for HDR and multi-target framebuffers).
     bool renderTarget = false;
 };
 
@@ -80,9 +83,11 @@ public:
     // ---- depth/stencil images: the renderbuffers of a framebuffer (never sampled, never renamed) ----
     // One combined image: stencil adds a stencil aspect (D24_UNORM_S8_UINT, else D32_SFLOAT_S8_UINT); depth only is D16_UNORM for
     // 16 bits, else D32_SFLOAT. -1 on failure.
-    int createDepthImage(uint32_t width, uint32_t height, bool stencil, uint32_t depthBits);
+    // `transient`: an opt-in for a framebuffer whose depth is rebuilt every pass (cleared, never read across passes): the image is a transient
+    // attachment in lazily allocated memory where the device has it (tile-based GPUs keep it on chip), and passes neither load nor store it.
+    int createDepthImage(uint32_t width, uint32_t height, bool stencil, uint32_t depthBits, bool transient = false);
     void destroyDepthImage(int id);
-    bool depthImageInfo(int id, VkImage* image, VkImageView* view, VkFormat* format, bool* hasStencil, bool* initialized);
+    bool depthImageInfo(int id, VkImage* image, VkImageView* view, VkFormat* format, bool* hasStencil, bool* initialized, bool* transient);
     void markDepthInitialized(int id); // the image has been moved out of UNDEFINED into DEPTH_STENCIL_ATTACHMENT_OPTIMAL
 
     // Can this device sample (and linearly filter) images in the given VkFormat? Compressed formats vary by GPU: BC on desktop, ETC2/ASTC on mobile.
@@ -96,7 +101,11 @@ public:
         uint32_t buffersLive = 0, texturesLive = 0, slotsInUse = 0, samplers = 0, stagingBlocks = 0;
         uint64_t bufferBytesLive = 0, poolBytes = 0, retiredPending = 0, totalRetired = 0, vmaBlockBytes = 0, vmaAllocationBytes = 0;
         uint64_t completedSerial = 0;
+        uint64_t textureRenames = 0;
     };
+
+    // Textures renamed since the context started: cheap, unlike stats(). A frame's renames are the difference between two readings.
+    uint64_t renameCount() const { return renames_.load(std::memory_order_relaxed); }
     Stats stats();
 
 private:
@@ -109,7 +118,7 @@ private:
     struct BufferEntry {
         bool live = false;
         uint32_t pool = 0;
-        VmaVirtualAllocation allocation = nullptr;
+        VmaVirtualAllocation allocation = VK_NULL_HANDLE; // a pointer on 64-bit targets, a 64-bit integer on 32-bit ones
         uint64_t offset = 0, size = 0;
     };
     struct TextureEntry {
@@ -120,6 +129,7 @@ private:
         uint32_t width = 0, height = 0, levels = 1;
         TexFormatInfo info;
         bool renderTarget = false;
+        bool linearFilter = true; // the format can be filtered linearly (a 32-bit float target may not: its sampler is then forced to nearest)
         SamplerKey sampler;
         int slot = -1;                     // Tier A
         DescriptorLayouts::TextureSet set; // Tier B
@@ -140,7 +150,7 @@ private:
     std::vector<TextureEntry> textures_;
     std::vector<int> freeTextureIds_;
     struct DepthEntry {
-        bool live = false, stencil = false, initialized = false;
+        bool live = false, stencil = false, initialized = false, transient = false;
         VkImage image = VK_NULL_HANDLE;
         VmaAllocation alloc = nullptr;
         VkImageView view = VK_NULL_HANDLE;
@@ -149,6 +159,7 @@ private:
     std::vector<DepthEntry> depths_;
     std::vector<int> freeDepthIds_;
     uint64_t bufferBytesLive_ = 0;
+    std::atomic<uint64_t> renames_{0}; // textures renamed (a new image after a pixel change), for the per-frame counter
     uint32_t buffersLive_ = 0, texturesLive_ = 0;
 };
 

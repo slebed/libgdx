@@ -18,6 +18,8 @@ public final class GdxVkPipelineDesc {
     public int cullMode = CULL_BACK;
     public boolean blend;
     public int srcColor = 1, dstColor = 0, srcAlpha = 1, dstAlpha = 0; // GL_ONE, GL_ZERO
+    /** Colour outputs the fragment shader writes (location 0..n-1): the render target it draws into must have as many attachments. */
+    public int colorOutputs = 1;
     private final List<int[]> attributes = new ArrayList<int[]>();
 
     public GdxVkPipelineDesc attribute(int location, int vkFormat, int offset) {
@@ -26,7 +28,7 @@ public final class GdxVkPipelineDesc {
     }
 
     int[] encode() {
-        int[] d = new int[9 + attributes.size() * 3];
+        int[] d = new int[10 + attributes.size() * 3];
         d[0] = stride;
         d[1] = topology;
         d[2] = cullMode;
@@ -36,7 +38,8 @@ public final class GdxVkPipelineDesc {
         d[6] = srcAlpha;
         d[7] = dstAlpha;
         d[8] = attributes.size();
-        for (int i = 0; i < attributes.size(); i++) System.arraycopy(attributes.get(i), 0, d, 9 + i * 3, 3);
+        d[9] = colorOutputs;
+        for (int i = 0; i < attributes.size(); i++) System.arraycopy(attributes.get(i), 0, d, 10 + i * 3, 3);
         return d;
     }
 }

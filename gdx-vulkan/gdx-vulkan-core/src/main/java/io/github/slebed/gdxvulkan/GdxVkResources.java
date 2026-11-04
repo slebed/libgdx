@@ -11,7 +11,7 @@ public final class GdxVkResources {
     /** A snapshot of resource accounting. The soak test requires these to stay flat. */
     public static final class Stats {
         public final int buffersLive, texturesLive, slotsInUse, samplers, stagingBlocks;
-        public final long bufferBytesLive, poolBytes, retiredPending, totalRetired, vmaBlockBytes, vmaAllocationBytes, completedSerial;
+        public final long bufferBytesLive, poolBytes, retiredPending, totalRetired, vmaBlockBytes, vmaAllocationBytes, completedSerial, textureRenames;
 
         Stats(long[] v) {
             buffersLive = (int)v[0];
@@ -26,12 +26,13 @@ public final class GdxVkResources {
             vmaBlockBytes = v[9];
             vmaAllocationBytes = v[10];
             completedSerial = v[11];
+            textureRenames = v[12];
         }
 
         @Override public String toString() {
             return "buffers=" + buffersLive + " (" + bufferBytesLive + " B) textures=" + texturesLive + " slots=" + slotsInUse
                 + " samplers=" + samplers + " staging=" + stagingBlocks + " retiredPending=" + retiredPending + " totalRetired="
-                + totalRetired + " vmaBlock=" + vmaBlockBytes + " vmaAlloc=" + vmaAllocationBytes;
+                + totalRetired + " vmaBlock=" + vmaBlockBytes + " vmaAlloc=" + vmaAllocationBytes + " renames=" + textureRenames;
         }
     }
 
@@ -71,6 +72,12 @@ public final class GdxVkResources {
     /** RGBA8 that can also be rendered into (a framebuffer's colour texture): one level, never renamed. Passed to createTexture like FORMAT_RGBA8. */
     public static final int FORMAT_RENDER_TARGET = 4;
 
+    /** RGBA with 16-bit float channels: a render target that keeps values outside 0..1 (HDR), sampled like any texture. Targets only. */
+    public static final int FORMAT_RGBA16F = 5;
+
+    /** RGBA with 32-bit float channels, a render target; the device may only sample it with nearest filtering. Targets only. */
+    public static final int FORMAT_RGBA32F = 6;
+
     /**
      * A block-compressed texture: {@code levels} mip levels of {@code vkFormat}, tightly packed, level 0 first. Throws if the device
      * cannot sample the format (BC on desktop GPUs, ETC2 and ASTC on mobile ones; check {@link #formatSupported}).
@@ -94,7 +101,7 @@ public final class GdxVkResources {
     }
 
     public static int bytesPerTexel(int format) {
-        return format == FORMAT_RGBA8 ? 4 : format == FORMAT_LUMINANCE_ALPHA ? 2 : 1;
+        return format == FORMAT_RGBA8 ? 4 : format == FORMAT_LUMINANCE_ALPHA ? 2 : format == FORMAT_RGBA16F ? 8 : format == FORMAT_RGBA32F ? 16 : 1;
     }
 
     /** @param rgba width * height * 4 bytes, RGBA8, row 0 at the top */
@@ -152,7 +159,12 @@ public final class GdxVkResources {
      * D32 otherwise, D24S8 or D32S8 with stencil. Never sampled.
      */
     public int createDepthImage(int width, int height, boolean stencil, int depthBits) {
-        int id = GdxVkNative.nativeCreateDepthImage(context.nativeHandle(), width, height, stencil, depthBits);
+        return createDepthImage(width, height, stencil, depthBits, false);
+    }
+
+    /** With {@code transient}: never loaded or stored between passes, and in lazily allocated (on-chip) memory where the GPU has it. */
+    public int createDepthImage(int width, int height, boolean stencil, int depthBits, boolean transientDepth) {
+        int id = GdxVkNative.nativeCreateDepthImage(context.nativeHandle(), width, height, stencil, depthBits, transientDepth);
         if (id < 0) throw new VulkanOutOfMemoryException("Could not create a " + width + "x" + height + " depth image");
         return id;
     }
@@ -174,6 +186,14 @@ public final class GdxVkResources {
     /** Runs deletions the GPU has finished with. A presenter does this every frame. @return how many ran */
     public int collectGarbage() {
         return GdxVkNative.nativeCollectGarbage(context.nativeHandle());
+    }
+
+    /**
+     * Textures renamed since the context started (a pixel change after the image existed: copy-on-write, plan Core decision 4). Cheap to read,
+     * unlike {@link #stats()}: {@code GdxVkFrame.getRenamesLastFrame()} uses it to give a per-frame figure for a debug overlay.
+     */
+    public long renameCount() {
+        return GdxVkNative.nativeRenameCount(context.nativeHandle());
     }
 
     public Stats stats() {
