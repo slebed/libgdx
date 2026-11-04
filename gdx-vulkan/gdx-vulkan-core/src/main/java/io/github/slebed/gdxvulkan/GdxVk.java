@@ -53,6 +53,15 @@ public final class GdxVk {
         }
     }
 
+    /**
+     * A surface and swapchain for a native window: the entry point the plan names {@code GdxVk.createSurface()}. Pass the handles GLFW gives
+     * for the platform (Win32: display 0 and the HWND; X11: the Display and the Window). On Android use
+     * {@link GdxVkContext#createPresenterAndroid} or {@code VulkanAndroidApplication}.
+     */
+    public static GdxVkPresenter createSurface(GdxVkContext context, long nativeDisplay, long nativeWindow, int width, int height, boolean vsync) {
+        return context.createPresenter(nativeDisplay, nativeWindow, width, height, vsync);
+    }
+
     static String platform() {
         String os = System.getProperty("os.name", "").toLowerCase();
         String arch = System.getProperty("os.arch", "").toLowerCase();

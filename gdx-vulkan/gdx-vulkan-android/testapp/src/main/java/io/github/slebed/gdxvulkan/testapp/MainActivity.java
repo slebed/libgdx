@@ -46,6 +46,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         TestLog.init(new java.io.File(getFilesDir(), "gdxvk-test.log"));
         forceTierB = getIntent().getBooleanExtra("forceTierB", false);
         validation = getIntent().getBooleanExtra("validation", false);
+        if (getIntent().getBooleanExtra("landscape", false)) {
+            setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE); // with preRotate this makes the swapchain rotated
+        }
 
         thread = new HandlerThread("gdxvk-render");
         thread.start();
@@ -105,7 +108,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             TestLog.i(TAG, "device=" + context.caps().deviceName + " driver=" + context.caps().driverInfo + " tier=" + context.caps().tier
                 + " forced=" + context.caps().tierForced + " validation=" + context.caps().validationEnabled);
         }
-        presenter = context.createPresenterAndroid(holder.getSurface(), width, height, getIntent().getBooleanExtra("vsync", true));
+        presenter = context.createPresenterAndroid(holder.getSurface(), width, height, getIntent().getBooleanExtra("vsync", true),
+            getIntent().getBooleanExtra("preRotate", false));
+        TestLog.i(TAG, "preRotation=" + presenter.rotation() * 90 + " deg, logical " + presenter.width() + "x" + presenter.height());
         pipeline = presenter.createPipeline("triangle", GdxVkShaders.load("triangle.vert"), GdxVkShaders.load("triangle.frag"));
         TestLog.i(TAG, "swapchain " + presenter.width() + "x" + presenter.height() + " vkFormat=" + presenter.vkFormat() + " images="
             + presenter.imageCount());

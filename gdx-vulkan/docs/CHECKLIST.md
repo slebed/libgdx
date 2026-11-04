@@ -13,7 +13,7 @@ the plan names.
 | Section | Done | Partial | Not started | Total |
 |---|---|---|---|---|
 | Core decisions | 44 | 4 | 8 | 56 |
-| Phase 1a: Extraction, window surfaces and CI | 17 | 5 | 0 | 22 |
+| Phase 1a: Extraction, window surfaces and CI | 18 | 4 | 0 | 22 |
 | Phase 1b: Memory, layout and caches | 18 | 2 | 0 | 20 |
 | Phase 2: Unmodified 2D | 24 | 1 | 0 | 25 |
 | Phase 3: Stock FrameBuffer | 12 | 1 | 0 | 13 |
@@ -21,7 +21,7 @@ the plan names.
 | Phase 5: 3D with stock models | 0 | 0 | 12 | 12 |
 | Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **126** | **16** | **27** | **169** |
+| **All** | **127** | **15** | **27** | **169** |
 ---
 
 ## Core decisions
@@ -106,7 +106,7 @@ the plan names.
 - [x] Modules `gdx-vulkan-core` (Java + `jni/`), `gdx-vulkan-desktop`, `gdx-vulkan-android`
 - [~] Natives via plain CMake + hand-written JNI instead of gdx-jnigen (deliberate; revisit when jnigen cross-compile is verified)
 - [x] Natives built: Windows x64, Linux x64 (Docker), Android arm64-v8a
-- [~] Natives: Android armeabi-v7a and x86_64 compile and link with the NDK (the library builds all three ABIs; fixed a 32-bit assumption in `VmaVirtualAllocation`); neither has been run, as the only device is arm64. Linux arm64 not built
+- [~] Natives: Android armeabi-v7a and x86_64 compile and link with the NDK (the library builds all three ABIs; fixed a 32-bit assumption in `VmaVirtualAllocation`); neither has been run, as the only device is arm64. Linux arm64: built and its native tests run by the `arm64-natives` CI job on GitHub's arm64 runner (the Java suite does not run there).
 - [x] No copied audio classes; `Gdx.gl30` untouched from the first commit
 
 ### 2. Native core boot
@@ -118,7 +118,7 @@ the plan names.
 
 ### 3. Surfaces from native handles
 - [x] Desktop: Win32 and X11 handles from GLFW (via `GlfwSurfaces`); [ ] Wayland
-- [~] `GdxVkContext.createPresenter()` (the plan names it `GdxVk.createSurface()`)
+- [x] `GdxVk.createSurface(context, display, window, width, height, vsync)` (the plan's name) wraps `GdxVkContext.createPresenter()`; every desktop test goes through it. Android uses `createPresenterAndroid` or `VulkanAndroidApplication`
 - [x] Android: `ANativeWindow_fromSurface()` from a minimal `SurfaceView` host
 
 ### 4. CI
@@ -258,7 +258,7 @@ the plan names.
 - [~] `VulkanAsyncTextureLoader` for `AssetManager`: not needed as a class. The stock `TextureLoader` already decodes on worker threads and builds the `Texture` where `update()` runs, and nothing in that path is GL-specific (`AssetManagerTest` on the desktop, texture streaming in `LifecycleActivity` on the phone). What it does not do is copy pixels into the staging ring from the worker thread; that would save one memcpy at first use and has not been measured as a problem
 
 ### Gate 4 and stress test 4
-- [~] All Phase 1-3 tests on a physical device with pre-rotation active, confirmed in Android GPU Inspector: pre-rotation is confirmed by the presenter's own report and by screenshots at four angles, not by AGI; the 21-check device suite was last run before pre-rotation existed and has not been repeated with it on
+- [~] All Phase 1-3 tests on a physical device with pre-rotation active, confirmed in Android GPU Inspector: the 21-check device suite passes on the Adreno 840 in landscape with the swapchain pre-rotated 90 degrees (logical 2688x1216) in Tier A and Tier B, and screenshots at four angles show the upright picture. Not done: an Android GPU Inspector capture (AGI is not installed here; the presenter's own `rotation()` and the logs are the evidence instead)
 - [~] ADB script: `tools/stress4.sh [cycles] [--tier-b]` runs N rotate + background/foreground cycles (default 50; the plan's 500 is available as an argument but is long, about 45 minutes) while an `AssetManager` streams textures in and out. Split-screen is not driven by it (adb cannot toggle it reliably)
 - [x] Pass: zero crashes, zero lost textures, flat native heap, swapchain recreation under 50 ms: `tools/stress4.sh` on the Adreno 840 with pre-rotation on and textures streaming, 50 cycles in Tier A (0 failures, 2 ms average and 5 ms worst recreation, heap 26,091 -> 26,117 KB between cycle 25 and 50) and 20 in Tier B (0 failures, 2 ms / 4 ms). The plan says 500 cycles; 50 was run (500 takes about 45 minutes)
 

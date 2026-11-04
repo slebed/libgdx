@@ -1,5 +1,6 @@
 package io.github.slebed.gdxvulkan.desktop;
 
+import io.github.slebed.gdxvulkan.GdxVk;
 import io.github.slebed.gdxvulkan.GdxVkContext;
 import io.github.slebed.gdxvulkan.GdxVkPresenter;
 
@@ -23,7 +24,7 @@ public final class GlfwSurfaces {
         GLFW.glfwGetFramebufferSize(glfwWindow, w, h);
         String os = System.getProperty("os.name", "").toLowerCase();
         if (os.contains("win")) {
-            return context.createPresenter(0, GLFWNativeWin32.glfwGetWin32Window(glfwWindow), w[0], h[0], vsync);
+            return GdxVk.createSurface(context, 0, GLFWNativeWin32.glfwGetWin32Window(glfwWindow), w[0], h[0], vsync);
         }
         if (os.contains("linux")) {
             long display = GLFWNativeX11.glfwGetX11Display();
@@ -31,7 +32,7 @@ public final class GlfwSurfaces {
             if (display == 0 || window == 0) {
                 throw new UnsupportedOperationException("GLFW is not running on X11; Wayland surfaces are not implemented yet");
             }
-            return context.createPresenter(display, window, w[0], h[0], vsync);
+            return GdxVk.createSurface(context, display, window, w[0], h[0], vsync);
         }
         throw new UnsupportedOperationException("No surface support for " + os + " yet");
     }

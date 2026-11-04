@@ -4,7 +4,7 @@ A Vulkan renderer for libGDX, built as a standalone library on **stock libGDX** 
 libGDX is needed: unmodified `Texture`, `Pixmap`, `SpriteBatch`, `FrameBuffer`, Scene2D, `BitmapFont` and friends run against Vulkan through a
 GL20 shim, and the result is compared with stock libGDX on OpenGL.
 
-`docs/PLAN.md` has the architecture and the phases; `docs/CHECKLIST.md` is the item-by-item state (126 done, 16 partial, 27 not started, of 169; what is left is Phases 5 and 6, the desktop `Application`, the Galaxy S20, or a stated limit),
+`docs/PLAN.md` has the architecture and the phases; `docs/CHECKLIST.md` is the item-by-item state (127 done, 15 partial, 27 not started, of 169; what is left is Phases 5 and 6, the desktop `Application`, the Galaxy S20, or a stated limit),
 marking only what has been built **and verified**.
 
 ## Status
@@ -15,7 +15,7 @@ marking only what has been built **and verified**.
 | 1b Memory, layout and caches | done: two-set layout, deferred deletion, frame rings, staging, pipeline cache, shader reflection, 10-minute soaks (RTX 5080 in both tiers, RTX 2080 in Tier A, Adreno 840 in both tiers) |
 | 2 Unmodified 2D | done: sprite batches, polygon batch, shape renderer, compressed textures, shader bundles, `VulkanSpriteBatchInstanced` (1,000,000 sprites moved by compute); every Stress 2 target met |
 | 3 Stock `FrameBuffer` | done: colour, depth and stencil framebuffers, `VulkanMultiTargetFrameBuffer` (several and floating-point attachments), GL cull/depth/stencil state, pass scheduling, Gate 3 scenes, Stress test 3. Not done: reordering offscreen passes that come after a swapchain draw |
-| 4 Android lifecycle | done apart from Swappy frame pacing, `VK_KHR_swapchain_maintenance1` and an Android GPU Inspector capture: `VulkanAndroidApplication` (stock input, audio and files), surface loss and recreation with everything resident (2 ms average), pre-rotation verified at all four angles on the phone, `onTrimMemory`, stock `AssetManager` texture streaming, Stress test 4 at 50 cycles |
+| 4 Android lifecycle | done apart from Swappy frame pacing, `VK_KHR_swapchain_maintenance1` and an Android GPU Inspector capture: `VulkanAndroidApplication` (stock input, audio and files), surface loss and recreation with everything resident (2 ms average), pre-rotation verified at all four angles on the phone, `onTrimMemory`, stock `AssetManager` texture streaming, Stress test 4 at 50 cycles, the 21-check device suite with the swapchain pre-rotated (both tiers) |
 | 5 3D with stock models | not started |
 | 6 macOS / iOS | not started (stretch) |
 
