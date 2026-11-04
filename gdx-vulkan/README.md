@@ -32,12 +32,12 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 |---|---|
 | macOS and iOS | needs a Mac to build and test; not started |
 | Wayland | X11 only on Linux |
-| Custom GLSL at run time | shaders are compiled to SPIR-V at build time; `new ShaderProgram(vertexSource, fragmentSource)` is not supported |
+| Custom GLSL at run time | shaders are compiled to SPIR-V at build time; `new ShaderProgram(vertexSource, fragmentSource)` is not supported. **In progress:** a `VulkanShaderProgram` that takes your existing libGDX GLSL and translates it to Vulkan at run time (tracked in `docs/CHECKLIST.md`, "Phase 5b") |
 | Direct OpenGL drawing | `glDrawArrays`, `glUseProgram`, `Mesh.render(ShaderProgram)` and similar throw an exception that says which Vulkan class to use |
 | Spot lights, point-light shadows | libGDX's own default shader has neither |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (155 of 169 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (160 of 208 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), and a REDMAGIC phone with an
 Adreno 840 (Android 16). Other GPUs and drivers should work but have not been tried.

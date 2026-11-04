@@ -106,6 +106,7 @@ second-GPU Vulkan comparison is capped by presentation and means nothing.
   an explicit dependency between consecutive captures (added to the capture path).
 
 ## Decisions to keep
+- **Stock GLSL support (checklist "Phase 5b")**: translate libGDX's old GLSL to Vulkan-native SPIR-V; do not emulate OpenGL. Loose uniforms become a uniform block in the frame ring with only changed ranges written (small hot ones in push constants), samplers use the bindless table, vertex input comes from reflection, SPIR-V is cached on disk by source hash. Nothing may cost a GL-style per-call price at draw time.
 - **Minimise changes to libGDX and to the code that uses it** (the owner's design goal). Never fork or patch libGDX; the only upstream change planned is two public accessors (`docs/upstream/`). Prefer making stock classes work unchanged (the GL20 shim, stock `Texture`, `FrameBuffer`, `Mesh`, `Stage`, ...) over adding library classes; where a replacement class is unavoidable (batches, application classes) give it the stock class's constructors and behaviour, so porting is a rename. Any API that asks users for something stock does not (an extra argument, an extra setup call) needs a reason.
 - Natives: plain CMake + hand-written JNI (gdx-jnigen deferred). Tier A needs core Vulkan 1.3.
 - One pipeline layout; Set 0 = dynamic UBO + SSBO, Set 1 = textures; 128-byte push constants. `Gdx.gl30` stays null.

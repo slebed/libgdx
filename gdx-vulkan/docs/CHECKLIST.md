@@ -19,9 +19,10 @@ the plan names.
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 11 | 1 | 0 | 12 |
 | Phase 5: 3D with stock models | 9 | 3 | 0 | 12 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 5 | 0 | 34 | 39 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **155** | **9** | **5** | **169** |
+| **All** | **160** | **9** | **39** | **208** |
 ---
 
 ## Core decisions
@@ -287,6 +288,68 @@ the plan names.
 - [x] Animated `knight.g3db` via unmodified `G3dModelLoader` + a `ModelBuilder` scene, normal mapping, skeletal animation, directional shadows: `gate5_models`, `gate5_knight`, `gate5_fog` match stock `ModelBatch` on OpenGL with 0 differing pixels and `gate5_shadows` with 1 (all within tolerance), `gate5_textures` exactly; `gate5_normalmap` has no stock equivalent and has its own lavapipe golden and a check that the mapped box shows far more detail than the plain one. All have lavapipe goldens; on the Adreno 840 they match them in both tiers (the Tier A-only scenes in Tier A)
 - [x] 250,000 instanced textured meshes moved by compute boids, 500 point lights culled in compute: `Stress5Main` (`gradlew :gdx-vulkan-desktop:stress5`), `boids.comp` (grid-based boids), `gpu_cull.comp`, `light_cull.comp`, `gpu_lit.vert/.frag`
 - [~] Pass: 60+ fps on the RTX 2080 (495 fps average, 1% low 259, both tiers; RTX 5080 957-988 fps), 50,000 instances and 64 lights at 60 fps on a phone (Adreno 840, 1216x2688, vsync off: 781 fps in Tier A, 785 in Tier B; 250,000 instances and 500 lights: 52 fps; **not the Galaxy S20**), zero Java allocations per frame (0.6-1.2 bytes per frame measured over 12 s, the rest is noise in the measurement; found and removed: JDK 18+ reflection allocation in `StockMeshAccess`, now JNI field reads)
+
+---
+
+## Phase 5b: Stock GLSL shaders (runtime translation to Vulkan)
+
+Goal: a game's own libGDX shaders (`ShaderProgram`, written in the old `attribute` / `varying` / `uniform` GLSL) run unchanged, and in the end the stock
+`SpriteBatch`, `ShapeRenderer` and `Stage` run without being renamed. Design rule (owner's decision): the translator produces **Vulkan-native** shaders, it
+does not emulate OpenGL. Every item below is judged against that: nothing may cost a GL-style per-call price at draw time (uniform calls, state replay,
+descriptor writes), and the Vulkan features the library already uses (bindless textures, push constants, uniform rings, pipeline cache) are the targets.
+
+### Porting ergonomics (done)
+- [x] Batches, shape renderer, model batch, compute shader and GPU instances find the application's frame themselves (`new VulkanSpriteBatch()`, `GdxVkFrame.current()`), with stock's constructors
+- [x] `VulkanDesktopApplication` accepts a stock `Lwjgl3ApplicationConfiguration` (`VulkanConfigurations` reads its package-private fields; libGDX is not changed)
+- [x] `VulkanModelBatch` turns the screen's depth buffer on itself (kept across swapchain replacement); no `setDepth` call
+- [x] `VulkanStage`: the stock `Stage` with a `VulkanSpriteBatch`, same constructors, disposes the batch
+- [x] Creating a stock `SpriteBatch`, `ShaderProgram` or `Stage(viewport)` fails with a message that names the class to use instead
+
+### A. Translating stock GLSL
+- [ ] Dialect: GLSL ES 1.00 / desktop 1.10-1.20 as libGDX ships it: `attribute` to `in`, `varying` to matched `out`/`in` locations across the two stages, `gl_FragColor` and `gl_FragData[n]` to declared outputs, `texture2D`/`textureCube` to `texture`, `#ifdef GL_ES` and `precision` lines
+- [ ] `#version 300 es` / `330` style shaders pass through with only the Vulkan declarations added
+- [ ] `ShaderProgram.prependVertexCode` / `prependFragmentCode`, `#define`s and `#extension` lines are honoured
+- [ ] Compile errors come back as `ShaderProgram`-style logs with the line numbers of the **original** source, not of the translated one
+- [ ] Fails loudly (a clear message) on GLSL it cannot translate; no silent mis-compiles
+
+### B. Vulkan-native mapping (the optimisation requirements)
+- [ ] Loose uniforms become one std140 uniform block per program, laid out from reflection and placed in the existing per-frame ring; at draw time only the changed byte ranges are written, never one call per uniform
+- [ ] Small, hot uniforms (a projection matrix and a few scalars) are placed in push constants within the shared 128-byte budget; the choice is made from size and update rate, not by name
+- [ ] Samplers use the existing bindless texture table (modern path) or the one-texture set (compatibility path); texture units are slots, so binding a texture is not a descriptor write
+- [ ] Vertex input comes from the program's reflected attributes and the mesh's `VertexAttributes` as pipeline vertex-input state; `glVertexAttribPointer` calls are not replayed
+- [ ] `#define` flags that an application sets through `prependCode` can become specialization constants, so variants share SPIR-V
+- [ ] Precision qualifiers are mapped to `RelaxedPrecision` where the device benefits (mobile)
+- [ ] SPIR-V goes through an optimisation pass (spirv-opt performance recipe, debug info stripped); a benchmark shows the effect, or the pass is dropped
+- [ ] Compiled SPIR-V is cached on disk by a hash of (source, defines, code path), so a second launch compiles nothing; the existing pipeline cache keeps handling pipelines
+- [ ] Compilation can run off the render thread; pipelines are still built lazily at first use
+- [ ] Measured: a translated stock shader is not slower than the same shader written as a SPIR-V bundle
+
+### C. The compiler
+- [ ] Choose and bundle a GLSL-to-SPIR-V compiler (shaderc or glslang) in the native library for Windows x64, Linux x64 and Android arm64; record the size cost
+- [ ] Existing SPIRV-Reflect validation runs on every translated shader (block layout, vertex inputs, sampler count)
+- [ ] The build still works without the compiler's sources for people who only use precompiled bundles (optional component), or the dependency is vendored
+
+### D. `VulkanShaderProgram` API
+- [ ] `new VulkanShaderProgram(vertexSource, fragmentSource)` and the `FileHandle` form, with `isCompiled`, `getLog`, `getAttributes`, `getUniforms`, `hasUniform`, `dispose`
+- [ ] The `ShaderProgram` setters: `setUniformf`/`i` (1 to 4 values), `setUniformMatrix` (2/3/4), array and `Vector`/`Color`/`Matrix` overloads, `setUniform*` by location, `fetchUniformLocation`, `pedantic`, `bind`/`begin`/`end`
+- [ ] Custom shaders for the batches the way stock does it: `new VulkanSpriteBatch(size, program)`, `setShader`, and the same for the polygon batch and the shape renderer
+- [ ] Custom 3D shaders: `ShaderProvider` / `Shader` for `VulkanModelBatch` built on `VulkanShaderProgram`
+- [ ] `VulkanShaderPipelineBundle` (precompiled SPIR-V) stays supported as the build-time path
+
+### E. Stock classes with no rename (stretch)
+- [ ] GL shim: `glCreateShader`, `glShaderSource`, `glCompileShader`, `glCreateProgram`, `glAttachShader`, `glLinkProgram`, `glGetProgramiv`/`glGetShaderInfoLog`, `glGetActiveUniform`/`Attrib`, `glGetUniformLocation`, `glUniform*`, `glUseProgram` route to the translator, so the stock `ShaderProgram` works
+- [ ] GL shim: array buffers, `glVertexAttribPointer`, `glEnableVertexAttribArray`, `glDrawElements`, `glDrawArrays` become command-stream draws; the pipeline comes from (program, vertex layout, blend/depth/cull state) with the state cached so equal state costs one lookup
+- [ ] Stock `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `ImmediateModeRenderer20`, `Mesh.render(ShaderProgram)` and `new Stage(viewport)` run unmodified
+- [ ] Stock `ModelBatch` with libGDX's `DefaultShader` and `DepthShader` GLSL runs unmodified
+- [ ] Gate: the Gate 2, 3 and 5 scenes drawn by the stock classes on the shim match stock OpenGL, and match the generated Vulkan batches
+- [ ] Performance gate: a stock `SpriteBatch` on the shim is within 1.5x of `VulkanSpriteBatch` in Stress test 2 (target to confirm once measured); first-use compile of a typical shader under 50 ms, second launch about 0
+- [ ] README and the migration section drop the renames once this passes (the generated Vulkan batches stay as the fast path)
+
+### F. Tests
+- [ ] Translator tests with the shaders libGDX ships (`SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `ImmediateModeRenderer20`, `DefaultShader`, `DepthShader`) and the Gate 3 post-processing shaders
+- [ ] Every test runs on both code paths with the validation layers clean
+- [ ] Android: translated shaders compile and render on the phone (USB only), compile time recorded
+- [ ] CI (lavapipe) runs the translator tests and the golden scenes
 
 ---
 
