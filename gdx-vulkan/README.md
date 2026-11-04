@@ -37,7 +37,7 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Spot lights, point-light shadows | libGDX's own default shader has neither |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (179 of 235 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (182 of 235 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). **Known problem:** on the Adreno 650 everything works except 3D models
@@ -203,7 +203,7 @@ public static void main(String[] args) {
 ```
 
 `VulkanSpriteBatch` implements the stock `Batch` interface, so anything that takes a `Batch` takes it: `BitmapFont.draw`, `ParticleEffect.draw`, `Image`, and
-so on. Stock `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `Stage`, `ModelBatch` and your own `ShaderProgram`s also run as they are, through the GL shim; the `Vulkan...` classes are the same classes written straight against Vulkan and are the fast path.
+so on. Stock `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `Stage`, `ModelBatch` and your own `ShaderProgram`s also run as they are, through the GL shim; the `Vulkan...` classes are the same classes written straight against Vulkan and are the fast path. Measured with 20,000 sprites from one texture, a stock `SpriteBatch` reaches about three quarters of `VulkanSpriteBatch`'s frame rate on the RTX 5080 and about the same on the RTX 2080 (`gradlew :gdx-vulkan-desktop:stressShim`). libGDX's own sprite, shape and 3D shaders are replaced by ones compiled when the library is built, so they cost no start-up compile.
 
 A game's existing `Lwjgl3ApplicationConfiguration` is used as it is: window size and title, vsync, resizable, fullscreen, audio and preferences settings (the
 OpenGL context settings are ignored). `VulkanDesktopConfiguration` holds the same settings in a class of ours, all optional.

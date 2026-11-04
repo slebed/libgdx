@@ -65,7 +65,24 @@ final class ShaderCache {
     static Entry load (File dir, String key) {
         final File file = new File(dir, key + ".spvprog");
         if (!file.isFile()) return null;
-        try (DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(file)))) {
+        try {
+            return read(new FileInputStream(file));
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /** A program compiled when the library was built: the {@code shaders/bundle} folder of the jar (see {@code recordShaderBundle}). Null when there is none for this key. */
+    static Entry loadBundled (String key) {
+        try (java.io.InputStream in = ShaderCache.class.getResourceAsStream("/shaders/bundle/" + key + ".spvprog")) {
+            return in == null ? null : read(in);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static Entry read (java.io.InputStream stream) {
+        try (DataInputStream in = new DataInputStream(new BufferedInputStream(stream))) {
             if (in.readInt() != MAGIC || in.readInt() != FORMAT) return null;
             final Translation t = new Translation();
             t.bindless = in.readBoolean();

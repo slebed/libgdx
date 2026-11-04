@@ -167,3 +167,41 @@ tasks.register('stress3', JavaExec) {
     systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'false')
     System.properties.each { k, v -> if (k.toString().startsWith('gdxvulkan.')) systemProperty k.toString(), v.toString() }
 }
+
+// Compiles the programs libGDX's DefaultShader and DepthShader ask for, for a matrix of materials, vertex layouts and lights, on both code paths, and keeps them in
+// gdx-vulkan-core/src/main/resources/shaders/bundle (shipped in the jar, so stock ModelBatch never reaches the run-time translator or compiler for these).
+// Run it after changing the translator, the compiler version or the matrix in RecordShaderBundleMain; BundledShadersTest fails when the bundle is stale.
+def bundleDir = rootProject.file('gdx-vulkan-core/src/main/resources/shaders/bundle')
+['A', 'B'].each { tier ->
+    tasks.register("recordShaderBundle${tier}", JavaExec) {
+        classpath = sourceSets.test.runtimeClasspath
+        mainClass = 'io.github.slebed.gdxvulkan.desktop.RecordShaderBundleMain'
+        dependsOn 'testClasses', ':gdx-vulkan-core:buildNatives'
+        systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
+        systemProperty 'gdxvulkan.validation', 'false'
+        systemProperty 'gdxvulkan.recordShaders', bundleDir.absolutePath
+        systemProperty 'gdxvulkan.forceTierB', tier == 'B' ? 'true' : 'false'
+        System.properties.each { k, v -> if (k.toString().startsWith('gdxvulkan.') && !k.toString().equals('gdxvulkan.forceTierB')) systemProperty k.toString(), v.toString() }
+        if (tier == 'A') doFirst { bundleDir.deleteDir() }
+    }
+}
+tasks.register('recordShaderBundle') {
+    description = 'Rebuilds the bundle of precompiled DefaultShader and DepthShader programs.'
+    group = 'build'
+    dependsOn 'recordShaderBundleA'
+    dependsOn 'recordShaderBundleB'
+}
+tasks.named('recordShaderBundleB') { mustRunAfter 'recordShaderBundleA' }
+
+// Stress test 2 for the GL shim: libGDX's own SpriteBatch on the shim against VulkanSpriteBatch (same sprites, same textures). Pass: within 1.5x on one texture.
+// -Dgdxvulkan.stressShim.report=true never fails; -Dgdxvulkan.device=N picks the GPU; -Dgdxvulkan.forceTierB=true the compatibility path.
+tasks.register('stressShim', JavaExec) {
+    description = 'Stock SpriteBatch on the GL shim against VulkanSpriteBatch.'
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.github.slebed.gdxvulkan.desktop.StressShimMain'
+    dependsOn 'testClasses', ':gdx-vulkan-core:buildNatives'
+    systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
+    systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'false')
+    System.properties.each { k, v -> if (k.toString().startsWith('gdxvulkan.')) systemProperty k.toString(), v.toString() }
+}

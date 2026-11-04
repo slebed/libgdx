@@ -972,18 +972,12 @@ public class VulkanGL20 extends VulkanGL20Base {
         GlBuffer b = boundBuffer(target, "glBufferData");
         if (data != null && data.remaining() == 0 && size > 0) data = null; // nothing to copy
         store(b, data == null ? null : directBytes(data, size), size);
+        // A CPU copy is the base of copy-on-write sub-range updates, and only a buffer that is filled by glBufferSubData needs one: stock's
+        // VertexBufferObjectSubData and IndexBufferObjectSubData define the store without data and then update ranges. A buffer defined with data
+        // (SpriteBatch's mesh does this at every flush) is replaced as a whole and would only pay for the copy.
         final boolean dynamic = usage == 0x88E8 || usage == 0x88E0; // GL_DYNAMIC_DRAW, GL_STREAM_DRAW
-        if (dynamic && size > 0) {
-            final ByteBuffer s = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder());
-            if (data != null) {
-                final ByteBuffer from = directBytes(data, size).duplicate();
-                from.limit(Math.min(from.limit(), from.position() + size));
-                s.put(from);
-            }
-            b.shadow = s;
-        } else {
-            b.shadow = null;
-        }
+        if (dynamic && data == null && size > 0) b.shadow = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder());
+        else b.shadow = null;
     }
 
     @Override public void glBufferSubData (int target, int offset, int size, Buffer data) {

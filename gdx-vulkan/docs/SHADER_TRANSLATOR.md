@@ -59,6 +59,13 @@ or `new VulkanShaderProgram` gets it, and a match gets the dedicated, build-time
 `PolygonSpriteBatch`, `shape` for `ShapeRenderer`'s `ImmediateModeRenderer20`; the shape shader's sub-pixel line nudge is written by the GL shim for lines and points).
 Any other source goes through the translator.
 
+## The bundle
+libGDX's `DefaultShader` and `DepthShader` are flag-driven (the flags are `#define`s that also size the light arrays), so they are not replaced by hand-written
+shaders. They are translated and compiled at build time instead: `gradlew :gdx-vulkan-desktop:recordShaderBundle` draws a matrix of materials, vertex layouts and lights
+through a stock `ModelBatch` and keeps every program in `gdx-vulkan-core/src/main/resources/shaders/bundle`, one file per code path and variant, named by the
+same hash the disk cache uses (it includes the translator and compiler versions, so a changed translator makes the files unreachable and
+`BundledShadersTest` fails). A variant outside the matrix is translated at run time and cached on disk.
+
 ## What it refuses (with a message naming the shader, the line and the construct)
 `samplerCube` and 3D samplers (the texture shim has no cube textures yet), samplers passed to functions, structs with array or matrix members or used as anything but a uniform type (a uniform struct of floats, ints and vectors, or an array of them, is supported), `bool` arrays, a
 program with more samplers than the path allows, uniform data over 16 KB, desktop GL built-ins that have no Vulkan meaning (`gl_ModelViewMatrix`, `ftransform`).

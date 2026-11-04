@@ -58,9 +58,22 @@ public class VulkanShaderProgram implements Disposable {
     /** How many programs were created from the cache instead of being compiled (for tests and diagnostics). */
     public static int cacheHits;
 
+    /** Set by the {@code recordShaderBundle} task: every program built is saved in this folder, to be shipped in the jar. */
+    private static final File RECORD = System.getProperty("gdxvulkan.recordShaders") == null ? null : new File(System.getProperty("gdxvulkan.recordShaders"));
+    /** How many programs came from the bundle compiled with the library (for tests and diagnostics). */
+    private static volatile int bundleHits;
+
+    public static int bundledShaderHits () {
+        return bundleHits;
+    }
+
     private static File cacheDirectory () {
         if (!cacheDirectoryChosen) {
             cacheDirectoryChosen = true;
+            if (RECORD != null) {
+                cacheDirectory = RECORD;
+                return cacheDirectory;
+            }
             if (cacheDirectory == null && Gdx.files != null) {
                 try {
                     cacheDirectory = Gdx.files.local("gdxvk-shader-cache").file();
@@ -203,7 +216,10 @@ public class VulkanShaderProgram implements Disposable {
             return b;
         }
         final File cache = cacheDirectory();
-        final ShaderCache.Entry cached = cache == null ? null : ShaderCache.load(cache, key);
+        // Programs compiled when the library was built (the variants of libGDX's own DefaultShader and DepthShader). Not while recording a new bundle.
+        final ShaderCache.Entry bundled = RECORD == null ? ShaderCache.loadBundled(key) : null;
+        final ShaderCache.Entry cached = bundled != null ? bundled : cache == null ? null : ShaderCache.load(cache, key);
+        if (bundled != null) bundleHits++;
         final Built built = new Built();
         if (cached != null) {
             cacheHits++;
