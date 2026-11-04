@@ -87,7 +87,7 @@ public final class Gate5Scenes {
     private Gate5Scenes() {}
 
     public static Scene[] all() {
-        Scene[] all = {new Models(), new Knight(), new FogInstances(), new Textures(), new Shadows(), new NormalMap()};
+        Scene[] all = {new Models(), new Knight(), new FogInstances(), new Textures(), new Shadows(), new NormalMap(), new CascadedShadows()};
         final String only = System.getenv("GDXVK_G5_ONLY"); // diagnosis: run one scene
         if (only == null) return all;
         for (Scene sc : all) if (sc.name().contains(only)) return new Scene[] {sc};
@@ -534,6 +534,93 @@ public final class Gate5Scenes {
             if (normalMap != null) normalMap.dispose();
             model = plain2 = null;
             normalMap = null;
+            instances.clear();
+        }
+    }
+
+    /** Cascaded shadow maps (beyond stock, which has one map): columns down a long road, near and far, all shadowed. Tier A. */
+    private static final class CascadedShadows implements Scene {
+        private Model floor, column;
+        private final Array<ModelInstance> instances = new Array<ModelInstance>();
+        private io.github.slebed.gdxvulkan.g3d.VulkanCascadedShadowLight light;
+        private Environment environment;
+
+        @Override public String name() { return "gate5_cascades"; }
+
+        @Override public boolean runsOnTierB() { return false; }
+
+        @Override public boolean hasStockReference() { return false; }
+
+        @Override public void prepare(FileHandle data) {
+            final int usage = Usage.Position | Usage.Normal;
+            ModelBuilder mb = new ModelBuilder();
+            floor = mb.createBox(60f, 0.2f, 120f, new Material(ColorAttribute.createDiffuse(0.75f, 0.75f, 0.7f, 1f)), usage);
+            column = mb.createBox(1.2f, 4f, 1.2f, new Material(ColorAttribute.createDiffuse(0.85f, 0.3f, 0.2f, 1f)), usage);
+            instances.add(new ModelInstance(floor, 0f, -0.1f, -30f));
+            for (int i = 0; i < 8; i++) {
+                final float z = -3f - i * i * 1.1f - i * 2f; // spreading out with distance: the far ones are small and need a cascade of their own
+                instances.add(new ModelInstance(column, -3.5f, 2f, z));
+                instances.add(new ModelInstance(column, 3.5f, 2f, z - 2f));
+            }
+            light = new io.github.slebed.gdxvulkan.g3d.VulkanCascadedShadowLight(1024, 3, 0.5f, 70f, 0.7f, 40f);
+            light.set(0.9f, 0.86f, 0.78f, -0.55f, -1f, -0.35f);
+            environment = new Environment();
+            environment.set(new ColorAttribute(ColorAttribute.AmbientLight, 0.3f, 0.3f, 0.35f, 1f));
+            environment.add(light);
+            environment.shadowMap = light;
+        }
+
+        @Override public void draw(ModelApi api, int width, int height) {
+            PerspectiveCamera camera = new PerspectiveCamera(55f, width, height);
+            camera.position.set(0f, 4.5f, 8f);
+            camera.lookAt(0f, 0.5f, -30f);
+            camera.near = 0.5f;
+            camera.far = 80f;
+            camera.update();
+
+            light.update(camera);
+            ModelApi shadowPass = api.depth();
+            for (int i = 0; i < light.cascades(); i++) {
+                light.begin(i);
+                shadowPass.begin(light.camera(i));
+                shadowPass.render(instances);
+                shadowPass.end();
+                light.end(i);
+            }
+            shadowPass.dispose();
+
+            Gdx.gl.glViewport(0, 0, width, height);
+            Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+            api.begin(camera);
+            api.render(instances, environment);
+            api.end();
+        }
+
+        /** Shadows must reach the far columns too: both a near and a far band of the road show lit and shadowed ground. */
+        @Override public void verify(byte[] px, int w, int h) {
+            final int[] bands = {(int)(h * 0.80), (int)(h * 0.50)}; // nearer ground, farther ground (row 0 is the top)
+            for (int band : bands) {
+                float lo = 255, hi = 0;
+                for (int y = band - 6; y < band + 6; y++) {
+                    for (int x = 0; x < w; x++) {
+                        final int o = (y * w + x) * 4;
+                        if (Math.abs((px[o] & 255) - (px[o + 2] & 255)) > 40) continue; // not the grey-beige ground (a column)
+                        final float l = 0.299f * (px[o] & 255) + 0.587f * (px[o + 1] & 255) + 0.114f * (px[o + 2] & 255);
+                        if (l < 5) continue; // background
+                        lo = Math.min(lo, l);
+                        hi = Math.max(hi, l);
+                    }
+                }
+                if (!(hi > 1.5f * lo)) throw new AssertionError("no shadow on the ground in the band at row " + band + ": luminance " + lo + " to " + hi);
+            }
+        }
+
+        @Override public void dispose() {
+            if (light != null) light.dispose();
+            if (floor != null) floor.dispose();
+            if (column != null) column.dispose();
+            light = null;
+            floor = column = null;
             instances.clear();
         }
     }

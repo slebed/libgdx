@@ -21,6 +21,7 @@ layout(constant_id = 13) const bool C_SPECULAR_TEX = false;
 layout(constant_id = 14) const bool C_EMISSIVE_TEX = false;
 layout(constant_id = 15) const bool C_SPECULAR_COLOR = false;
 layout(constant_id = 16) const bool C_SHADOW = false;
+layout(constant_id = 18) const int C_CASCADES = 1;          // cascades of the shadow map (1: the plain map; 2..4: VulkanCascadedShadowLight)
 layout(constant_id = 17) const bool C_NORMAL_TEX = false;  // a normal map: lighting is done per pixel (stock's default shader has no normal mapping)
 layout(constant_id = 9) const int C_NUM_DIR = 0;
 layout(constant_id = 10) const int C_NUM_POINT = 0;
@@ -91,7 +92,37 @@ float getShadowness(vec2 offset) {
     return step(v_shadowUv.z, dot(texture(GDX_TEXTURE(slot), v_shadowUv.xy + offset), bitShifts));
 }
 
+// Cascaded shadow maps: the cascade is chosen by the fragment's distance along the view direction (perspective projection:
+// 1 / gl_FragCoord.w is the clip-space w, which is the view depth). Cascade 0 is the plain shadow map's matrix and slot.
+mat4 loadMat4(int at) {
+    return mat4(gdx_data[at], gdx_data[at + 1], gdx_data[at + 2], gdx_data[at + 3]);
+}
+
+float getCascadedShadow() {
+    const float depth = 1.0 / gl_FragCoord.w;
+    const vec4 splits = gdx_data[53];
+    int c = 0;
+    if (depth > splits.x) c = 1;
+    if (depth > splits.y) c = 2;
+    if (depth > splits.z) c = 3;
+    c = min(c, C_CASCADES - 1);
+    const mat4 m = c == 0 ? loadMat4(36) : loadMat4(41 + (c - 1) * 4);
+    const vec4 sp = m * vec4(v_worldPos, 1.0);
+    vec3 uv = (sp.xyz / sp.w) * 0.5 + 0.5;
+    uv.z = min(uv.z, 0.998);
+    const int slot = c == 0 ? floatBitsToInt(gdx_data[H_SHADOWP].y) : floatBitsToInt(gdx_data[54][c - 1]);
+    const float o = gdx_data[H_SHADOWP].x;
+    const vec4 bitShifts = vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0);
+    float lit = 0.0;
+    lit += step(uv.z, dot(texture(GDX_TEXTURE(slot), uv.xy + vec2(o, o)), bitShifts));
+    lit += step(uv.z, dot(texture(GDX_TEXTURE(slot), uv.xy + vec2(-o, o)), bitShifts));
+    lit += step(uv.z, dot(texture(GDX_TEXTURE(slot), uv.xy + vec2(o, -o)), bitShifts));
+    lit += step(uv.z, dot(texture(GDX_TEXTURE(slot), uv.xy + vec2(-o, -o)), bitShifts));
+    return lit * 0.25;
+}
+
 float getShadow() {
+    if (C_CASCADES > 1) return getCascadedShadow();
     const float o = gdx_data[H_SHADOWP].x;
     return (getShadowness(vec2(o, o)) + getShadowness(vec2(-o, o)) + getShadowness(vec2(o, -o)) + getShadowness(vec2(-o, -o))) * 0.25;
 }

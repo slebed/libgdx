@@ -12,6 +12,9 @@
 //   35      fog colour
 //   36..39  shadow map projViewTrans (columns)
 //   40      {shadow PCF offset, shadow texture slot (int bits), -, -}
+//   41..52  cascades 1..3 of a cascaded shadow map: projViewTrans (columns), 4 vec4s each
+//   53      {split 0, split 1, split 2 (view-space distances), -}
+//   54      {texture slot of cascade 1, 2, 3 (int bits), -}
 //   41..    one record of 15 per renderable (instances are consecutive records), selected by gdx_pc.u_indices.x + gl_InstanceIndex * 15:
 //           0..3 world, 4..6 normal matrix (columns), 7 diffuse colour, 8 specular colour, 9 emissive colour,
 //           10 {shininess, opacity, alphaTest, bone matrices start (vec4 index, 4 per matrix)}, 11 diffuse UV transform {offsetU, offsetV, scaleU, scaleV},
@@ -81,7 +84,7 @@ layout(location = 10) out vec3 v_worldPos;
 layout(location = 11) out vec3 v_worldNormal;
 layout(location = 12) out vec2 v_normalUV;
 
-const int H_AMBIENT = 5, H_DIR = 11, H_POINT = 19, H_FOGCOLOR = 35, H_SHADOW = 36, HEADER = 41, RECORD = 15;
+const int H_AMBIENT = 5, H_DIR = 11, H_POINT = 19, H_FOGCOLOR = 35, H_SHADOW = 36, HEADER = 55, RECORD = 15;
 
 mat4 loadMat4(int at) {
     return mat4(gdx_data[at], gdx_data[at + 1], gdx_data[at + 2], gdx_data[at + 3]);

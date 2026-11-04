@@ -73,7 +73,7 @@ public class VulkanModelBatch implements Disposable {
     public static final int MAX_DIRECTIONAL_LIGHTS = 4, MAX_POINT_LIGHTS = 8;
 
     // Layout of the data blob in vec4 units; mirrors model_default_vertex.glsl.
-    private static final int H_PROJVIEW = 0, H_CAMERA = 4, H_AMBIENT = 5, H_DIR = 11, H_POINT = 19, H_FOG = 35, H_SHADOW = 36, H_SHADOWP = 40, HEADER = 41,
+    private static final int H_PROJVIEW = 0, H_CAMERA = 4, H_AMBIENT = 5, H_DIR = 11, H_POINT = 19, H_FOG = 35, H_SHADOW = 36, H_SHADOWP = 40, H_CASCADE = 41, H_CASCADEP = 53, H_CASCADES = 54, HEADER = 55,
         RECORD = 15;
 
     /** The number of directional and point lights the shaders evaluate; the stock {@code DefaultShader.Config} defaults. */
@@ -430,9 +430,23 @@ public class VulkanModelBatch implements Disposable {
             final int nativeId = nativeTexture(t);
             putF(H_SHADOWP * 4, 1f / (2f * t.getWidth())); // u_shadowPCFOffset
             words[H_SHADOWP * 4 + 1] = gl.slotOf(nativeId);
+            if (shadow instanceof VulkanCascadedShadowLight) {
+                final VulkanCascadedShadowLight c = (VulkanCascadedShadowLight)shadow;
+                for (int k = 1; k < c.cascades(); k++) {
+                    putMatrix4(H_CASCADE + (k - 1) * 4, c.projViewTrans(k));
+                    final Texture ct = bindTextureState(c.depthMap(k));
+                    words[H_CASCADES * 4 + k - 1] = gl.slotOf(nativeTexture(ct));
+                }
+                putVec4(H_CASCADEP, c.split(0), c.split(1), c.split(2), 0);
+            }
         } else {
             putVec4(H_SHADOWP, 0, 0, 0, 0);
         }
+    }
+
+    private int cascadesOf (Environment env) {
+        final ShadowMap s = shadowOf(env);
+        return s instanceof VulkanCascadedShadowLight ? ((VulkanCascadedShadowLight)s).cascades() : 1;
     }
 
     /** The environment's shadow map, where this tier can use it (the main shader would need a second texture on Tier B). */
@@ -747,7 +761,7 @@ public class VulkanModelBatch implements Disposable {
             d.specConstants = new int[] {lighting ? 1 : 0, tex ? 1 : 0, diffuse != null ? 1 : 0, specAny ? 1 : 0, emissive != null ? 1 : 0,
                 blend != null ? 1 : 0, blend != null && alphaTest != null ? 1 : 0, shininess != null ? 1 : 0,
                 config.numDirectionalLights, config.numPointLights, (mask & 2) != 0 ? 1 : 0, fog ? 1 : 0, specTex ? 1 : 0, emiTex ? 1 : 0,
-                specular != null ? 1 : 0, shadow ? 1 : 0, normalMap ? 1 : 0};
+                specular != null ? 1 : 0, shadow ? 1 : 0, normalMap ? 1 : 0, shadow ? cascadesOf(r.environment) : 1};
             key.append('|').append(java.util.Arrays.toString(d.specConstants));
             vert = "model_default_v" + mask + (bones > 0 ? "b" + bones : "") + ".vert";
             name = "model:" + mask + "b" + bones;
