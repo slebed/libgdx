@@ -47,7 +47,7 @@ import java.util.concurrent.TimeUnit;
  * and surface) is destroyed. The context, the textures, buffers and framebuffers, and the application's own objects stay resident, so
  * nothing is "managed" and nothing is reloaded when the surface comes back: a new presenter is created and the application resumes drawing.
  */
-public class VulkanAndroidGraphics implements Graphics, SurfaceHolder.Callback {
+public class VulkanAndroidGraphics implements Graphics, SurfaceHolder.Callback, io.github.slebed.gdxvulkan.GdxVkFrameSource {
     private static final String TAG = "VulkanAndroidGraphics";
 
     final SurfaceView view;

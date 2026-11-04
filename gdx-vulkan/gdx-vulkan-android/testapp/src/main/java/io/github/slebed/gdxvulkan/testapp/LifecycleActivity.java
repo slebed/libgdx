@@ -79,7 +79,7 @@ public class LifecycleActivity extends VulkanAndroidApplication {
         private boolean streaming;
 
         @Override public void create() {
-            batch = new VulkanSpriteBatch(getVulkanGraphics().getFrame());
+            batch = new VulkanSpriteBatch(); // the frame is found through Gdx.graphics
             Pixmap pm = new Pixmap(4, 4, Pixmap.Format.RGBA8888);
             int[][] c = {{255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {255, 255, 0}}; // top-left, top-right, bottom-left, bottom-right
             for (int q = 0; q < 4; q++) {

@@ -40,6 +40,11 @@ public final class VulkanSpriteBatchInstanced implements Disposable {
     private boolean disposed;
 
     /** @param capacity the most sprites this batch can hold; the buffer is {@code 16 * capacity} bytes */
+    public VulkanSpriteBatchInstanced(int capacity) {
+        this(GdxVkFrame.current(), capacity);
+    }
+
+    /** @param capacity the most sprites this batch can hold; the buffer is {@code 16 * capacity} bytes */
     public VulkanSpriteBatchInstanced(GdxVkFrame frame, int capacity) {
         if (capacity <= 0) throw new IllegalArgumentException("capacity must be positive");
         this.frame = frame;

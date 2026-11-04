@@ -43,7 +43,7 @@ class DesktopApplicationTest {
         @Override public void create () {
             app = (VulkanDesktopApplication)Gdx.app;
             window = app.getWindowHandle();
-            batch = new VulkanSpriteBatch(app.getFrame());
+            batch = new VulkanSpriteBatch(); // finds the application's frame itself
             Pixmap pm = new Pixmap(2, 2, Pixmap.Format.RGBA8888);
             int[][] c = {{255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {255, 255, 0}};
             for (int q = 0; q < 4; q++) {

@@ -72,6 +72,11 @@ public class VulkanGpuInstances implements Disposable {
      * @param texture drawn on every instance (modulated by a per-instance tint), or null
      * @param userUints size in 32-bit words of the region after the cluster lists that your own compute shaders may use
      */
+    /** Draws into the running application's frame ({@link GdxVkFrame#current()}); see the other constructor for the parameters. */
+    public VulkanGpuInstances (Mesh mesh, Texture texture, int maxInstances, int maxLights, int userUints) {
+        this(GdxVkFrame.current(), mesh, texture, maxInstances, maxLights, userUints);
+    }
+
     public VulkanGpuInstances (GdxVkFrame frame, Mesh mesh, Texture texture, int maxInstances, int maxLights, int userUints) {
         if (mesh.getNumIndices() == 0) throw new IllegalArgumentException("the mesh needs indices");
         this.frame = frame;

@@ -341,7 +341,9 @@ public class VulkanDesktopApplication implements Application {
 
     // ---- Graphics
 
-    private final class Gfx extends AbstractGraphics implements DesktopInputHost {
+    private final class Gfx extends AbstractGraphics implements DesktopInputHost, io.github.slebed.gdxvulkan.GdxVkFrameSource {
+        @Override public GdxVkFrame getFrame () { return frame; }
+
         int logicalW, logicalH, backW, backH;
         float deltaTime;
         long frameId;

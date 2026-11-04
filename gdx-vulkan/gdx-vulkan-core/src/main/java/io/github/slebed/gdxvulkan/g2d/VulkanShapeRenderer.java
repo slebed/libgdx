@@ -107,6 +107,15 @@ public class VulkanShapeRenderer implements Disposable {
 	private boolean autoShapeType;
 	private float defaultRectLineWidth = 0.75f;
 
+	/** Like stock's {@code new ShapeRenderer()}: draws into the running application's frame ({@link GdxVkFrame#current()}). */
+	public VulkanShapeRenderer () {
+		this(GdxVkFrame.current(), 5000);
+	}
+
+	public VulkanShapeRenderer (int maxVertices) {
+		this(GdxVkFrame.current(), maxVertices);
+	}
+
 	public VulkanShapeRenderer (GdxVkFrame frame) {
 		this(frame, 5000);
 	}

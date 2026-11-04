@@ -129,8 +129,7 @@ public class MyGame extends ApplicationAdapter {
     Texture img;                                                   // unchanged: the stock Texture
 
     @Override public void create() {
-        GdxVkFrame frame = ((VulkanDesktopApplication)Gdx.app).getFrame();
-        batch = new VulkanSpriteBatch(frame);                      // was new SpriteBatch()
+        batch = new VulkanSpriteBatch();                           // was new SpriteBatch()
         img = new Texture("badlogic.jpg");
     }
 
@@ -150,7 +149,10 @@ public static void main(String[] args) {
 ```
 
 `VulkanSpriteBatch` implements the stock `Batch` interface, so anything that takes a `Batch` takes it: `Stage`, `BitmapFont.draw`, `ParticleEffect.draw`,
-`Image`, and so on.
+`Image`, and so on. (`new Stage(viewport)` makes a stock `SpriteBatch` for itself, so write `new Stage(viewport, new VulkanSpriteBatch())`.)
+
+The batches find the running application's frame through `Gdx.graphics`, so create them in `create()` or later, as you would stock ones. If you build the
+Vulkan context yourself (a test, a tool), pass the frame explicitly: `new VulkanSpriteBatch(frame)`.
 
 ### Moving an existing game over
 
@@ -158,10 +160,10 @@ public static void main(String[] args) {
 |---|---|---|
 | `Lwjgl3Application` | `VulkanDesktopApplication` | `Gdx.graphics`, `Gdx.input`, `Gdx.files`, `Gdx.audio`, `Gdx.net` are all set as usual |
 | `AndroidApplication` | `VulkanAndroidApplication` | see below |
-| `SpriteBatch` | `VulkanSpriteBatch(frame)` | a `Batch`: pass it to `Stage`, fonts, particles |
-| `PolygonSpriteBatch` | `VulkanPolygonSpriteBatch(frame)` | |
-| `ShapeRenderer` | `VulkanShapeRenderer(frame)` | |
-| `ModelBatch` | `VulkanModelBatch(frame)` | same `begin / render(instances, environment) / end` |
+| `SpriteBatch` | `VulkanSpriteBatch` | a `Batch`: pass it to `Stage`, fonts, particles. Same constructors: `()` and `(size)` |
+| `PolygonSpriteBatch` | `VulkanPolygonSpriteBatch` | |
+| `ShapeRenderer` | `VulkanShapeRenderer` | |
+| `ModelBatch` | `VulkanModelBatch` | same `begin / render(instances, environment) / end` |
 | `Texture`, `Pixmap`, `TextureAtlas`, `FrameBuffer`, `Mesh`, `BitmapFont`, `Stage`, `AssetManager`, `Model`, `Environment`, `Camera` | **unchanged** | these run on the shim as they are |
 | `ShaderProgram` (GLSL source) | SPIR-V shader bundle (`VulkanShaderPipelineBundle`) | write GLSL as before, compile it with `glslc` at build time; the batches' own shaders in `gdx-vulkan-core/src/main/shaders` are the examples |
 | `Gdx.gl.glDrawArrays`, `glUseProgram`, ... | not supported | use the batches, or a compute shader |
@@ -179,20 +181,19 @@ public class MyActivity extends VulkanAndroidApplication {          // was Andro
     }
 }
 
-// in MyGame.create():
-GdxVkFrame frame = ((VulkanAndroidApplication)Gdx.app).getVulkanGraphics().getFrame();
-batch = new VulkanSpriteBatch(frame);
+// in MyGame.create(), exactly as on the desktop:
+batch = new VulkanSpriteBatch();
 ```
 
 Declare `android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|density"` on the activity so a rotation arrives
-as a surface change. The `frame` object stays valid for the life of the app; the swapchain behind it is replaced whenever the surface is, and textures and
+as a surface change. The batches stay valid for the life of the app; the swapchain behind them is replaced whenever the surface is, and textures and
 buffers survive that. Pre-rotation (the shaders, not the compositor, rotate the image) is on by default, and `Gdx.graphics.getWidth/Height`, `glViewport` and
 `glScissor` stay in the logical orientation. Frames are paced with Android Frame Pacing (Swappy) when vsync is on.
 
 ### 3D
 
 ```java
-VulkanModelBatch batch = new VulkanModelBatch(frame);              // the stock ModelBatch API
+VulkanModelBatch batch = new VulkanModelBatch();                   // the stock ModelBatch API
 Environment env = new Environment();
 env.set(new ColorAttribute(ColorAttribute.AmbientLight, 0.3f, 0.3f, 0.35f, 1f));
 env.add(new DirectionalLight().set(1f, 1f, 0.9f, -0.5f, -1f, -0.3f));
@@ -210,10 +211,10 @@ Ask for a depth buffer once with `presenter.setDepth(GdxVkPresenter.DEPTH)` (the
 This is the part with no OpenGL equivalent in libGDX:
 
 ```java
-VulkanGpuInstances gpu = new VulkanGpuInstances(frame, mesh, texture, 250_000, 500, userUints);
+VulkanGpuInstances gpu = new VulkanGpuInstances(mesh, texture, 250_000, 500, userUints);
 gpu.setInstances(data, count);               // position + scale, rotation, and 4 floats of your own state per instance
 gpu.setLights(lights, lightCount);           // position + radius, colour + intensity
-new VulkanComputeShader(frame, "boids", "boids.comp").dispatch(groups, push, gpu.buffer());   // your simulation, on the GPU
+new VulkanComputeShader("boids", "boids.comp").dispatch(groups, push, gpu.buffer());   // your simulation, on the GPU
 gpu.render(camera, width, height);           // culls, sorts the lights into clusters, draws once
 ```
 The transforms never leave GPU memory. `Stress5Main` is a complete program; `VulkanSpriteBatchInstanced` does the same for a million sprites.

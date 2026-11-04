@@ -51,6 +51,19 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
     public int totalRenderCalls = 0;
     public int maxTrianglesInBatch = 0;
 
+    /** Like stock's {@code new PolygonSpriteBatch()}: draws into the running application's frame ({@link GdxVkFrame#current()}). */
+    public VulkanPolygonSpriteBatch () {
+        this(GdxVkFrame.current(), 2000);
+    }
+
+    public VulkanPolygonSpriteBatch (int size) {
+        this(GdxVkFrame.current(), size);
+    }
+
+    public VulkanPolygonSpriteBatch (int maxVertices, int maxTriangles) {
+        this(GdxVkFrame.current(), maxVertices, maxTriangles);
+    }
+
     public VulkanPolygonSpriteBatch (GdxVkFrame frame) {
         this(frame, 2000);
     }

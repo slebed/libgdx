@@ -35,6 +35,19 @@ public final class GdxVkFrame {
     private final ByteBuffer[] blockCache = new ByteBuffer[8];
     private boolean open;
 
+    /**
+     * The running application's frame: what the batches' no-argument constructors use. Works when {@code Gdx.graphics} is the one of a
+     * gdx-vulkan application; code that builds its own context and frame passes it to the constructors instead.
+     */
+    public static GdxVkFrame current () {
+        if (com.badlogic.gdx.Gdx.graphics instanceof GdxVkFrameSource) {
+            final GdxVkFrame frame = ((GdxVkFrameSource)com.badlogic.gdx.Gdx.graphics).getFrame();
+            if (frame != null) return frame;
+        }
+        throw new IllegalStateException("No gdx-vulkan frame: create the batch in ApplicationListener.create() of a VulkanDesktopApplication or "
+            + "VulkanAndroidApplication, or pass the frame to the constructor (new VulkanSpriteBatch(frame)).");
+    }
+
     public GdxVkFrame(GdxVkContext context, GdxVkPresenter presenter, VulkanGL20 gl) {
         this.context = context;
         this.presenter = presenter;

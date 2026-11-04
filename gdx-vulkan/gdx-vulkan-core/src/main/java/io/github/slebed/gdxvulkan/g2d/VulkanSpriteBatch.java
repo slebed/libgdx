@@ -60,6 +60,16 @@ public class VulkanSpriteBatch extends VulkanSpriteBatchDraws implements VulkanG
     public int totalRenderCalls = 0;
     public int maxSpritesInBatch = 0;
 
+    /** Like stock's {@code new SpriteBatch()}: draws into the running application's frame ({@link GdxVkFrame#current()}). */
+    public VulkanSpriteBatch () {
+        this(GdxVkFrame.current(), 1000);
+    }
+
+    /** Like stock's {@code new SpriteBatch(size)}. */
+    public VulkanSpriteBatch (int size) {
+        this(GdxVkFrame.current(), size);
+    }
+
     public VulkanSpriteBatch (GdxVkFrame frame) {
         this(frame, 1000);
     }

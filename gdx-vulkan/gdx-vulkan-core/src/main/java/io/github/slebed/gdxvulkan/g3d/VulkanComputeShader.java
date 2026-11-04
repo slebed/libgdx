@@ -22,6 +22,11 @@ public final class VulkanComputeShader {
     private final String key, resource;
 
     /** @param key identifies the shader in the frame's pipeline cache; @param resource the shader resource, such as {@code "gpu_cull.comp"} */
+    public VulkanComputeShader (String key, String resource) {
+        this(GdxVkFrame.current(), key, resource);
+    }
+
+    /** @param key identifies the shader in the frame's pipeline cache; @param resource the shader resource, such as {@code "gpu_cull.comp"} */
     public VulkanComputeShader (GdxVkFrame frame, String key, String resource) {
         this.frame = frame;
         this.key = key;

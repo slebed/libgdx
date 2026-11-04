@@ -124,6 +124,19 @@ public class VulkanModelBatch implements Disposable {
     private boolean blending, depthMask;
     private int blendSrc, blendDst;
 
+    /** Like stock's {@code new ModelBatch()}: draws into the running application's frame ({@link GdxVkFrame#current()}). */
+    public VulkanModelBatch () {
+        this(GdxVkFrame.current(), new DefaultRenderableSorter(), new Config(), false);
+    }
+
+    public VulkanModelBatch (RenderableSorter sorter) {
+        this(GdxVkFrame.current(), sorter, new Config(), false);
+    }
+
+    public VulkanModelBatch (RenderableSorter sorter, Config config) {
+        this(GdxVkFrame.current(), sorter, config, false);
+    }
+
     public VulkanModelBatch (GdxVkFrame frame) {
         this(frame, new DefaultRenderableSorter(), new Config(), false);
     }
