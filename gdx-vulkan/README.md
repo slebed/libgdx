@@ -1,161 +1,251 @@
 # gdx-vulkan
 
-A Vulkan renderer for libGDX, built as a standalone library on **stock libGDX** (1.14.2 today; 1.14.3 is not on Maven Central yet). No fork of
-libGDX is needed: unmodified `Texture`, `Pixmap`, `SpriteBatch`, `FrameBuffer`, Scene2D, `BitmapFont` and friends run against Vulkan through a
-GL20 shim, and the result is compared with stock libGDX on OpenGL.
+A Vulkan renderer for [libGDX](https://libgdx.com). It draws with Vulkan instead of OpenGL, on **unmodified libGDX** (1.14.2): no fork, no patched jars.
+Your `Texture`, `Pixmap`, `FrameBuffer`, `BitmapFont`, Scene2D `Stage`, `ModelBatch` code and the rest of the libGDX API keep working; you swap the
+renderer underneath them.
 
-`docs/PLAN.md` has the architecture and the phases; `docs/CHECKLIST.md` is the item-by-item state (155 done, 9 partial, 5 not started, of 169; what is left is Phase 6 (tabled, needs a Mac), the Galaxy S20, an Android GPU Inspector capture, running the other Android ABIs, spot lights and point-light shadows (stock has neither), filing the upstream PR, and the 1.14.3 bump),
-marking only what has been built **and verified**.
+## Why
+
+- **Speed where OpenGL is slow.** Switching textures is cheap in Vulkan. A scene drawn from many separate textures runs up to 24 times faster than stock libGDX
+  on the same machine (see [Performance](#performance)), and a game that already uses atlases still gains 20%.
+- **The GPU can do work OpenGL could not give you.** Compute shaders, indirect draws and GPU-side culling are available from libGDX: one million sprites
+  moved by a compute shader at 722 frames per second on a 2018 graphics card; 250,000 lit 3D meshes at 495.
+- **No fork to maintain.** gdx-vulkan implements libGDX's own `GL20` interface on top of Vulkan, so the stock classes run as they are. When libGDX is updated,
+  you update libGDX.
+- **Android that survives the lifecycle.** The Vulkan surface can be destroyed and recreated (rotation, background, foreground) without reloading a single
+  texture: recreation takes about 2 ms on the phone we test with. There is no "managed texture" reload.
 
 ## Status
 
-| Phase | State |
+Beta. Everything below is built and tested against stock libGDX on OpenGL, with the Vulkan validation layers on.
+
+| Works today | |
 |---|---|
-| 1a Surfaces, swapchain, golden harness, CI | done; Windows, Linux (lavapipe) and Android; the only gaps are other ABIs and Wayland/macOS |
-| 1b Memory, layout and caches | done: two-set layout, deferred deletion, frame rings, staging, pipeline cache, shader reflection, 10-minute soaks (RTX 5080 in both tiers, RTX 2080 in Tier A, Adreno 840 in both tiers) |
-| 2 Unmodified 2D | done: sprite batches, polygon batch, shape renderer, compressed textures, shader bundles, `VulkanSpriteBatchInstanced` (1,000,000 sprites moved by compute); every Stress 2 target met |
-| 3 Stock `FrameBuffer` | done: colour, depth and stencil framebuffers, `VulkanMultiTargetFrameBuffer` (several and floating-point attachments), GL cull/depth/stencil state, pass scheduling, Gate 3 scenes, Stress test 3. Not done: reordering offscreen passes that come after a swapchain draw |
-| 4 Android lifecycle | done apart from Swappy frame pacing, `VK_KHR_swapchain_maintenance1` and an Android GPU Inspector capture: `VulkanAndroidApplication` (stock input, audio and files), surface loss and recreation with everything resident (2 ms average), pre-rotation verified at all four angles on the phone, `onTrimMemory`, stock `AssetManager` texture streaming, Stress test 4 at 50 cycles, the 21-check device suite with the swapchain pre-rotated (both tiers) |
-| 5 3D with stock models | done apart from point-light shadows (stock has neither point-light shadows nor spot lights): stock `Mesh` data through the GL buffer shim, a swapchain depth buffer, `VulkanModelBatch` (the stock `ModelBatch` API on a port of the default shader: lights, specular, emissive, textures, normal maps, fog, one directional shadow map or a cascaded one (`VulkanCascadedShadowLight`), blending, skeletal animation, instancing), `VulkanComputeShader`, and GPU-driven instancing with compute culling, indirect draws and clustered point lights (`VulkanGpuInstances`). The animated knight and the `ModelBuilder` scenes match stock GL; Stress test 5 runs 250,000 boids and 500 lights at 495 fps on the RTX 2080 |
-| 6 macOS / iOS | tabled: it needs a Mac to build and test (stretch) |
+| 2D | `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `BitmapFont`, Scene2D, `TextureAtlas`, particles, compressed textures (ETC2, ASTC, ...), custom shaders (as SPIR-V) |
+| Framebuffers | the stock `FrameBuffer` (colour, depth, stencil), multiple and floating-point colour attachments |
+| 3D | `ModelBatch` with `ModelInstance`, `Environment`, directional and point lights, textures, normal maps, fog, skeletal animation, blending, shadow maps (one, or cascaded), instancing; models from `G3dModelLoader` or `ModelBuilder` |
+| GPU-driven | compute shaders, GPU culling, indirect drawing, clustered lighting for hundreds of lights |
+| Platforms | Windows x64, Linux x64 (X11), Android 10+ (arm64) |
+| Application | a desktop `Application` (`VulkanDesktopApplication`) and an Android one (`VulkanAndroidApplication`), with stock input, audio and files |
 
-**Two tiers.** Tier A (Vulkan 1.3: dynamic rendering, a bindless texture table, dynamic raster state) and Tier B (Vulkan 1.1: render passes,
-one descriptor set per texture, pipeline variants). `forceTierB` runs Tier B on any device, and every test runs in both.
-
-**Verified on** an RTX 5080 and an RTX 2080 (Windows), lavapipe in Docker and on GitHub Actions (Mesa pinned, exact goldens), and a REDMAGIC with
-an Adreno 840 (Android 16). Not the Galaxy S20 the plan names.
-
-## What the tests compare
-
-- **Stock GL oracle:** the Gate 2 and Gate 3 scenes are written once against stock `Batch`, `ShapeRenderer` and `FrameBuffer` and drawn by stock
-  libGDX on OpenGL and by gdx-vulkan. Both Gate 3 scenes match with zero differing pixels on lavapipe versus llvmpipe and on both GPUs, in both
-  tiers. Gate 2 matches too, except the shapes scene on lavapipe, which differs from llvmpipe by 116 pixels (0.18%) at line ends, within tolerance.
-- **Lavapipe goldens:** committed PNGs, exact on lavapipe, within a tolerance on a real GPU or the phone.
-- **Validation:** the layers, with synchronization validation, run in every test; any message fails it.
-
-## Measured
-
-| What | Result |
+| Not yet | |
 |---|---|
-| Stress 2, 20,000 sprites, 128 textures, Tier A | 24x stock GL (423 fps against 17.5) on the RTX 5080; Tier B 3.5-4x |
-| Stress 2, 1 texture | 1.2x stock GL (1,306 fps against 1,064; the target is 1.0x). It was 0.91x until the vertex ring got a device-local mirror |
-| 1,000,000 sprites moved by compute | 722 fps on the RTX 2080, 1,879 fps on the RTX 5080, 208-225 fps on the Adreno 840 (target 60+) |
-| Stress 3, 100,000 draws through the Java command stream | 1.0-1.3x a plain C++ loop on both GPUs (limit 1.3x); the phone is 1.2-1.8x run to run |
-| Stress 5, 250,000 instanced meshes moved by compute boids, culled and drawn indirectly, 500 clustered point lights, 1280x720 | RTX 2080 495 fps (1% low 259), RTX 5080 957-988 fps, both tiers, 1 byte of Java allocation per frame; Adreno 840 (1216x2688): 52 fps, and 781 fps at the plan's mobile load of 50,000 instances with 64 lights |
-| Stress 4, 50 rotate + background/foreground cycles with textures streaming (Adreno 840, Tier A, pre-rotation on) | 0 failures, picture read back after every step; surface recreation 2 ms average, 5 ms worst (target under 50 ms); native heap flat (26,091 KB at cycle 25, 26,117 KB at cycle 50). Tier B, 20 cycles: 0 failures, 2 ms average, 4 ms worst |
+| macOS and iOS | needs a Mac to build and test; not started |
+| Wayland | X11 only on Linux |
+| Custom GLSL at run time | shaders are compiled to SPIR-V at build time; `new ShaderProgram(vertexSource, fragmentSource)` is not supported |
+| Direct OpenGL drawing | `glDrawArrays`, `glUseProgram`, `Mesh.render(ShaderProgram)` and similar throw an exception that says which Vulkan class to use |
+| Spot lights, point-light shadows | libGDX's own default shader has neither |
+| Maven Central | not published yet; see [Getting it](#getting-it) |
 
-## Layout
-- `gdx-vulkan-core/` Java API and the C++ core (`jni/`: CMake, vendored volk, VMA, SPIRV-Reflect and Vulkan headers); shaders in `src/main/shaders`
-- `gdx-vulkan-desktop/` the desktop `Application` (`VulkanDesktopApplication`) on stock `gdx-backend-lwjgl3` GLFW, files, audio and networking, plus the desktop tests and stress programs
-- `gdx-vulkan-android/` separate Gradle build (AGP): `:library` and a `:testapp` that runs the self-test and the device suite. See its README
-- `ci/` the Docker image and script that run every test on lavapipe; `.github/workflows/ci.yml` runs it on GitHub
-- `tools/` generators for the GL20 base class and the batch draw code (generated from stock libGDX source so the oracle stays honest); see `tools/README.md`
-- `test-assets/` the skin, fonts and particle effects the Gate 2 and Gate 3 scenes load (libGDX's own test assets; see `NOTICE`)
-- `docs/` the plan, the checklist and the notes for Claude Code (`CLAUDE.md`)
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (155 of 169 items done).
 
-## Using 3D
-```java
-GdxVkPresenter presenter = ...;
-presenter.setDepth(GdxVkPresenter.DEPTH);              // a depth buffer on the screen (off by default)
-VulkanModelBatch batch = new VulkanModelBatch(frame);   // the stock ModelBatch API
-Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
-batch.begin(camera);
-batch.render(instances, environment);                   // stock ModelInstance, Environment, lights, animation
-batch.end();
+**Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), and a REDMAGIC phone with an
+Adreno 840 (Android 16). Other GPUs and drivers should work but have not been tried.
+
+## Performance
+
+Measured against stock libGDX 1.14.2 on OpenGL, on the same machine, same sprites, vsync off, 800x600. Reproduce with the commands in
+[`docs/TESTING.md`](docs/TESTING.md).
+
+| Test | Stock libGDX (OpenGL) | gdx-vulkan | |
+|---|---|---|---|
+| 20,000 sprites, each from one of **128 separate textures** (no atlas), RTX 5080 | 17.5 fps | 423 fps | **24x** |
+| 20,000 sprites, 128 separate textures, on drivers limited to Vulkan 1.1 | 17.5 fps | 61-70 fps | 3.5-4x |
+| 20,000 sprites, **one texture** (an atlas), RTX 5080 | 1,064 fps | 1,306 fps | 1.2x |
+| 1,000,000 sprites moved by a compute shader, RTX 2080 | not possible | 722 fps | |
+| 1,000,000 sprites moved by a compute shader, RTX 5080 / Adreno 840 phone | not possible | 1,879 fps / 208-225 fps | |
+| 250,000 instanced 3D meshes moved by compute, culled on the GPU, 500 point lights, RTX 2080 | not possible | 495 fps (1% low: 259) | |
+| The same on the phone, 1216x2688 | not possible | 52 fps; 781 fps with 50,000 meshes and 64 lights | |
+
+How to read these:
+- The first row is the case Vulkan helps most: every sprite switches texture. A game that packs its art into atlases is closer to the third row, about 1.2x.
+  The renderer started out slower than stock OpenGL on that row (0.91x) until vertex data got a copy in GPU memory.
+- Stock OpenGL cannot run the compute rows at all, so there is nothing to compare; they show what the extra control buys.
+- The Java layer is not the bottleneck: recording 100,000 draws through the Java API costs 1.0-1.3x a hand-written C++ loop, and the 3D benchmark allocates about 1
+  byte of Java garbage per frame.
+- The phone numbers are gdx-vulkan only. The same sprite test on the phone runs at 548 fps with one texture and 38 fps with 128; a stock OpenGL run on the phone
+  has not been done yet.
+- Android lifecycle: 50 rotate and background/foreground cycles with textures streaming in and out, 0 failures, surface recreation 2 ms on average (5 ms worst),
+  memory flat.
+
+Rendering matches stock libGDX: the test scenes are drawn by stock OpenGL and by gdx-vulkan and compared pixel by pixel. The framebuffer scenes are identical;
+the 2D and 3D scenes differ in at most 0.2% of pixels, at the ends of lines and edges.
+
+## Getting it
+
+gdx-vulkan is not on Maven Central yet. For now, add it to your Gradle build as a source dependency:
+
 ```
-Models come from stock `ModelBuilder` or `G3dModelLoader`; `Mesh.dispose()` releases the native buffers. `Gate5GoldenTest` compares scenes with stock `ModelBatch` on OpenGL.
-
-## GPU-driven instancing and lighting
-```java
-VulkanGpuInstances gpu = new VulkanGpuInstances(frame, mesh, texture, 250_000, 500, userUints);
-gpu.setInstances(data, count);               // 12 floats each: position + scale, rotation quaternion, 4 floats of your own state
-gpu.setLights(lights, lightCount);           // 8 floats each: position + radius, colour + intensity
-new VulkanComputeShader(frame, "boids", "boids.comp").dispatch(groups, push, gpu.buffer());   // your simulation, on the GPU
-gpu.render(camera, width, height);           // culls, sorts the lights into clusters, draws once, indirect
+git clone https://github.com/slebed/gdx-vulkan
 ```
-The transforms never leave GPU memory; the CPU's part of a frame is a 224-byte header write, five dispatches and one indirect draw. See
-`Stress5Main` for a complete program and `gpu_world.glsl` for the buffer layout.
+```groovy
+// settings.gradle of your project
+includeBuild('../gdx-vulkan')
 
-## Using it on the desktop
-```java
-VulkanDesktopConfiguration config = new VulkanDesktopConfiguration();
-config.title = "My game";
-config.width = 1280; config.height = 720;
-new VulkanDesktopApplication(new MyGame(), config);   // runs on this thread until the window closes
-```
-`Gdx.graphics`, `Gdx.input`, `Gdx.files`, `Gdx.audio`, `Gdx.net` and `Gdx.gl` are set, so the stock `Texture`, `Pixmap`, `FrameBuffer`, `Mesh`,
-`Stage` and the batches of this library work unchanged. Input is the stock LWJGL3 key mapping and event queue (a generated copy, see
-`tools/generate_desktop_input.py`). Not done: custom cursors (`newCursor` returns null), HiDPI `HdpiMode.Pixels`, and more than one window.
-
-## Using it on Android
-```java
-public class MyActivity extends VulkanAndroidApplication {
-    @Override protected void onCreate(Bundle b) {
-        super.onCreate(b);
-        initialize(new MyGame()); // or initialize(listener, androidConfig, new GdxVkConfig(), vsync)
-    }
+// build.gradle of your project
+dependencies {
+    implementation 'io.github.slebed.gdx-vulkan:gdx-vulkan-core'
+    implementation 'io.github.slebed.gdx-vulkan:gdx-vulkan-desktop'   // the desktop Application, GLFW and OpenAL (desktop only)
 }
 ```
-Declare `android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|density"` on the activity so a
-rotation arrives as a surface change. In `create()`, make the batches from `getVulkanGraphics().getFrame()`; that frame object stays valid for the life of
-the application, while the swapchain behind it is replaced whenever the surface is. Textures, buffers and framebuffers survive the surface being
-destroyed (no managed-texture reload). Pre-rotation is on by default (`GdxVkConfig.preRotate`): the compositor does not rotate, the shaders do, and
-`Gdx.graphics.getWidth/Height`, `glViewport` and `glScissor` stay in the logical orientation. A custom shader bundle must call `gdx_vk_clip()` (as
-`sprite.vert` does) for its output to be rotated. `VulkanDebugOverlay` shows renames, retired objects, samplers and staging blocks while you develop.
 
-## Build and test
-Prerequisites: JDK 11+ (class files target Java 8), CMake 3.20+, a C++17 compiler, the Vulkan loader, `glslc` (Vulkan SDK or the `glslc`
-package), and on Linux `libx11-dev`. For validation layers install the Vulkan SDK or your distro's validation layer package. For a software
-device on Linux: `mesa-vulkan-drivers` (lavapipe).
+Building needs a C++17 compiler, CMake 3.20+ and `glslc` (see [`docs/TESTING.md`](docs/TESTING.md)); the build compiles the native library for your machine's platform and bundles it into the jar, and compiles the shaders. At run time you
+need a GPU and driver with Vulkan 1.1 or newer (1.3 for the fastest path). Android uses its own Gradle build in `gdx-vulkan-android/`; see its README.
 
-```
-gradlew check -Dgdxvulkan.requireDriver=true                          # every test, validation + sync validation
-gradlew check -Dgdxvulkan.requireDriver=true -Dgdxvulkan.forceTierB=true
-gradlew check -Dgdxvulkan.requireDriver=true -Dgdxvulkan.device=1     # the second GPU
-gradlew check ... -Dgdxvulkan.requireGl=true                          # fail instead of skip when the stock-GL images are missing
-```
-Native only: `cmake -S gdx-vulkan-core/jni -B build/native && cmake --build build/native && ctest --test-dir build/native`.
+## Using it
 
-Without a Vulkan driver the driver tests skip; `-Dgdxvulkan.requireDriver=true` turns that into a failure (CI does). Gate 2 and Gate 3 use the skin, fonts and particle effects in
-`test-assets/` (see `NOTICE`); `-Dgdxvulkan.assetsDir=` points elsewhere, and they skip if the directory is missing.
+### Desktop
 
-Benchmarks and soak (each prints a table; `-Dgdxvulkan.<name>.report=true` never fails the build):
-```
-gradlew :gdx-vulkan-desktop:stress2                                   # VulkanSpriteBatch against stock SpriteBatch, each in its own JVM
-gradlew :gdx-vulkan-desktop:stressInstanced -Dgdxvulkan.device=1      # 1,000,000 sprites moved by compute
-gradlew :gdx-vulkan-desktop:stress3                                   # command stream recording against a C++ floor
-gradlew :gdx-vulkan-desktop:soakTest -Dgdxvulkan.soakSeconds=600      # the full soak
-```
+The change from a stock libGDX desktop game is the application class and the batch:
 
-Lavapipe, as CI runs it (see `ci/README.md`):
-```
-docker build -t gdx-vulkan-ci ci
-docker run --rm -v <repo>:/src:ro -v <out>:/out -v gdxvk-gradle:/root/.gradle gdx-vulkan-ci bash /src/ci/run-checks.sh
+```java
+// Before: stock libGDX
+public class MyGame extends ApplicationAdapter {
+    SpriteBatch batch;
+    Texture img;
+
+    @Override public void create() {
+        batch = new SpriteBatch();
+        img = new Texture("badlogic.jpg");
+    }
+
+    @Override public void render() {
+        ScreenUtils.clear(0, 0, 0, 1);
+        batch.begin();
+        batch.draw(img, 0, 0);
+        batch.end();
+    }
+}
+
+public static void main(String[] args) {
+    new Lwjgl3Application(new MyGame(), new Lwjgl3ApplicationConfiguration());
+}
 ```
 
-Android (`gdx-vulkan-android/`, its own Gradle build):
+```java
+// After: gdx-vulkan
+public class MyGame extends ApplicationAdapter {
+    VulkanSpriteBatch batch;                                       // was SpriteBatch
+    Texture img;                                                   // unchanged: the stock Texture
+
+    @Override public void create() {
+        GdxVkFrame frame = ((VulkanDesktopApplication)Gdx.app).getFrame();
+        batch = new VulkanSpriteBatch(frame);                      // was new SpriteBatch()
+        img = new Texture("badlogic.jpg");
+    }
+
+    @Override public void render() {                               // unchanged
+        ScreenUtils.clear(0, 0, 0, 1);
+        batch.begin();
+        batch.draw(img, 0, 0);
+        batch.end();
+    }
+}
+
+public static void main(String[] args) {
+    VulkanDesktopConfiguration config = new VulkanDesktopConfiguration();
+    config.title = "My game";
+    new VulkanDesktopApplication(new MyGame(), config);            // was Lwjgl3Application
+}
 ```
-gradlew :testapp:assembleDebug && adb install -r testapp/build/outputs/apk/debug/testapp-debug.apk
-adb shell am start -n io.github.slebed.gdxvulkan.testapp/.MainActivity --ez suite true [--ez forceTierB true] [--ez vsync false]
-adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # look for "DEVICESUITE PASS"
-tools/stress4.sh [cycles=50] [--tier-b] [--no-prerotate] [--no-stream]             # Stress test 4: rotate + background/foreground while textures stream
+
+`VulkanSpriteBatch` implements the stock `Batch` interface, so anything that takes a `Batch` takes it: `Stage`, `BitmapFont.draw`, `ParticleEffect.draw`,
+`Image`, and so on.
+
+### Moving an existing game over
+
+| Stock libGDX | gdx-vulkan | Notes |
+|---|---|---|
+| `Lwjgl3Application` | `VulkanDesktopApplication` | `Gdx.graphics`, `Gdx.input`, `Gdx.files`, `Gdx.audio`, `Gdx.net` are all set as usual |
+| `AndroidApplication` | `VulkanAndroidApplication` | see below |
+| `SpriteBatch` | `VulkanSpriteBatch(frame)` | a `Batch`: pass it to `Stage`, fonts, particles |
+| `PolygonSpriteBatch` | `VulkanPolygonSpriteBatch(frame)` | |
+| `ShapeRenderer` | `VulkanShapeRenderer(frame)` | |
+| `ModelBatch` | `VulkanModelBatch(frame)` | same `begin / render(instances, environment) / end` |
+| `Texture`, `Pixmap`, `TextureAtlas`, `FrameBuffer`, `Mesh`, `BitmapFont`, `Stage`, `AssetManager`, `Model`, `Environment`, `Camera` | **unchanged** | these run on the shim as they are |
+| `ShaderProgram` (GLSL source) | SPIR-V shader bundle (`VulkanShaderPipelineBundle`) | write GLSL as before, compile it with `glslc` at build time; the batches' own shaders in `gdx-vulkan-core/src/main/shaders` are the examples |
+| `Gdx.gl.glDrawArrays`, `glUseProgram`, ... | not supported | use the batches, or a compute shader |
+
+Rules that carry over from stock libGDX: dispose textures and batches yourself; do not dispose a texture between drawing with it and the batch's `end()`.
+Stock batches keep the projection they were created with, so on a window resize update it the way you already do.
+
+### Android
+
+```java
+public class MyActivity extends VulkanAndroidApplication {          // was AndroidApplication
+    @Override protected void onCreate(Bundle b) {
+        super.onCreate(b);
+        initialize(new MyGame());
+    }
+}
+
+// in MyGame.create():
+GdxVkFrame frame = ((VulkanAndroidApplication)Gdx.app).getVulkanGraphics().getFrame();
+batch = new VulkanSpriteBatch(frame);
 ```
-`docs/RELEASE.md` is the checklist of manual runs (real GPUs, the phone) that CI cannot do.
 
-## Runtime options (system properties)
-`gdxvulkan.validation`, `gdxvulkan.forceTierB`, `gdxvulkan.device` (index), `gdxvulkan.pipelineCache` (file), `gdxvulkan.native.path` (dir or file
-of the built `gdxvk` library). Environment `GDXVK_COMPLETION=fence|timeline` overrides the GPU completion tracking (diagnostics).
+Declare `android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|density"` on the activity so a rotation arrives
+as a surface change. The `frame` object stays valid for the life of the app; the swapchain behind it is replaced whenever the surface is, and textures and
+buffers survive that. Pre-rotation (the shaders, not the compositor, rotate the image) is on by default, and `Gdx.graphics.getWidth/Height`, `glViewport` and
+`glScissor` stay in the logical orientation. Frames are paced with Android Frame Pacing (Swappy) when vsync is on.
 
-## Known gaps
-- 3D: `VulkanModelBatch` draws stock models with the default shader's features, plus normal maps. No spot lights (stock's default shader has none), no shadow cascades or point-light shadows, no custom shaders; Tier B samples one texture per draw, so shadow maps and the specular, emissive and normal textures are Tier A only. The upstream libGDX change that would replace the reflection on `Mesh` internals is prepared in `docs/upstream/`, not filed.
-- The swapchain has a depth buffer only when asked for (`GdxVkPresenter.setDepth`), so 2D keeps its memory and bandwidth.
-- Custom shaders are precompiled SPIR-V bundles (`VulkanShaderPipelineBundle`); there is no run-time GLSL compilation.
-- Natives run on Windows x64, Linux x64 and Android arm64-v8a. The Android library also compiles for armeabi-v7a and x86_64, which have never been run.
-- Android: the on-screen keyboard and native text input through `Gdx.input` do not work yet (stock `DefaultAndroidInput` casts the graphics object to its own GL class there). No Swappy frame pacing, and swapchains are rebuilt after `vkDeviceWaitIdle` (2-5 ms measured).
-- Linux arm64 natives are built and their native tests run by CI on GitHub's arm64 runner; the Java suite does not run there.
-- Offscreen passes that come after a swapchain draw are not reordered ahead of it (a framebuffer pass in the middle of a frame still suspends the main pass).
-- A framebuffer's depth keeps its contents between passes, as in GL; the on-chip (transient) depth of tile-based GPUs is an opt-in that needs every pass to clear it.
+### 3D
 
-## Third-party code (vendored in `gdx-vulkan-core/jni/vendor`)
-volk, Vulkan-Headers, Vulkan Memory Allocator, SPIRV-Reflect. Each is under its own permissive licence; see the upstream repositories for versions
-and licence texts. Versions are pinned by the vendored copies.
+```java
+VulkanModelBatch batch = new VulkanModelBatch(frame);              // the stock ModelBatch API
+Environment env = new Environment();
+env.set(new ColorAttribute(ColorAttribute.AmbientLight, 0.3f, 0.3f, 0.35f, 1f));
+env.add(new DirectionalLight().set(1f, 1f, 0.9f, -0.5f, -1f, -0.3f));
+
+Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+batch.begin(camera);
+batch.render(instances, env);                                      // ModelInstance, Environment, animation: as stock
+batch.end();
+```
+Ask for a depth buffer once with `presenter.setDepth(GdxVkPresenter.DEPTH)` (the desktop application's `getPresenter()`). Shadows use the stock
+`DirectionalShadowLight`, or `VulkanCascadedShadowLight` for several shadow maps over distance.
+
+### Compute and GPU-driven rendering
+
+This is the part with no OpenGL equivalent in libGDX:
+
+```java
+VulkanGpuInstances gpu = new VulkanGpuInstances(frame, mesh, texture, 250_000, 500, userUints);
+gpu.setInstances(data, count);               // position + scale, rotation, and 4 floats of your own state per instance
+gpu.setLights(lights, lightCount);           // position + radius, colour + intensity
+new VulkanComputeShader(frame, "boids", "boids.comp").dispatch(groups, push, gpu.buffer());   // your simulation, on the GPU
+gpu.render(camera, width, height);           // culls, sorts the lights into clusters, draws once
+```
+The transforms never leave GPU memory. `Stress5Main` is a complete program; `VulkanSpriteBatchInstanced` does the same for a million sprites.
+
+## How it works
+
+gdx-vulkan implements libGDX's `GL20` interface on Vulkan for everything that is not drawing: textures, framebuffers, buffers, state. The drawing classes
+(`VulkanSpriteBatch` and the others) are generated from libGDX's own source, so their behaviour is the stock behaviour. A small C++ core owns the Vulkan objects
+(memory, descriptors, pipelines, a pipeline cache, deferred deletion). Java records draw commands into an array and hands them over once per frame, so the Java
+side allocates almost nothing. The validation layers, a stock-OpenGL comparison and a leak/hazard soak test run in CI on every commit.
+
+`docs/PLAN.md` is the full design.
+
+## Layout
+- `gdx-vulkan-core/` the Java API and the C++ core (`jni/`: CMake, with volk, VMA, SPIRV-Reflect and the Vulkan headers vendored); shaders in `src/main/shaders`
+- `gdx-vulkan-desktop/` the desktop `Application`, plus the desktop tests and benchmarks
+- `gdx-vulkan-android/` the Android library and a test app (its own Gradle build)
+- `ci/`, `.github/` the Docker image and workflow that run every test on a software Vulkan driver
+- `tools/` generators that copy code from stock libGDX (so the comparison stays honest)
+- `test-assets/` libGDX's own test assets, used by the scene tests (see `NOTICE`)
+- `docs/` [`PLAN.md`](docs/PLAN.md) the design, [`CHECKLIST.md`](docs/CHECKLIST.md) the detailed status, [`TESTING.md`](docs/TESTING.md) building, testing and benchmarking,
+  [`RELEASE.md`](docs/RELEASE.md) the manual checks before a release
+
+## Known limitations
+- Custom shaders must be precompiled to SPIR-V (a bundle of vertex and fragment shaders); there is no run-time GLSL compilation. A custom shader that
+  rotates its own output must call `gdx_vk_clip()` like the bundled ones, for Android pre-rotation.
+- 3D draws with the port of libGDX's default shader (plus normal maps). Custom 3D `Shader` and `ShaderProvider` classes are not accepted.
+- A few features need a driver with Vulkan 1.3: shadow maps and specular, emissive and normal-map textures. On a Vulkan 1.1 driver they are skipped.
+- On Android, the on-screen keyboard through `Gdx.input` does not work yet.
+- Natives are built for Windows x64, Linux x64 and Android arm64. Android armeabi-v7a and x86_64 compile but have never been run.
+- Offscreen framebuffer passes recorded after a draw to the screen keep their order: a framebuffer pass in the middle of a frame interrupts the main pass.
+
+## Contributing and licence
+Issues and pull requests are welcome; run the tests first (`docs/TESTING.md`). Apache License 2.0, see `LICENSE`. Third-party code is vendored in
+`gdx-vulkan-core/jni/vendor` (volk, Vulkan-Headers, Vulkan Memory Allocator, SPIRV-Reflect), each under its own permissive licence; see `NOTICE`.

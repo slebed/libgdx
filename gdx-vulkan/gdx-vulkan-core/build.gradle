@@ -37,6 +37,18 @@ registerCompileShaders(project, file('src/main/shaders'), shaderGen)
 sourceSets.main.resources.srcDir(shaderGen)
 processResources.dependsOn 'compileShaders'
 
+// The native library built for this machine goes into the jar as /natives/<os>-<arch>/, where GdxVk.loadNatives() looks for it, so a project that
+// depends on this one (a composite build or a published jar) needs no -Dgdxvulkan.native.path. One platform per build: build on each OS to bundle it.
+def hostOs = System.getProperty('os.name').toLowerCase().contains('win') ? 'windows' : System.getProperty('os.name').toLowerCase().contains('mac') ? 'macos' : 'linux'
+def hostArch = System.getProperty('os.arch').toLowerCase().with { it.contains('aarch64') || it.contains('arm64') } ? 'arm64' : 'x86_64'
+processResources {
+    dependsOn 'buildNatives'
+    from(nativeBuild) {
+        include 'gdxvk.dll', 'libgdxvk.so', 'libgdxvk.dylib'
+        into "natives/${hostOs}-${hostArch}"
+    }
+}
+
 test {
     useJUnitPlatform()
     dependsOn 'buildNatives'
