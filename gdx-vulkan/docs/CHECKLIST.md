@@ -19,12 +19,12 @@ the plan names.
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 12 | 1 | 0 | 13 |
 | Phase 5: 3D with stock models | 9 | 3 | 1 | 13 |
-| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 26 | 9 | 10 | 45 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 26 | 10 | 9 | 45 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
 | Demos (to plan once Phase 5 is complete) | 0 | 0 | 7 | 7 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **183** | **17** | **35** | **235** |
+| **All** | **183** | **18** | **34** | **235** |
 ---
 
 ## Core decisions
@@ -361,7 +361,7 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 ### F. Tests
 - [~] Translator tests with the shaders libGDX ships: done for the `SpriteBatch`/`PolygonSpriteBatch`, `ShapeRenderer` and `ImmediateModeRenderer20` shaders, `DefaultShader` (unlit variants) and `DepthShader`, and a custom shader with arrays, a bool, an int, two samplers and `#ifdef` flags, each compiled by glslang on both code paths (`GlslTranslatorTest`, no GPU needed); not yet the Gate 3 post-processing shaders
 - [ ] Every test runs on both code paths with the validation layers clean
-- [ ] Android: translated shaders compile and render on the phone (USB only), compile time recorded
+- [~] Android: translated shaders compile and render on the phone (USB only): on the Galaxy S20 FE (Adreno 650, compatibility path) libGDX's own `SpriteBatch`, `PolygonSpriteBatch` and `ShapeRenderer` on the shim draw the same picture as the Vulkan classes (0 pixels differ), the Gate 3 scenes drawn by stock classes with the effects as translated GLSL match the SPIR-V ones exactly, and the stock `SpriteBatch` reaches 0.89x of `VulkanSpriteBatch` (563 and 499 fps, 20,000 sprites; device checks `stockClassesOnTheShim`, `gate3StockClassesOnTheShim`, `stockSpriteBatchAgainstGenerated`). Not run: the REDMAGIC (only its wireless connection was present, so by the USB-only rule it was skipped), the stock `ModelBatch` on a phone (`gate5StockModelBatchOnTheShim` is written; the S20's model-shader problem is deferred), compile time of a translated shader on a phone
 - [ ] CI (lavapipe) runs the translator tests and the golden scenes
 
 ---

@@ -93,13 +93,17 @@ final class DeviceSuite {
         s.check("frameBufferDepthAndStencil", s::frameBufferDepthAndStencil);
         s.check("multiTargetFrameBuffer", s::multiTargetFrameBuffer);
         s.check("gate3Scenes", s::gate3);
+        s.check("stockClassesOnTheShim", s::stockClasses);
+        s.check("gate3StockClassesOnTheShim", s::gate3Stock);
         s.check("gate5Scenes", s::gate5);
+        s.check("gate5StockModelBatchOnTheShim", s::gate5Stock);
         s.check("gpuInstancesAgainstACpuReference", s::gpuInstancesCorrectness);
         s.check("stress3Recording", s::stress3);
         s.check("soakTextureChurn", () -> s.soak(soakSeconds));
         s.check("stress2Single", () -> s.stress(1, stressSeconds));
         s.check("stress2Textures128", () -> s.stress(128, stressSeconds));
         s.check("shaderProgramsAgainstBuiltIn", () -> s.shaderPrograms(stressSeconds));
+        s.check("stockSpriteBatchAgainstGenerated", () -> s.stockSpriteBatch(stressSeconds));
         s.check("instancedMillionSprites", () -> s.instancedMillion(stressSeconds));
         s.check("stress5Instances50k", () -> s.stress5(50_000, 64, stressSeconds));
         s.check("stress5Instances250k", () -> s.stress5(250_000, 500, stressSeconds));
@@ -907,6 +911,230 @@ final class DeviceSuite {
         } finally {
             fx.dispose();
         }
+    }
+
+
+    // ------------------------------------------------------------------------------------------------------- stock classes on the GL shim
+
+    /** At most {@code fraction} of the pixels may differ by more than {@code tolerance} in a colour channel. */
+    private static void requireSimilar(String what, byte[] expected, byte[] actual, int tolerance, double fraction) {
+        require(expected.length == actual.length, what + ": picture sizes");
+        int off = 0, worst = 0;
+        for (int i = 0; i < expected.length; i += 4) {
+            int d = 0;
+            for (int c = 0; c < 3; c++) d = Math.max(d, Math.abs((expected[i + c] & 255) - (actual[i + c] & 255)));
+            worst = Math.max(worst, d);
+            if (d > tolerance) off++;
+        }
+        final double share = off / (double)(expected.length / 4);
+        TestLog.i(TAG, what + ": " + off + " pixels differ by more than " + tolerance + " (" + share + "), worst " + worst);
+        require(share <= fraction, what + ": " + off + " pixels (" + share + ") differ by more than " + tolerance + ", worst " + worst);
+    }
+
+    /** libGDX's own SpriteBatch, PolygonSpriteBatch and ShapeRenderer, unmodified, next to the Vulkan classes: the same picture, and no run-time compiler call. */
+    private void stockClasses() throws Exception {
+        final int hits = io.github.slebed.gdxvulkan.glsl.VulkanShaderProgram.knownShaderHits();
+        final int calls = io.github.slebed.gdxvulkan.GlslCompiler.callCount();
+        final Pixmap pm = new Pixmap(2, 2, Pixmap.Format.RGBA8888);
+        pm.drawPixel(0, 0, 0xFF0000FF);
+        pm.drawPixel(1, 0, 0x00FF00FF);
+        pm.drawPixel(0, 1, 0x0000FFFF);
+        pm.drawPixel(1, 1, 0xFFFF00FF);
+        final Texture quads = new Texture(pm);
+        quads.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        pm.dispose();
+        final com.badlogic.gdx.graphics.g2d.BitmapFont font = new com.badlogic.gdx.graphics.g2d.BitmapFont();
+        try {
+            final com.badlogic.gdx.graphics.g2d.Batch[] stock = {new com.badlogic.gdx.graphics.g2d.SpriteBatch(), new com.badlogic.gdx.graphics.g2d.PolygonSpriteBatch()};
+            require(io.github.slebed.gdxvulkan.glsl.VulkanShaderProgram.knownShaderHits() - hits == 2, "stock batches take the dedicated shaders");
+            final ShapeApi stockShapes = ShapeApi.stock();
+            final com.badlogic.gdx.graphics.g2d.Batch[] generated = {new VulkanSpriteBatch(frame), new io.github.slebed.gdxvulkan.g2d.VulkanPolygonSpriteBatch(frame)};
+            final ShapeApi generatedShapes = ShapeApi.vulkan(frame);
+            require(io.github.slebed.gdxvulkan.GlslCompiler.callCount() == calls, "no run-time compiler call for the stock classes");
+            for (int variant = 0; variant < 2; variant++) {
+                beginFrame(0.1f, 0.1f, 0.1f);
+                drawStockScene(stock[variant], stockShapes, quads, font);
+                final byte[] a = frame.endAndCapture();
+                beginFrame(0.1f, 0.1f, 0.1f);
+                drawStockScene(generated[variant], generatedShapes, quads, font);
+                final byte[] b = frame.endAndCapture();
+                requireSimilar("stockClasses variant " + variant, b, a, 2, 0.0005);
+            }
+            for (com.badlogic.gdx.graphics.g2d.Batch b : stock) b.dispose();
+            for (com.badlogic.gdx.graphics.g2d.Batch b : generated) b.dispose();
+            stockShapes.dispose();
+            generatedShapes.dispose();
+        } finally {
+            font.dispose();
+            quads.dispose();
+        }
+    }
+
+    private void drawStockScene(com.badlogic.gdx.graphics.g2d.Batch batch, ShapeApi shapes, Texture quads, com.badlogic.gdx.graphics.g2d.BitmapFont font) {
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, W, H);
+        batch.begin();
+        batch.draw(quads, W * 0.1f, H * 0.1f, W * 0.4f, W * 0.4f);
+        font.draw(batch, "Vulkan", W * 0.55f, H * 0.5f);
+        batch.end();
+        shapes.setProjectionMatrix(new Matrix4().setToOrtho2D(0, 0, W, H));
+        shapes.begin(ShapeApi.Kind.Filled);
+        shapes.setColor(1f, 0.5f, 0.25f, 1f);
+        shapes.rect(W * 0.55f, H * 0.1f, W * 0.3f, W * 0.2f);
+        shapes.end();
+        shapes.begin(ShapeApi.Kind.Line);
+        shapes.setColor(0f, 1f, 1f, 1f);
+        shapes.line(5, 5, W - 5, H * 0.6f);
+        shapes.end();
+    }
+
+    /** The Gate 3 scenes drawn by libGDX's own SpriteBatch, ShapeRenderer and GLSL effects on the shim, against the same scenes drawn by the Vulkan classes. */
+    private void gate3Stock() throws Exception {
+        final int size = Gate3Scenes.SIZE;
+        final Gate3Scenes.Fx vulkanFx = Gate3Scenes.vulkanFx();
+        final Gate3Scenes.Fx stockFx = Gate3Scenes.glFx();
+        final com.badlogic.gdx.files.FileHandle data = Gdx.files.internal("data");
+        try {
+            for (final Gate3Scenes.Scene scene : Gate3Scenes.all()) {
+                scene.prepare(data, size, size);
+                gfxW = gfxH = size;
+                try {
+                    final float[] bg = Gate3Scenes.BACKGROUND;
+                    beginFrame(bg[0], bg[1], bg[2]);
+                    Gdx.gl.glViewport(0, 0, size, size);
+                    final VulkanSpriteBatch vb = new VulkanSpriteBatch(frame);
+                    vb.getProjectionMatrix().setToOrtho2D(0, 0, size, size);
+                    scene.draw(new Gate3Scenes.Env() {
+                        public com.badlogic.gdx.graphics.g2d.Batch batch() { return vb; }
+
+                        public Gate3Scenes.Fx fx() { return vulkanFx; }
+
+                        public ShapeApi shapes() { return ShapeApi.vulkan(frame); }
+                    }, size, size);
+                    vb.dispose();
+                    final byte[] expected = frame.endAndCapture();
+
+                    beginFrame(bg[0], bg[1], bg[2]);
+                    Gdx.gl.glViewport(0, 0, size, size);
+                    final com.badlogic.gdx.graphics.g2d.SpriteBatch sb = new com.badlogic.gdx.graphics.g2d.SpriteBatch();
+                    sb.getProjectionMatrix().setToOrtho2D(0, 0, size, size);
+                    scene.draw(new Gate3Scenes.Env() {
+                        public com.badlogic.gdx.graphics.g2d.Batch batch() { return sb; }
+
+                        public Gate3Scenes.Fx fx() { return stockFx; }
+
+                        public ShapeApi shapes() { return ShapeApi.stock(); }
+                    }, size, size);
+                    sb.dispose();
+                    final byte[] actual = frame.endAndCapture();
+                    requireSimilar(scene.name() + " (stock classes)", expected, actual, 8, 0.01);
+                } finally {
+                    gfxW = W;
+                    gfxH = H;
+                    Gdx.gl.glViewport(0, 0, W, H);
+                    scene.dispose();
+                }
+            }
+        } finally {
+            vulkanFx.dispose();
+            stockFx.dispose();
+        }
+    }
+
+    /** The Gate 5 scenes through libGDX's own ModelBatch, DefaultShader and DepthShader on the shim, against VulkanModelBatch. */
+    private void gate5Stock() throws Exception {
+        final int size = Gate5Scenes.SIZE;
+        final com.badlogic.gdx.files.FileHandle data = Gdx.files.internal("data");
+        presenter.setDepth(GdxVkPresenter.DEPTH);
+        final java.util.List<String> failures = new java.util.ArrayList<String>();
+        for (final Gate5Scenes.Scene scene : Gate5Scenes.all()) {
+            if (!scene.hasStockReference()) continue;
+            if (!tierA && !scene.runsOnTierB()) continue;
+            try {
+                scene.prepare(data);
+                gfxW = gfxH = size;
+                final float[] bg = Gate5Scenes.BACKGROUND;
+                beginFrame(bg[0], bg[1], bg[2]);
+                Gdx.gl.glViewport(0, 0, size, size);
+                Gate5Scenes.ModelApi api = scene.name().equals("gate5_fog") ? Gate5Scenes.vulkanInstancing(frame) : Gate5Scenes.vulkan(frame);
+                scene.draw(api, size, size);
+                api.dispose();
+                final byte[] expected = frame.endAndCapture();
+                beginFrame(bg[0], bg[1], bg[2]);
+                Gdx.gl.glViewport(0, 0, size, size);
+                api = Gate5Scenes.stock();
+                scene.draw(api, size, size);
+                api.dispose();
+                final byte[] actual = frame.endAndCapture();
+                requireSimilar(scene.name() + " (stock ModelBatch)", expected, actual, 8, 0.01);
+            } catch (Throwable t) {
+                closeOpenFrame();
+                failures.add(scene.name() + ": " + t);
+                TestLog.i(TAG, scene.name() + " (stock ModelBatch) failed: " + t);
+            } finally {
+                gfxW = W;
+                gfxH = H;
+                Gdx.gl.glViewport(0, 0, W, H);
+                scene.dispose();
+            }
+        }
+        require(failures.isEmpty(), failures.toString());
+    }
+
+    /** Stress test 2 for the shim on the device: 20,000 sprites from one texture through libGDX's own SpriteBatch and through VulkanSpriteBatch, the order alternating. */
+    private void stockSpriteBatch(int seconds) {
+        final int sprites = 20_000, size = 24, each = Math.max(2, seconds / 2);
+        final Pixmap pm = new Pixmap(16, 16, Pixmap.Format.RGBA8888);
+        pm.setColor(0.9f, 0.7f, 0.4f, 1f);
+        pm.fill();
+        final Texture texture = new Texture(pm);
+        pm.dispose();
+        final Random r = new Random(7);
+        final float[] x = new float[sprites], y = new float[sprites];
+        for (int i = 0; i < sprites; i++) {
+            x[i] = r.nextFloat() * (W - size);
+            y[i] = r.nextFloat() * (H - size);
+        }
+        final com.badlogic.gdx.graphics.g2d.Batch[] batches = {new VulkanSpriteBatch(frame, 8191), new com.badlogic.gdx.graphics.g2d.SpriteBatch(8191)};
+        for (long settleEnd = System.nanoTime() + 6_000_000_000L; System.nanoTime() < settleEnd; ) { // phones need about six seconds to settle
+            if (!frame.begin(0.1f, 0.1f, 0.1f, 1f)) continue;
+            batches[0].getProjectionMatrix().setToOrtho2D(0, 0, W, H);
+            batches[0].begin();
+            for (int i = 0; i < sprites; i++) batches[0].draw(texture, x[i], y[i], size, size);
+            batches[0].end();
+            frame.end();
+        }
+        final double[] fps = new double[2];
+        final int rounds = 4;
+        for (int round = 0; round < rounds; round++) {
+            for (int k = 0; k < 2; k++) {
+                final int c = round % 2 == 0 ? k : 1 - k;
+                final com.badlogic.gdx.graphics.g2d.Batch b = batches[c];
+                long warmEnd = System.nanoTime() + 1_000_000_000L, end = 0, measureStart = 0;
+                long frames = 0;
+                while (true) {
+                    if (!frame.begin(0.1f, 0.1f, 0.1f, 1f)) continue;
+                    b.getProjectionMatrix().setToOrtho2D(0, 0, W, H);
+                    b.begin();
+                    for (int i = 0; i < sprites; i++) b.draw(texture, x[i], y[i], size, size);
+                    b.end();
+                    frame.end();
+                    final long now = System.nanoTime();
+                    if (measureStart == 0 && now >= warmEnd) {
+                        measureStart = now;
+                        end = now + each * 1_000_000_000L;
+                    } else if (measureStart != 0) {
+                        frames++;
+                        if (now >= end) break;
+                    }
+                }
+                fps[c] += frames / ((System.nanoTime() - measureStart) / 1e9) / rounds;
+            }
+        }
+        for (com.badlogic.gdx.graphics.g2d.Batch b : batches) b.dispose();
+        texture.dispose();
+        final double ratio = fps[1] / fps[0];
+        TestLog.i(TAG, String.format("stockSpriteBatch: VulkanSpriteBatch %.1f fps, stock SpriteBatch on the shim %.1f fps (%.2fx)", fps[0], fps[1], ratio));
+        require(ratio >= 1.0 / 1.5, "the stock SpriteBatch is within 1.5x of the generated one (" + ratio + ")");
     }
 
     private void compareWithGolden(String name, byte[] px, int size) throws java.io.IOException {
