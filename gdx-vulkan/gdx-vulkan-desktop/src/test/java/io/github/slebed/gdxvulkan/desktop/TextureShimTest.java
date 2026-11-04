@@ -483,10 +483,9 @@ class TextureShimTest {
         pm.dispose();
     }
 
-    @Test void drawingIsRefusedWithAMessageThatNamesTheCall() {
+    @Test void drawingWithoutAProgramIsRefusedWithAMessageThatNamesTheCall() {
         GdxRuntimeException e = assertThrows(GdxRuntimeException.class, () -> Gdx.gl.glDrawArrays(GL20.GL_TRIANGLES, 0, 3));
-        assertTrue(e.getMessage().contains("glDrawArrays") && e.getMessage().contains("Vulkan batches"), e.getMessage());
-        assertThrows(GdxRuntimeException.class, () -> Gdx.gl.glCreateProgram());
+        assertTrue(e.getMessage().contains("no linked program"), e.getMessage());
         // pure state is accepted
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);

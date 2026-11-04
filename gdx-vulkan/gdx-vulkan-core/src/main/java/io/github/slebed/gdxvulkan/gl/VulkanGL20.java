@@ -5,6 +5,7 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.IntMap;
 
 import io.github.slebed.gdxvulkan.CommandStream;
+import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkContext;
 import io.github.slebed.gdxvulkan.GdxVkResources;
 import io.github.slebed.gdxvulkan.GdxVkSampler;
@@ -371,20 +372,6 @@ public class VulkanGL20 extends VulkanGL20Base {
 
     @Override public void glDeleteTextures (int n, IntBuffer textures) {
         for (int i = 0; i < n; i++) glDeleteTexture(textures.get(textures.position() + i));
-    }
-
-    /**
-     * Stock libGDX reaches this by constructing a {@code SpriteBatch}, {@code ShapeRenderer}, {@code ShaderProgram} or {@code new Stage(viewport)}:
-     * say which class to use instead of just naming the GL call.
-     */
-    @Override public int glCreateShader (int type) {
-        throw new GdxRuntimeException("gdx-vulkan: glCreateShader is not supported, which means a stock class that compiles GLSL was created. "
-            + "Use VulkanSpriteBatch instead of SpriteBatch, VulkanPolygonSpriteBatch, VulkanShapeRenderer, VulkanModelBatch (or ModelBatch's shader provider), "
-            + "and VulkanStage instead of new Stage(...). Custom shaders are SPIR-V bundles (VulkanShaderPipelineBundle).");
-    }
-
-    @Override public int glCreateProgram () {
-        return glCreateShader(0);
     }
 
     @Override public void glActiveTexture (int texture) {
@@ -920,6 +907,7 @@ public class VulkanGL20 extends VulkanGL20Base {
         int nativeId = -1;
         long size;
         long usedFrame = -1; // the frame whose draws last read it: changing it that frame means a new native buffer (copy-on-write)
+        ByteBuffer shadow; // CPU copy of a dynamic or stream buffer, the base for copy-on-write sub-range updates
 
         GlBuffer(int handle) {
             this.handle = handle;
@@ -933,6 +921,19 @@ public class VulkanGL20 extends VulkanGL20Base {
     /** Called once at the start of every frame ({@code GdxVkFrame.begin}). */
     public void frameStarted() {
         bufferFrame++;
+        // The previous frame is submitted: the native ids it named may be freed (and reused) now.
+        for (int i = 0; i < releasedBuffers.size; i++) resources.destroyBuffer(releasedBuffers.get(i));
+        releasedBuffers.clear();
+    }
+
+    private final com.badlogic.gdx.utils.IntArray releasedBuffers = new com.badlogic.gdx.utils.IntArray();
+
+    /**
+     * Gives a native buffer up. The recorded command stream names buffers by id and the ids are resolved when the frame is submitted, so the id must
+     * stay valid, and must not be handed out again, until then: the destroy waits for the next frame.
+     */
+    private void releaseBuffer (int nativeId) {
+        releasedBuffers.add(nativeId);
     }
 
     @Override public int glGenBuffer () {
@@ -964,20 +965,47 @@ public class VulkanGL20 extends VulkanGL20Base {
         GlBuffer b = boundBuffer(target, "glBufferData");
         if (data != null && data.remaining() == 0 && size > 0) data = null; // nothing to copy
         store(b, data == null ? null : directBytes(data, size), size);
+        final boolean dynamic = usage == 0x88E8 || usage == 0x88E0; // GL_DYNAMIC_DRAW, GL_STREAM_DRAW
+        if (dynamic && size > 0) {
+            final ByteBuffer s = ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder());
+            if (data != null) {
+                final ByteBuffer from = directBytes(data, size).duplicate();
+                from.limit(Math.min(from.limit(), from.position() + size));
+                s.put(from);
+            }
+            b.shadow = s;
+        } else {
+            b.shadow = null;
+        }
     }
 
     @Override public void glBufferSubData (int target, int offset, int size, Buffer data) {
         GlBuffer b = boundBuffer(target, "glBufferSubData");
         if (b.nativeId < 0 || offset < 0 || offset + (long)size > b.size) throw new GdxRuntimeException("gdx-vulkan: glBufferSubData outside the store of the buffer");
-        // A sub-range update after the buffer was drawn this frame is applied in place: the whole-buffer rename (glBufferData, or a mesh
-        // upload) is the copy-on-write path. Stock libGDX only calls this from VertexBufferObjectSubData and IndexBufferObjectSubData.
+        // Stock libGDX calls this from VertexBufferObjectSubData and IndexBufferObjectSubData, which is what SpriteBatch's mesh uses: every flush
+        // rewrites the start of the same buffer. A draw already recorded this frame must keep the old bytes, so a buffer that was drawn gets a new
+        // native buffer first, filled from the shadow copy kept for dynamic buffers.
         ByteBuffer src = directBytes(data, size);
+        if (b.usedFrame == bufferFrame) {
+            final int old = b.nativeId;
+            b.nativeId = resources.createBuffer(b.size);
+            b.usedFrame = -1;
+            if (b.shadow != null) resources.writeBuffer(b.nativeId, 0, b.shadow, 0, (int)b.size);
+            releaseBuffer(old); // retired, so draws already recorded keep what they read
+        }
         resources.writeBuffer(b.nativeId, offset, src, src.position(), size);
+        if (b.shadow != null) {
+            final ByteBuffer s = b.shadow.duplicate();
+            s.position(offset);
+            final ByteBuffer from = src.duplicate();
+            from.position(src.position()).limit(src.position() + size);
+            s.put(from);
+        }
     }
 
     @Override public void glDeleteBuffer (int buffer) {
         GlBuffer b = buffers.remove(buffer);
-        if (b != null && b.nativeId >= 0) resources.destroyBuffer(b.nativeId); // deferred until the GPU is done with it
+        if (b != null && b.nativeId >= 0) releaseBuffer(b.nativeId); // deferred until the GPU is done with it
         if (boundArrayBuffer == buffer) boundArrayBuffer = 0;
         if (boundElementBuffer == buffer) boundElementBuffer = 0;
     }
@@ -1002,13 +1030,13 @@ public class VulkanGL20 extends VulkanGL20Base {
     /** (Re)defines the store of a buffer: a new native buffer when the size changed or the old one was drawn this frame, the same one otherwise. */
     private void store (GlBuffer b, ByteBuffer data, long size) {
         if (size <= 0) {
-            if (b.nativeId >= 0) resources.destroyBuffer(b.nativeId);
+            if (b.nativeId >= 0) releaseBuffer(b.nativeId);
             b.nativeId = -1;
             b.size = 0;
             return;
         }
         if (b.nativeId < 0 || b.size != size || b.usedFrame == bufferFrame) {
-            if (b.nativeId >= 0) resources.destroyBuffer(b.nativeId); // retired, so draws already recorded keep what they read
+            if (b.nativeId >= 0) releaseBuffer(b.nativeId); // retired, so draws already recorded keep what they read
             b.nativeId = resources.createBuffer(size);
             b.size = size;
             b.usedFrame = -1;
@@ -1043,5 +1071,278 @@ public class VulkanGL20 extends VulkanGL20Base {
     public long bufferSize (int glHandle) {
         GlBuffer b = buffers.get(glHandle);
         return b == null ? 0 : b.size;
+    }
+
+    // ------------------------------------------------------------------------------------------------- programs, uniforms and draws (StockPrograms)
+
+    private final StockPrograms programs = new StockPrograms(this);
+    private final float[] scratchFloats = new float[4];
+    private final int[] scratchInts = new int[4];
+    private GdxVkFrame attachedFrame;
+
+    /** The frame this shim draws for; set when the frame is created. Programs are linked and draws recorded against it. */
+    public void attachFrame (GdxVkFrame frame) {
+        this.attachedFrame = frame;
+    }
+
+    GdxVkFrame attachedFrame () {
+        return attachedFrame;
+    }
+
+    CommandStream stream () {
+        return stream;
+    }
+
+    /** The frame's pipelines were discarded (a new swapchain): the shim's remembered pipeline ids are stale. */
+    public void presenterReplaced () {
+        programs.frameReplaced();
+    }
+
+    @Override public int glCreateShader (int type) {
+        return programs.createShader(type);
+    }
+
+    @Override public void glShaderSource (int shader, String string) {
+        programs.shaderSource(shader, string);
+    }
+
+    @Override public void glCompileShader (int shader) {
+        programs.compileShader(shader);
+    }
+
+    @Override public void glGetShaderiv (int shader, int pname, IntBuffer params) {
+        programs.getShaderiv(shader, pname, params);
+    }
+
+    @Override public String glGetShaderInfoLog (int shader) {
+        return programs.getShaderInfoLog(shader);
+    }
+
+    @Override public void glDeleteShader (int shader) {
+        programs.deleteShader(shader);
+    }
+
+    @Override public int glCreateProgram () {
+        return programs.createProgram();
+    }
+
+    @Override public void glAttachShader (int program, int shader) {
+        programs.attachShader(program, shader);
+    }
+
+    @Override public void glLinkProgram (int program) {
+        programs.linkProgram(program);
+    }
+
+    @Override public void glGetProgramiv (int program, int pname, IntBuffer params) {
+        programs.getProgramiv(program, pname, params);
+    }
+
+    @Override public String glGetProgramInfoLog (int program) {
+        return programs.getProgramInfoLog(program);
+    }
+
+    @Override public void glDeleteProgram (int program) {
+        programs.deleteProgram(program);
+    }
+
+    @Override public void glUseProgram (int program) {
+        programs.useProgram(program);
+    }
+
+    @Override public void glValidateProgram (int program) {
+    }
+
+    @Override public String glGetActiveAttrib (int program, int index, IntBuffer size, IntBuffer type) {
+        return programs.getActiveAttrib(program, index, size, type);
+    }
+
+    @Override public String glGetActiveUniform (int program, int index, IntBuffer size, IntBuffer type) {
+        return programs.getActiveUniform(program, index, size, type);
+    }
+
+    @Override public int glGetAttribLocation (int program, String name) {
+        return programs.getAttribLocation(program, name);
+    }
+
+    @Override public int glGetUniformLocation (int program, String name) {
+        return programs.getUniformLocation(program, name);
+    }
+
+    @Override public void glUniform1f (int location, float x) {
+        scratchFloats[0] = x;
+        programs.uniformFloats(location, 1, 1, scratchFloats, 0);
+    }
+
+    @Override public void glUniform2f (int location, float x, float y) {
+        scratchFloats[0] = x;
+        scratchFloats[1] = y;
+        programs.uniformFloats(location, 2, 1, scratchFloats, 0);
+    }
+
+    @Override public void glUniform3f (int location, float x, float y, float z) {
+        scratchFloats[0] = x;
+        scratchFloats[1] = y;
+        scratchFloats[2] = z;
+        programs.uniformFloats(location, 3, 1, scratchFloats, 0);
+    }
+
+    @Override public void glUniform4f (int location, float x, float y, float z, float w) {
+        scratchFloats[0] = x;
+        scratchFloats[1] = y;
+        scratchFloats[2] = z;
+        scratchFloats[3] = w;
+        programs.uniformFloats(location, 4, 1, scratchFloats, 0);
+    }
+
+    @Override public void glUniform1fv (int location, int count, FloatBuffer v) {
+        programs.uniformFloats(location, 1, count, v);
+    }
+
+    @Override public void glUniform1fv (int location, int count, float[] v, int offset) {
+        programs.uniformFloats(location, 1, count, v, offset);
+    }
+
+    @Override public void glUniform2fv (int location, int count, FloatBuffer v) {
+        programs.uniformFloats(location, 2, count, v);
+    }
+
+    @Override public void glUniform2fv (int location, int count, float[] v, int offset) {
+        programs.uniformFloats(location, 2, count, v, offset);
+    }
+
+    @Override public void glUniform3fv (int location, int count, FloatBuffer v) {
+        programs.uniformFloats(location, 3, count, v);
+    }
+
+    @Override public void glUniform3fv (int location, int count, float[] v, int offset) {
+        programs.uniformFloats(location, 3, count, v, offset);
+    }
+
+    @Override public void glUniform4fv (int location, int count, FloatBuffer v) {
+        programs.uniformFloats(location, 4, count, v);
+    }
+
+    @Override public void glUniform4fv (int location, int count, float[] v, int offset) {
+        programs.uniformFloats(location, 4, count, v, offset);
+    }
+
+    @Override public void glUniform1i (int location, int x) {
+        scratchInts[0] = x;
+        programs.uniformInts(location, 1, 1, scratchInts, 0);
+    }
+
+    @Override public void glUniform2i (int location, int x, int y) {
+        scratchInts[0] = x;
+        scratchInts[1] = y;
+        programs.uniformInts(location, 2, 1, scratchInts, 0);
+    }
+
+    @Override public void glUniform3i (int location, int x, int y, int z) {
+        scratchInts[0] = x;
+        scratchInts[1] = y;
+        scratchInts[2] = z;
+        programs.uniformInts(location, 3, 1, scratchInts, 0);
+    }
+
+    @Override public void glUniform4i (int location, int x, int y, int z, int w) {
+        scratchInts[0] = x;
+        scratchInts[1] = y;
+        scratchInts[2] = z;
+        scratchInts[3] = w;
+        programs.uniformInts(location, 4, 1, scratchInts, 0);
+    }
+
+    @Override public void glUniform1iv (int location, int count, IntBuffer v) {
+        programs.uniformInts(location, 1, count, v);
+    }
+
+    @Override public void glUniform1iv (int location, int count, int[] v, int offset) {
+        programs.uniformInts(location, 1, count, v, offset);
+    }
+
+    @Override public void glUniform2iv (int location, int count, IntBuffer v) {
+        programs.uniformInts(location, 2, count, v);
+    }
+
+    @Override public void glUniform2iv (int location, int count, int[] v, int offset) {
+        programs.uniformInts(location, 2, count, v, offset);
+    }
+
+    @Override public void glUniform3iv (int location, int count, IntBuffer v) {
+        programs.uniformInts(location, 3, count, v);
+    }
+
+    @Override public void glUniform3iv (int location, int count, int[] v, int offset) {
+        programs.uniformInts(location, 3, count, v, offset);
+    }
+
+    @Override public void glUniform4iv (int location, int count, IntBuffer v) {
+        programs.uniformInts(location, 4, count, v);
+    }
+
+    @Override public void glUniform4iv (int location, int count, int[] v, int offset) {
+        programs.uniformInts(location, 4, count, v, offset);
+    }
+
+    @Override public void glUniformMatrix2fv (int location, int count, boolean transpose, FloatBuffer value) {
+        programs.uniformMatrices(location, 2, count, transpose, value);
+    }
+
+    @Override public void glUniformMatrix2fv (int location, int count, boolean transpose, float[] value, int offset) {
+        programs.uniformMatrices(location, 2, count, transpose, value, offset);
+    }
+
+    @Override public void glUniformMatrix3fv (int location, int count, boolean transpose, FloatBuffer value) {
+        programs.uniformMatrices(location, 3, count, transpose, value);
+    }
+
+    @Override public void glUniformMatrix3fv (int location, int count, boolean transpose, float[] value, int offset) {
+        programs.uniformMatrices(location, 3, count, transpose, value, offset);
+    }
+
+    @Override public void glUniformMatrix4fv (int location, int count, boolean transpose, FloatBuffer value) {
+        programs.uniformMatrices(location, 4, count, transpose, value);
+    }
+
+    @Override public void glUniformMatrix4fv (int location, int count, boolean transpose, float[] value, int offset) {
+        programs.uniformMatrices(location, 4, count, transpose, value, offset);
+    }
+
+    @Override public void glEnableVertexAttribArray (int index) {
+        programs.enableVertexAttrib(index, true);
+    }
+
+    @Override public void glDisableVertexAttribArray (int index) {
+        programs.enableVertexAttrib(index, false);
+    }
+
+    @Override public void glVertexAttrib4f (int indx, float x, float y, float z, float w) {
+        // A constant value for a disabled attribute array: stock only sets it for attributes a mesh does not have, which this renderer leaves undefined.
+    }
+
+    @Override public void glVertexAttribPointer (int indx, int size, int type, boolean normalized, int stride, int ptr) {
+        programs.vertexAttribPointer(indx, size, type, normalized, stride, ptr, boundArrayBuffer);
+    }
+
+    @Override public void glVertexAttribPointer (int indx, int size, int type, boolean normalized, int stride, Buffer ptr) {
+        throw new GdxRuntimeException("gdx-vulkan: glVertexAttribPointer with a client-side array: vertex data in memory (a Mesh of the VertexArray type) is not supported; use a Mesh with a vertex buffer object");
+    }
+
+    @Override public void glDrawArrays (int mode, int first, int count) {
+        programs.drawArrays(mode, first, count);
+    }
+
+    @Override public void glDrawElements (int mode, int count, int type, int indices) {
+        programs.drawElements(mode, count, type, indices, boundElementBuffer);
+    }
+
+    @Override public void glDrawElements (int mode, int count, int type, Buffer indices) {
+        throw new GdxRuntimeException("gdx-vulkan: glDrawElements with an index array in memory (a Mesh of the VertexArray type) is not supported; use a Mesh with an index buffer object");
+    }
+
+    /** The GL buffer names bound to the array and element targets, for the draw that follows. */
+    int boundArrayBufferName () {
+        return boundArrayBuffer;
     }
 }

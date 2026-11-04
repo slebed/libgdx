@@ -110,8 +110,7 @@ class StockPortingTest {
         assertEquals(120, probe.height, "window height from the stock configuration");
         assertEquals(GdxVkPresenter.DEPTH_NONE, probe.depthBeforeModelBatch);
         assertEquals(GdxVkPresenter.DEPTH, probe.depthAfterModelBatch, "creating a VulkanModelBatch turns the depth buffer on");
-        assertTrue(probe.stockBatchError != null && probe.stockBatchError.contains("VulkanSpriteBatch") && probe.stockBatchError.contains("VulkanStage"),
-            "the stock SpriteBatch error: " + probe.stockBatchError);
+        assertNull(probe.stockBatchError, "the stock SpriteBatch is created through the GL shim");
         assertTrue(probe.picture != null && probe.picture.length == 200 * 120 * 4, "a captured frame");
         // The stage's red image fills the window.
         final int o = (60 * 200 + 100) * 4;

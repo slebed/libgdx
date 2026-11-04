@@ -99,10 +99,22 @@ public class VulkanShaderProgram implements Disposable {
     }
 
     public VulkanShaderProgram (GdxVkFrame frame, String vertexShader, String fragmentShader) {
+        this(frame, vertexShader, fragmentShader, prependVertexCode, prependFragmentCode);
+    }
+
+    /**
+     * For the GL shim: stock {@code ShaderProgram} has already put its prepend text in front of the sources it hands to {@code glShaderSource}, so the
+     * program is made from them as they are.
+     */
+    public static VulkanShaderProgram fromAssembledSources (GdxVkFrame frame, String vertexShader, String fragmentShader) {
+        return new VulkanShaderProgram(frame, vertexShader, fragmentShader, "", "");
+    }
+
+    private VulkanShaderProgram (GdxVkFrame frame, String vertexShader, String fragmentShader, String prependVertex, String prependFragment) {
         if (vertexShader == null) throw new IllegalArgumentException("vertex shader must not be null");
         if (fragmentShader == null) throw new IllegalArgumentException("fragment shader must not be null");
         this.frame = frame;
-        final Built built = obtain(frame.isTierA(), "program" + id, vertexShader, fragmentShader, prependVertexCode, prependFragmentCode, false);
+        final Built built = obtain(frame.isTierA(), "program" + id, vertexShader, fragmentShader, prependVertex, prependFragment, false);
         t = built.translation != null ? built.translation : new Translation();
         vertexSpirv = built.vertex;
         fragmentSpirv = built.fragment;
@@ -239,6 +251,12 @@ public class VulkanShaderProgram implements Disposable {
         return a == null ? -1 : a.location;
     }
 
+    /** Whether the shader has an attribute at this vertex input location. */
+    public boolean hasAttributeLocation (int location) {
+        for (Attribute a : t.attributes) if (a.location == location) return true;
+        return false;
+    }
+
     /** The GLSL type of an attribute ({@code vec2}, {@code vec4}, ...), null when the shader has none by that name. */
     public String getAttributeType (String name) {
         final Attribute a = t.attribute(name);
@@ -254,32 +272,13 @@ public class VulkanShaderProgram implements Disposable {
     }
 
     public boolean hasUniform (String name) {
-        return fetchUniformLocation(name, false) >= 0;
-    }
-
-    /**
-     * An index for a uniform to use with the setters that take a location; -1 when the shader does not read it. With {@link #pedantic} a missing name throws, as
-     * in stock.
-     */
-    public int fetchUniformLocation (String name) {
-        return fetchUniformLocation(name, pedantic);
-    }
-
-    public int fetchUniformLocation (String name, boolean pedantic) {
-        int location = -1;
-        for (int i = 0; i < t.uniforms.size(); i++) {
-            if (t.uniforms.get(i).name.equals(name) && t.uniforms.get(i).active) location = i;
-        }
-        if (location < 0) {
-            for (int i = 0; i < t.samplers.size(); i++) {
-                if (t.samplers.get(i).name.equals(name) && t.samplers.get(i).active) location = t.uniforms.size() + i;
-            }
-        }
-        if (location == -1 && pedantic) throw new IllegalArgumentException("no uniform with name '" + name + "' in shader");
-        return location;
+        return uniformLocation(name) >= 0;
     }
 
     // --------------------------------------------------------------------------------------------------------------------------- setters
+
+    /** A location is {@code uniformIndex * 1024 + element}: location + 1 is the next element of an array, as in OpenGL. A sampler's index follows the uniforms'. */
+    private static final int ELEMENTS = 1024;
 
     /** Stock's {@code bind()}: nothing to do, the program is used by the batch it was given to. */
     public void bind () {
@@ -291,39 +290,105 @@ public class VulkanShaderProgram implements Disposable {
     public void end () {
     }
 
+    /**
+     * An index for a uniform to use with the setters that take a location; -1 when the shader does not read it. With {@link #pedantic} a missing name throws, as
+     * in stock.
+     */
+    public int fetchUniformLocation (String name) {
+        return fetchUniformLocation(name, pedantic);
+    }
+
+    public int fetchUniformLocation (String name, boolean pedantic) {
+        final int location = uniformLocation(name);
+        if (location == -1 && pedantic) throw new IllegalArgumentException("no uniform with name '" + name + "' in shader");
+        return location;
+    }
+
+    /** What {@code glGetUniformLocation} answers: the name of a uniform, or of one element of an array ({@code u_palette[2]}); -1 when the shader does not read it. */
+    public int uniformLocation (String name) {
+        String base = name;
+        int element = 0;
+        final int br = name.indexOf('[');
+        if (br > 0 && name.endsWith("]")) {
+            try {
+                element = Integer.parseInt(name.substring(br + 1, name.length() - 1).trim());
+            } catch (NumberFormatException e) {
+                return -1;
+            }
+            base = name.substring(0, br);
+        }
+        for (int i = 0; i < t.uniforms.size(); i++) {
+            final Uniform u = t.uniforms.get(i);
+            if (u.active && u.name.equals(base) && element < Math.max(1, u.arraySize)) return i * ELEMENTS + element;
+        }
+        for (int i = 0; i < t.samplers.size(); i++) {
+            final Sampler sm = t.samplers.get(i);
+            if (sm.active && sm.name.equals(base) && element == 0) return (t.uniforms.size() + i) * ELEMENTS;
+        }
+        return -1;
+    }
+
+    /** The element of the array a location names, set by {@link #uniformAt} for the write that follows. */
+    private int elementBase;
+
+    /** The uniform a location names (not a sampler); remembers the element for the write that follows. */
+    private Uniform uniformAt (int location) {
+        final int index = location / ELEMENTS;
+        if (index >= t.uniforms.size()) {
+            final Sampler sm = t.samplers.get(index - t.uniforms.size());
+            throw new GdxRuntimeException("the uniform '" + sm.name + "' is a sampler: set it with setUniformi, to the number of a texture unit");
+        }
+        elementBase = location % ELEMENTS;
+        return t.uniforms.get(index);
+    }
+
+    // The by-name and by-location setters of stock's ShaderProgram. A value of the wrong kind throws, naming the uniform.
+
     public void setUniformi (String name, int value) {
         setUniformi(fetchUniformLocation(name), value);
     }
 
     public void setUniformi (int location, int value) {
         if (location < 0) return;
-        if (location >= t.uniforms.size()) { // a sampler: the value is its texture unit
-            samplerUnit[location - t.uniforms.size()] = value;
+        final int index = location / ELEMENTS;
+        if (index >= t.uniforms.size()) { // a sampler: the value is its texture unit
+            samplerUnit[index - t.uniforms.size()] = value;
             return;
         }
-        final Uniform u = t.uniforms.get(location);
+        final Uniform u = uniformAt(location);
         requireKind(u, "int", 1);
-        putInt(u, 0, value);
+        putWord(u, 0, 0, value);
     }
 
     public void setUniformi (String name, int v1, int v2) {
-        setUniformInts(name, "ivec2", v1, v2);
+        setUniformInts(fetchUniformLocation(name), "ivec2", v1, v2);
     }
 
     public void setUniformi (String name, int v1, int v2, int v3) {
-        setUniformInts(name, "ivec3", v1, v2, v3);
+        setUniformInts(fetchUniformLocation(name), "ivec3", v1, v2, v3);
     }
 
     public void setUniformi (String name, int v1, int v2, int v3, int v4) {
-        setUniformInts(name, "ivec4", v1, v2, v3, v4);
+        setUniformInts(fetchUniformLocation(name), "ivec4", v1, v2, v3, v4);
     }
 
-    private void setUniformInts (String name, String type, int... v) {
-        final int location = fetchUniformLocation(name);
+    public void setUniformi (int location, int v1, int v2) {
+        setUniformInts(location, "ivec2", v1, v2);
+    }
+
+    public void setUniformi (int location, int v1, int v2, int v3) {
+        setUniformInts(location, "ivec3", v1, v2, v3);
+    }
+
+    public void setUniformi (int location, int v1, int v2, int v3, int v4) {
+        setUniformInts(location, "ivec4", v1, v2, v3, v4);
+    }
+
+    private void setUniformInts (int location, String type, int... v) {
         if (location < 0) return;
-        final Uniform u = t.uniforms.get(location);
+        final Uniform u = uniformAt(location);
         requireKind(u, type, v.length);
-        for (int i = 0; i < v.length; i++) putInt(u, i, v[i]);
+        for (int i = 0; i < v.length; i++) putWord(u, 0, i, v[i]);
     }
 
     public void setUniformf (String name, float value) {
@@ -331,22 +396,34 @@ public class VulkanShaderProgram implements Disposable {
     }
 
     public void setUniformf (int location, float value) {
-        if (location < 0 || location >= t.uniforms.size()) return;
-        final Uniform u = t.uniforms.get(location);
+        if (location < 0) return;
+        final Uniform u = uniformAt(location);
         requireKind(u, "float", 1);
-        putFloat(u, 0, value);
+        putWord(u, 0, 0, Float.floatToRawIntBits(value));
     }
 
     public void setUniformf (String name, float v1, float v2) {
-        setUniformFloats(name, "vec2", v1, v2);
+        setUniformFloats(fetchUniformLocation(name), "vec2", v1, v2);
     }
 
     public void setUniformf (String name, float v1, float v2, float v3) {
-        setUniformFloats(name, "vec3", v1, v2, v3);
+        setUniformFloats(fetchUniformLocation(name), "vec3", v1, v2, v3);
     }
 
     public void setUniformf (String name, float v1, float v2, float v3, float v4) {
-        setUniformFloats(name, "vec4", v1, v2, v3, v4);
+        setUniformFloats(fetchUniformLocation(name), "vec4", v1, v2, v3, v4);
+    }
+
+    public void setUniformf (int location, float v1, float v2) {
+        setUniformFloats(location, "vec2", v1, v2);
+    }
+
+    public void setUniformf (int location, float v1, float v2, float v3) {
+        setUniformFloats(location, "vec3", v1, v2, v3);
+    }
+
+    public void setUniformf (int location, float v1, float v2, float v3, float v4) {
+        setUniformFloats(location, "vec4", v1, v2, v3, v4);
     }
 
     public void setUniformf (String name, Vector2 values) {
@@ -361,44 +438,29 @@ public class VulkanShaderProgram implements Disposable {
         setUniformf(name, values.r, values.g, values.b, values.a);
     }
 
-    private void setUniformFloats (String name, String type, float... v) {
-        final int location = fetchUniformLocation(name);
+    private void setUniformFloats (int location, String type, float... v) {
         if (location < 0) return;
-        final Uniform u = t.uniforms.get(location);
+        final Uniform u = uniformAt(location);
         requireKind(u, type, v.length);
-        for (int i = 0; i < v.length; i++) putFloat(u, i, v[i]);
+        for (int i = 0; i < v.length; i++) putWord(u, 0, i, Float.floatToRawIntBits(v[i]));
     }
 
     /** Sets an array of floats ({@code float u[n]}), or one {@code float}. */
     public void setUniform1fv (String name, float[] values, int offset, int length) {
-        setUniformArray(name, "float", 1, values, offset, length);
+        setFloats(fetchUniformLocation(name), 1, length, values, offset);
     }
 
     /** Sets an array of {@code vec2}: {@code length} counts floats, two per element. */
     public void setUniform2fv (String name, float[] values, int offset, int length) {
-        setUniformArray(name, "vec2", 2, values, offset, length);
+        setFloats(fetchUniformLocation(name), 2, length / 2, values, offset);
     }
 
     public void setUniform3fv (String name, float[] values, int offset, int length) {
-        setUniformArray(name, "vec3", 3, values, offset, length);
+        setFloats(fetchUniformLocation(name), 3, length / 3, values, offset);
     }
 
     public void setUniform4fv (String name, float[] values, int offset, int length) {
-        setUniformArray(name, "vec4", 4, values, offset, length);
-    }
-
-    private void setUniformArray (String name, String type, int components, float[] values, int offset, int length) {
-        final int location = fetchUniformLocation(name);
-        if (location < 0) return;
-        final Uniform u = t.uniforms.get(location);
-        if (!u.type.equals(type)) throw new GdxRuntimeException("the uniform '" + name + "' is " + u.type + ", not " + type);
-        if (length % components != 0) throw new GdxRuntimeException("the uniform '" + name + "' takes " + components + " floats per element, not " + length + " in all");
-        final int elements = length / components;
-        final int capacity = Math.max(1, u.arraySize);
-        if (elements > capacity) throw new GdxRuntimeException("the uniform '" + name + "' holds " + capacity + " elements, not " + elements);
-        for (int e = 0; e < elements; e++) {
-            for (int c = 0; c < components; c++) putFloatAt(u, e, c, values[offset + e * components + c]);
-        }
+        setFloats(fetchUniformLocation(name), 4, length / 4, values, offset);
     }
 
     public void setUniformMatrix (String name, Matrix4 matrix) {
@@ -406,51 +468,149 @@ public class VulkanShaderProgram implements Disposable {
     }
 
     public void setUniformMatrix (String name, Matrix4 matrix, boolean transpose) {
-        setUniformMatrix4fv(name, matrix.val, 0, 16, transpose);
+        setMatrices(fetchUniformLocation(name), 4, 1, transpose, matrix.val, 0);
     }
 
     public void setUniformMatrix (String name, Matrix3 matrix) {
-        setUniformMatrix (name, matrix, false);
+        setUniformMatrix(name, matrix, false);
     }
 
     public void setUniformMatrix (String name, Matrix3 matrix, boolean transpose) {
-        final int location = fetchUniformLocation(name);
-        if (location < 0) return;
-        final Uniform u = t.uniforms.get(location);
-        requireKind(u, "mat3", 9);
-        writeMatrix(u, 0, matrix.val, 0, 3, transpose);
+        setMatrices(fetchUniformLocation(name), 3, 1, transpose, matrix.val, 0);
     }
 
     /** Sets a {@code mat4} (16 floats) or an array of them ({@code length} counts floats). The values are column-major, as in {@code Matrix4.val}. */
     public void setUniformMatrix4fv (String name, float[] values, int offset, int length) {
-        setUniformMatrix4fv(name, values, offset, length, false);
+        setMatrices(fetchUniformLocation(name), 4, length / 16, false, values, offset);
     }
 
     public void setUniformMatrix4fv (String name, float[] values, int offset, int length, boolean transpose) {
-        final int location = fetchUniformLocation(name);
-        if (location < 0) return;
-        final Uniform u = t.uniforms.get(location);
-        if (!u.type.equals("mat4")) throw new GdxRuntimeException("the uniform '" + name + "' is " + u.type + ", not mat4");
-        if (length % 16 != 0) throw new GdxRuntimeException("a mat4 takes 16 floats, not " + length);
-        final int count = length / 16;
-        if (count > Math.max(1, u.arraySize)) throw new GdxRuntimeException("the uniform '" + name + "' holds " + Math.max(1, u.arraySize) + " matrices, not " + count);
-        for (int m = 0; m < count; m++) writeMatrix(u, m, values, offset + m * 16, 4, transpose);
+        setMatrices(fetchUniformLocation(name), 4, length / 16, transpose, values, offset);
     }
 
     public void setUniformMatrix3fv (String name, float[] values, int offset, int length) {
-        final int location = fetchUniformLocation(name);
-        if (location < 0) return;
-        final Uniform u = t.uniforms.get(location);
-        if (!u.type.equals("mat3")) throw new GdxRuntimeException("the uniform '" + name + "' is " + u.type + ", not mat3");
-        for (int m = 0; m < length / 9; m++) writeMatrix(u, m, values, offset + m * 9, 3, false);
+        setMatrices(fetchUniformLocation(name), 3, length / 9, false, values, offset);
     }
 
     public void setUniformMatrix2fv (String name, float[] values, int offset, int length) {
-        final int location = fetchUniformLocation(name);
+        setMatrices(fetchUniformLocation(name), 2, length / 4, false, values, offset);
+    }
+
+    // The calls of OpenGL's glUniform family, by location: what the GL shim forwards. {@code count} elements, from the element the location names.
+
+    /** {@code glUniform1f..4fv}: {@code count} values of {@code components} floats each, read from {@code v} at {@code offset}. */
+    public void setFloats (int location, int components, int count, float[] v, int offset) {
         if (location < 0) return;
-        final Uniform u = t.uniforms.get(location);
-        if (!u.type.equals("mat2")) throw new GdxRuntimeException("the uniform '" + name + "' is " + u.type + ", not mat2");
-        for (int m = 0; m < length / 4; m++) writeMatrix(u, m, values, offset + m * 4, 2, false);
+        final Uniform u = uniformAt(location);
+        final String type = components == 1 ? "float" : "vec" + components;
+        if (!u.type.equals(type)) throw new GdxRuntimeException("the uniform '" + u.name + "' is " + u.type + ", it cannot be set with floats in groups of " + components);
+        checkCount(u, count);
+        for (int e = 0; e < count; e++) {
+            for (int c = 0; c < components; c++) putWord(u, e, c, Float.floatToRawIntBits(v[offset + e * components + c]));
+        }
+    }
+
+    /** {@code glUniform1i..4iv}: integers; a sampler's value is the number of its texture unit. */
+    public void setInts (int location, int components, int count, int[] v, int offset) {
+        if (location < 0) return;
+        final int index = location / ELEMENTS;
+        if (index >= t.uniforms.size()) {
+            samplerUnit[index - t.uniforms.size()] = v[offset];
+            return;
+        }
+        final Uniform u = uniformAt(location);
+        final String type = components == 1 ? "int" : "ivec" + components;
+        requireKind(u, type, components);
+        checkCount(u, count);
+        for (int e = 0; e < count; e++) {
+            for (int c = 0; c < components; c++) putWord(u, e, c, v[offset + e * components + c]);
+        }
+    }
+
+    /** {@code glUniformMatrix2fv..4fv}: {@code count} square matrices of size {@code n}, column-major unless {@code transpose}. */
+    public void setMatrices (int location, int n, int count, boolean transpose, float[] v, int offset) {
+        if (location < 0) return;
+        final Uniform u = uniformAt(location);
+        if (!u.type.equals("mat" + n)) throw new GdxRuntimeException("the uniform '" + u.name + "' is " + u.type + ", not mat" + n);
+        checkCount(u, count);
+        for (int m = 0; m < count; m++) writeMatrix(u, m, v, offset + m * n * n, n, transpose);
+    }
+
+    private void checkCount (Uniform u, int count) {
+        final int room = Math.max(1, u.arraySize) - elementBase;
+        if (count > room) throw new GdxRuntimeException("the uniform '" + u.name + "' has room for " + room + " more element" + (room == 1 ? "" : "s") + " there, not " + count);
+    }
+
+    // ------------------------------------------------------------------------------------------------------- what the shader declares (the GL shim)
+
+    /** GL's type enums for the uniform and attribute types. */
+    public static int glType (String type) {
+        switch (type) {
+        case "float": return 0x1406;
+        case "int": return 0x1404;
+        case "bool": return 0x8B56;
+        case "vec2": return 0x8B50;
+        case "vec3": return 0x8B51;
+        case "vec4": return 0x8B52;
+        case "ivec2": return 0x8B53;
+        case "ivec3": return 0x8B54;
+        case "ivec4": return 0x8B55;
+        case "mat2": return 0x8B5A;
+        case "mat3": return 0x8B5B;
+        case "mat4": return 0x8B5C;
+        case "sampler2D": return 0x8B5E;
+        default: return 0;
+        }
+    }
+
+    /** The uniforms the shader reads, and its samplers, in the order {@code glGetActiveUniform} lists them. */
+    public int activeUniformCount () {
+        int n = 0;
+        for (Uniform u : t.uniforms) if (u.active) n++;
+        for (Sampler sm : t.samplers) if (sm.active) n++;
+        return n;
+    }
+
+    private Object activeUniform (int index) {
+        for (Uniform u : t.uniforms) {
+            if (!u.active) continue;
+            if (index-- == 0) return u;
+        }
+        for (Sampler sm : t.samplers) {
+            if (!sm.active) continue;
+            if (index-- == 0) return sm;
+        }
+        throw new IndexOutOfBoundsException("no active uniform " + index);
+    }
+
+    /** The name as GL reports it: an array is listed as {@code name[0]}. */
+    public String activeUniformName (int index) {
+        final Object o = activeUniform(index);
+        if (o instanceof Sampler) return ((Sampler)o).name;
+        final Uniform u = (Uniform)o;
+        return u.arraySize > 0 ? u.name + "[0]" : u.name;
+    }
+
+    public int activeUniformType (int index) {
+        final Object o = activeUniform(index);
+        return o instanceof Sampler ? glType("sampler2D") : glType(((Uniform)o).type);
+    }
+
+    public int activeUniformSize (int index) {
+        final Object o = activeUniform(index);
+        return o instanceof Sampler ? 1 : Math.max(1, ((Uniform)o).arraySize);
+    }
+
+    public int activeAttributeCount () {
+        return t.attributes.size();
+    }
+
+    public String activeAttributeName (int index) {
+        return t.attributes.get(index).name;
+    }
+
+    public int activeAttributeType (int index) {
+        return glType(t.attributes.get(index).type);
     }
 
     // ------------------------------------------------------------------------------------------------------------------------- the bytes
@@ -474,7 +634,7 @@ public class VulkanShaderProgram implements Disposable {
 
     /** Writes one 32-bit word of a uniform: element {@code element} of an array, component {@code component} of a vector. */
     private void putWord (Uniform u, int element, int component, int word) {
-        final int at = u.offset + element * u.arrayStride + component * 4;
+        final int at = u.offset + (element + elementBase) * u.arrayStride + component * 4;
         write(u, at, word);
     }
 
@@ -488,7 +648,7 @@ public class VulkanShaderProgram implements Disposable {
 
     /** Writes a square matrix column by column; the storage pads each column (a mat3's columns are 16 bytes apart). */
     private void writeMatrix (Uniform u, int element, float[] src, int srcOffset, int n, boolean transpose) {
-        final int base = u.offset + element * u.arrayStride;
+        final int base = u.offset + (element + elementBase) * u.arrayStride;
         final int stride = u.columnStride;
         for (int col = 0; col < n; col++) {
             for (int row = 0; row < n; row++) {

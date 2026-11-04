@@ -6,3 +6,4 @@ hs_err_pid*
 .idea/
 *.iml
 local.properties
+gdx-vulkan-desktop/gdxvk-shader-cache/

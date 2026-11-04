@@ -54,6 +54,7 @@ public final class GdxVkFrame {
         this.gl = gl;
         this.tierA = context.caps().tier == VulkanCaps.Tier.A;
         gl.setCommandStream(stream);
+        gl.attachFrame(this);
     }
 
     /** Starts a frame cleared to the colour. @return false if there is nothing to draw into (minimized); skip the frame. */
@@ -113,6 +114,7 @@ public final class GdxVkFrame {
      */
     public void replacePresenter(GdxVkPresenter p) {
         presenter = p;
+        gl.presenterReplaced();
         if (wantedDepth != GdxVkPresenter.DEPTH_NONE) p.setDepth(wantedDepth); // a new swapchain keeps the depth buffer the application asked for
         pipelines.clear();
         java.util.Arrays.fill(blockCache, null);

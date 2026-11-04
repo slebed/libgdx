@@ -188,6 +188,7 @@ class StockMeshTest {
         final Mesh quad = new Mesh(Mesh.VertexDataType.VertexArray, true, 4, 6, VertexAttribute.Position(), VertexAttribute.Normal());
         quad.setIndices(new short[] {0, 1, 2, 2, 3, 0});
         quad.setVertices(quadAt(0f));
+        for (int i = 0; i < 3; i++) frameOf(false, () -> { }); // buffers given up by earlier tests are released at the next frames
         final int buffers = ctx.resources().stats().buffersLive;
         byte[] f = frameOf(true, () -> drawMesh(quad, new Matrix4(), 1, 0, 0));
         assertRedish(px(f, N / 2, N / 2), "the vertex-array quad");
