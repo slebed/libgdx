@@ -1,8 +1,11 @@
 package io.github.slebed.gdxvulkan.gl;
 
 import java.nio.Buffer;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.nio.ShortBuffer;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -12,6 +15,7 @@ import com.badlogic.gdx.utils.IntMap;
 import io.github.slebed.gdxvulkan.CommandStream;
 import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkPipelineDesc;
+import io.github.slebed.gdxvulkan.GdxVkPresenter;
 import io.github.slebed.gdxvulkan.glsl.VulkanShaderProgram;
 
 /**
@@ -55,7 +59,11 @@ final class StockPrograms {
         boolean enabled;
         int size, type, stride, offset, buffer;
         boolean normalized;
+        /** Vertex data in memory (a Mesh of the VertexArray type): the buffer, and {@code offset} is its position when the pointer was set. buffer is CLIENT then. */
+        Buffer client;
     }
+
+    private static final int CLIENT = -1;
 
     private final VulkanGL20 gl;
     private final IntMap<Shader> shaders = new IntMap<Shader>();
@@ -271,7 +279,7 @@ final class StockPrograms {
     void vertexAttribPointer (int index, int size, int type, boolean normalized, int stride, int offset, int arrayBuffer) {
         final Pointer p = pointer(index);
         if (arrayBuffer == 0) {
-            throw new GdxRuntimeException("gdx-vulkan: glVertexAttribPointer without an array buffer bound: vertex data in client memory (a Mesh of the VertexArray type) is not supported; use a Mesh with a vertex buffer object");
+            throw new GdxRuntimeException("gdx-vulkan: glVertexAttribPointer with an offset and no array buffer bound");
         }
         p.size = size;
         p.type = type;
@@ -279,6 +287,22 @@ final class StockPrograms {
         p.stride = stride;
         p.offset = offset;
         p.buffer = arrayBuffer;
+        p.client = null;
+    }
+
+    /** {@code glVertexAttribPointer} with the data in memory: the vertex bytes are copied into the frame's vertex ring by the draw that reads them. */
+    void vertexAttribPointerClient (int index, int size, int type, boolean normalized, int stride, Buffer data) {
+        if (!(data instanceof ByteBuffer) && !(data instanceof FloatBuffer)) {
+            throw new GdxRuntimeException("gdx-vulkan: glVertexAttribPointer with a " + data.getClass().getSimpleName() + " in memory: a ByteBuffer or a FloatBuffer is supported (Mesh passes one of them)");
+        }
+        final Pointer p = pointer(index);
+        p.size = size;
+        p.type = type;
+        p.normalized = normalized;
+        p.stride = stride;
+        p.offset = data.position() * (data instanceof FloatBuffer ? 4 : 1); // the attribute's offset inside the vertex, in bytes: the position is moved before each call
+        p.buffer = CLIENT;
+        p.client = data;
     }
 
     private Pointer pointer (int index) {
@@ -289,17 +313,22 @@ final class StockPrograms {
     // ----------------------------------------------------------------------------------------------------------------------------- draws
 
     void drawArrays (int mode, int first, int count) {
-        draw(mode, count, first, false, 0, 0, 0);
+        draw(mode, count, first, false, 0, 0, 0, null);
     }
 
     void drawElements (int mode, int count, int type, int offset, int elementBuffer) {
         if (elementBuffer == 0) {
             throw new GdxRuntimeException("gdx-vulkan: glDrawElements without an element buffer bound: index data in client memory (a Mesh of the VertexArray type) is not supported; use a Mesh with an index buffer object");
         }
-        draw(mode, count, 0, true, type, offset, elementBuffer);
+        draw(mode, count, 0, true, type, offset, elementBuffer, null);
     }
 
-    private void draw (int mode, int count, int first, boolean indexed, int indexType, int indexOffset, int elementBuffer) {
+    /** {@code glDrawElements} with the indices in memory (the {@code count} elements from the buffer's position). */
+    void drawElementsClient (int mode, int count, int type, Buffer indices) {
+        draw(mode, count, 0, true, type, 0, 0, indices);
+    }
+
+    private void draw (int mode, int count, int first, boolean indexed, int indexType, int indexOffset, int elementBuffer, Buffer clientIndices) {
         if (count <= 0) return;
         final VulkanShaderProgram program = inUse("a draw");
         final GdxVkFrame frame = gl.attachedFrame();
@@ -308,6 +337,8 @@ final class StockPrograms {
 
         // The layout of the vertex data: every enabled array the program reads, from one buffer.
         int buffer = 0, stride = 0;
+        Buffer client = null;
+        int clientBytes = Integer.MAX_VALUE;
         key.setLength(0);
         key.append(mode).append('|');
         final boolean blend = gl.isBlendEnabled();
@@ -323,10 +354,14 @@ final class StockPrograms {
             final Pointer p = pointers[i];
             if (!p.enabled || p.size == 0) continue;
             if (!program.hasAttributeLocation(i)) continue; // an array the program does not read
-            if (buffer != 0 && p.buffer != buffer) {
+            if (buffer != 0 && p.buffer != buffer) { // in-memory pointers are all CLIENT: Mesh passes a FloatBuffer and a ByteBuffer, two views of the one array
                 throw new GdxRuntimeException("gdx-vulkan: the vertex attributes come from more than one buffer; interleave them in one (stock Mesh does)");
             }
             buffer = p.buffer;
+            if (p.client != null) {
+                if (client == null) client = p.client;
+                clientBytes = Math.min(clientBytes, p.client instanceof FloatBuffer ? ((FloatBuffer)p.client).limit() * 4 : ((ByteBuffer)p.client).limit());
+            }
             stride = p.stride != 0 ? p.stride : p.size * typeBytes(p.type);
             key.append(i).append(':').append(p.size).append(':').append(p.type).append(p.normalized ? 'n' : 'r').append(':').append(p.offset).append(';');
             enabledReadByProgram++;
@@ -357,8 +392,17 @@ final class StockPrograms {
             pipelines.put(program.key() + "|" + variant, pipeline);
         }
 
-        final int nativeVertices = gl.nativeBuffer(buffer);
-        if (nativeVertices < 0) throw new GdxRuntimeException("gdx-vulkan: the vertex buffer has no data");
+        // Data in memory goes through the frame's ring: the vertices up to the highest one this draw reads, and the indices of the draw.
+        int nativeVertices = -1;
+        int maxVertex = 0;
+        if (indexed && clientIndices != null) maxVertex = maxIndex(clientIndices, count, indexType);
+        else if (!indexed) maxVertex = first + count - 1;
+        if (client == null) {
+            nativeVertices = gl.nativeBuffer(buffer);
+            if (nativeVertices < 0) throw new GdxRuntimeException("gdx-vulkan: the vertex buffer has no data");
+        } else if (indexed && clientIndices == null) {
+            throw new GdxRuntimeException("gdx-vulkan: vertices in memory drawn with an index buffer object: use vertex and index data of the same kind");
+        }
         if (program.hasThinLineNudge()) { // as VulkanImmediateModeRenderer does: lines and points move 1/256 pixel the way GL resolves a tie
             final boolean thin = mode == 0x0000 || mode == 0x0001 || mode == 0x0003;
             program.setPushFloat(96, thin ? -2f / 256f / Math.max(1, frame.height()) : 0f);
@@ -366,8 +410,50 @@ final class StockPrograms {
         s.bindPipeline(pipeline);
         program.prepareDraw(s, push, gl.boundTexture(0));
         s.pushConstants(push);
-        s.bindVertexBuffer(nativeVertices, 0);
-        if (indexed) {
+        if (client != null) {
+            final int bytes = Math.min((maxVertex + 1) * stride, clientBytes);
+            final long a = frame.presenter().allocVertex(bytes);
+            final int block = GdxVkPresenter.blockOf(a);
+            final long offset = GdxVkPresenter.offsetOf(a);
+            final ByteBuffer out = frame.vertexBlock(block).duplicate().order(ByteOrder.nativeOrder());
+            out.position((int)offset);
+            if (client instanceof FloatBuffer) {
+                final FloatBuffer from = ((FloatBuffer)client).duplicate();
+                from.position(0);
+                from.limit(bytes / 4);
+                out.asFloatBuffer().put(from);
+            } else {
+                final ByteBuffer from = ((ByteBuffer)client).duplicate();
+                from.position(0);
+                from.limit(bytes);
+                out.put(from);
+            }
+            frame.presenter().flushVertices(block, offset, bytes);
+            s.bindVertex(block, offset);
+        } else {
+            s.bindVertexBuffer(nativeVertices, 0);
+        }
+        if (indexed && clientIndices != null) {
+            final boolean wide = indexType == GL_UNSIGNED_INT;
+            final int bytes = count * (wide ? 4 : 2);
+            final long a = frame.presenter().allocVertex(bytes);
+            final int block = GdxVkPresenter.blockOf(a);
+            final long offset = GdxVkPresenter.offsetOf(a);
+            final ByteBuffer out = frame.vertexBlock(block).duplicate().order(ByteOrder.nativeOrder());
+            out.position((int)offset);
+            if (wide) {
+                final IntBuffer in = ((IntBuffer)clientIndices).duplicate();
+                in.limit(in.position() + count);
+                out.asIntBuffer().put(in);
+            } else {
+                final ShortBuffer in = ((ShortBuffer)clientIndices).duplicate();
+                in.limit(in.position() + count);
+                out.asShortBuffer().put(in);
+            }
+            frame.presenter().flushVertices(block, offset, bytes);
+            s.bindIndexRing(block, offset, wide ? CommandStream.INDEX_U32 : CommandStream.INDEX_U16);
+            s.drawIndexed(count, 0, 0);
+        } else if (indexed) {
             final int nativeIndices = gl.nativeBuffer(elementBuffer);
             if (nativeIndices < 0) throw new GdxRuntimeException("gdx-vulkan: the index buffer has no data");
             if (indexType != GL_UNSIGNED_SHORT && indexType != GL_UNSIGNED_INT) {
@@ -378,6 +464,22 @@ final class StockPrograms {
         } else {
             s.draw(count, first);
         }
+    }
+
+    /** The highest vertex index among the {@code count} indices from the buffer's position. */
+    private static int maxIndex (Buffer indices, int count, int type) {
+        int max = 0;
+        if (type == GL_UNSIGNED_INT && indices instanceof IntBuffer) {
+            final IntBuffer b = (IntBuffer)indices;
+            for (int i = 0, p = b.position(); i < count; i++) max = Math.max(max, b.get(p + i));
+        } else if (type == GL_UNSIGNED_SHORT && indices instanceof ShortBuffer) {
+            final ShortBuffer b = (ShortBuffer)indices;
+            for (int i = 0, p = b.position(); i < count; i++) max = Math.max(max, b.get(p + i) & 0xFFFF);
+        } else {
+            throw new GdxRuntimeException("gdx-vulkan: glDrawElements with " + indices.getClass().getSimpleName() + " of type 0x" + Integer.toHexString(type)
+                + " in memory: unsigned short indices in a ShortBuffer, or unsigned int in an IntBuffer");
+        }
+        return max;
     }
 
     private static int topology (int mode) {

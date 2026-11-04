@@ -1318,8 +1318,30 @@ public class VulkanGL20 extends VulkanGL20Base {
         programs.enableVertexAttrib(index, false);
     }
 
+    // A constant value for a disabled attribute array. Stock sets it for attributes a mesh does not have (DefaultShader does, for bone weights "in case a
+    // mesh has missing attributes"), and a Vulkan pipeline has no constant attributes: a draw that reads one gets undefined values, as the unset case does in GL ES.
+    @Override public void glVertexAttrib1f (int indx, float x) {
+    }
+
+    @Override public void glVertexAttrib1fv (int indx, FloatBuffer values) {
+    }
+
+    @Override public void glVertexAttrib2f (int indx, float x, float y) {
+    }
+
+    @Override public void glVertexAttrib2fv (int indx, FloatBuffer values) {
+    }
+
+    @Override public void glVertexAttrib3f (int indx, float x, float y, float z) {
+    }
+
+    @Override public void glVertexAttrib3fv (int indx, FloatBuffer values) {
+    }
+
     @Override public void glVertexAttrib4f (int indx, float x, float y, float z, float w) {
-        // A constant value for a disabled attribute array: stock only sets it for attributes a mesh does not have, which this renderer leaves undefined.
+    }
+
+    @Override public void glVertexAttrib4fv (int indx, FloatBuffer values) {
     }
 
     @Override public void glVertexAttribPointer (int indx, int size, int type, boolean normalized, int stride, int ptr) {
@@ -1327,7 +1349,7 @@ public class VulkanGL20 extends VulkanGL20Base {
     }
 
     @Override public void glVertexAttribPointer (int indx, int size, int type, boolean normalized, int stride, Buffer ptr) {
-        throw new GdxRuntimeException("gdx-vulkan: glVertexAttribPointer with a client-side array: vertex data in memory (a Mesh of the VertexArray type) is not supported; use a Mesh with a vertex buffer object");
+        programs.vertexAttribPointerClient(indx, size, type, normalized, stride, ptr);
     }
 
     @Override public void glDrawArrays (int mode, int first, int count) {
@@ -1339,7 +1361,7 @@ public class VulkanGL20 extends VulkanGL20Base {
     }
 
     @Override public void glDrawElements (int mode, int count, int type, Buffer indices) {
-        throw new GdxRuntimeException("gdx-vulkan: glDrawElements with an index array in memory (a Mesh of the VertexArray type) is not supported; use a Mesh with an index buffer object");
+        programs.drawElementsClient(mode, count, type, indices);
     }
 
     /** The GL buffer names bound to the array and element targets, for the draw that follows. */

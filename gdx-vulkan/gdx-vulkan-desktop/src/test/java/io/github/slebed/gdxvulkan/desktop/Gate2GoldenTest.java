@@ -86,14 +86,15 @@ class Gate2GoldenTest {
     private void check(Gate2Scenes.Scene scene) throws Exception {
         try {
             scene.prepare(data, w, h);
-            checkWith(scene, false);
+            final byte[] expected = checkWith(scene, false);
             if (!(scene instanceof Gate2Scenes.ShapeScene)) checkWith(scene, true); // shapes do not go through a batch
+            checkStock(scene, expected);
         } finally {
             scene.dispose();
         }
     }
 
-    private void checkWith(Gate2Scenes.Scene scene, boolean polygonBatch) throws Exception {
+    private byte[] checkWith(Gate2Scenes.Scene scene, boolean polygonBatch) throws Exception {
         float[] bg = Gate2Scenes.BACKGROUND;
         String label = scene.name() + (polygonBatch ? " (VulkanPolygonSpriteBatch)" : " (VulkanSpriteBatch)");
         GLFW.glfwPollEvents();
@@ -139,5 +140,37 @@ class Gate2GoldenTest {
         }
         if (first instanceof Exception) throw (Exception)first;
         if (first instanceof Error) throw (Error)first;
+        return px;
+    }
+
+    /**
+     * The same scene drawn by libGDX's own {@code SpriteBatch}, {@code PolygonSpriteBatch} and {@code ShapeRenderer}, unmodified, through the GL shim: the same picture
+     * as the Vulkan classes drew (their shaders are the same dedicated ones).
+     */
+    private void checkStock(Gate2Scenes.Scene scene, byte[] expected) throws Exception {
+        final boolean shapes = scene instanceof Gate2Scenes.ShapeScene;
+        for (int variant = 0; variant < (shapes ? 1 : 2); variant++) {
+            final float[] bg = Gate2Scenes.BACKGROUND;
+            GLFW.glfwPollEvents();
+            assertTrue(frame.begin(bg[0], bg[1], bg[2], bg[3]));
+            if (shapes) {
+                final ShapeApi api = ShapeApi.stock();
+                try {
+                    ((Gate2Scenes.ShapeScene)scene).drawShapes(api, w, h);
+                } finally {
+                    api.dispose();
+                }
+            } else {
+                final com.badlogic.gdx.graphics.g2d.Batch batch = variant == 0 ? new com.badlogic.gdx.graphics.g2d.SpriteBatch()
+                    : new com.badlogic.gdx.graphics.g2d.PolygonSpriteBatch();
+                try {
+                    scene.draw(batch, w, h);
+                } finally {
+                    batch.dispose();
+                }
+            }
+            final byte[] px = frame.endAndCapture();
+            PictureCompare.assertSimilar(scene.name() + (variant == 0 ? "_stock" : "_stock_polygon"), expected, px, w, h, 2, 0.0005);
+        }
     }
 }

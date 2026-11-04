@@ -37,7 +37,7 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Spot lights, point-light shadows | libGDX's own default shader has neither |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (182 of 235 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (183 of 235 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). **Known problem:** on the Adreno 650 everything works except 3D models
@@ -224,7 +224,7 @@ Vulkan context yourself (a test, a tool), pass the frame explicitly: `new Vulkan
 | `Stage` | `VulkanStage` | the stock `Stage` with a `VulkanSpriteBatch`; same constructors |
 | `Texture`, `Pixmap`, `TextureAtlas`, `FrameBuffer`, `Mesh`, `BitmapFont`, `Skin`, `AssetManager`, `Model`, `Environment`, `Camera` and the Scene2D actors | **unchanged** | these run on the shim as they are |
 | `ShaderProgram` (GLSL source) | **unchanged**, or `VulkanShaderProgram` to give it to a `Vulkan...` batch | your libGDX GLSL as it is (`attribute`, `varying`, `uniform`, `gl_FragColor`, `texture2D`), translated and compiled when the program is created; same constructors and `setUniform...` calls; give it to a batch with `setShaderProgram(program)` (sprite batch, polygon batch; the shape renderer through `getRenderer()`). Uniform arrays, structs of floats and vectors (lights), `bool`, `int`, several textures (modern path) and `prependVertexCode` work; cube maps and more than one texture on a Vulkan 1.1 driver are refused with a message |
-| `Gdx.gl.glDrawArrays`, `glDrawElements`, `glUseProgram`, `glUniform*`, `glVertexAttribPointer`, ... | **unchanged** | served by the shim for a program with one vertex buffer (what `Mesh` and the stock classes use); vertex data in memory (a `Mesh` of the `VertexArray` type) and several vertex buffers are refused with a message |
+| `Gdx.gl.glDrawArrays`, `glDrawElements`, `glUseProgram`, `glUniform*`, `glVertexAttribPointer`, ... | **unchanged** | served by the shim for a program with one vertex buffer (what `Mesh` and the stock classes use); several vertex buffers and vertex formats other than floats and normalised bytes are refused with a message |
 
 Rules that carry over from stock libGDX: dispose textures and batches yourself; do not dispose a texture between drawing with it and the batch's `end()`.
 Stock batches keep the projection they were created with, so on a window resize update it the way you already do.

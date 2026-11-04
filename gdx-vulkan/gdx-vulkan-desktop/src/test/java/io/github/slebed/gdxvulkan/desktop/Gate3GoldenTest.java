@@ -124,6 +124,28 @@ class Gate3GoldenTest {
             }
             if (first instanceof Exception) throw (Exception)first;
             if (first instanceof Error) throw (Error)first;
+
+            // The same scene again with libGDX's own classes on the GL shim: SpriteBatch, ShapeRenderer, and the effects as GLSL programs, translated.
+            // The effect shaders are not the same text as the SPIR-V ones, so the pictures agree within a small tolerance, not bit for bit.
+            GLFW.glfwPollEvents();
+            assertTrue(frame.begin(bg[0], bg[1], bg[2], bg[3]));
+            final com.badlogic.gdx.graphics.g2d.SpriteBatch stockBatch = new com.badlogic.gdx.graphics.g2d.SpriteBatch();
+            stockBatch.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
+            final Gate3Scenes.Fx stockFx = Gate3Scenes.glFx();
+            try {
+                scene.draw(new Gate3Scenes.Env() {
+                    public Batch batch() { return stockBatch; }
+
+                    public Gate3Scenes.Fx fx() { return stockFx; }
+
+                    public ShapeApi shapes() { return ShapeApi.stock(); }
+                }, w, h);
+            } finally {
+                stockBatch.dispose();
+                stockFx.dispose();
+            }
+            final byte[] stockPx = frame.endAndCapture();
+            PictureCompare.assertSimilar(scene.name() + "_stock", px, stockPx, w, h, 6, 0.005);
         } finally {
             scene.dispose();
         }

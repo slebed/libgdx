@@ -115,6 +115,22 @@ class Gate5GoldenTest {
             }
             if (first instanceof Exception) throw (Exception)first;
             if (first instanceof Error) throw (Error)first;
+
+            // The same scene through libGDX's own ModelBatch, DefaultShader and DepthShader, unmodified, on the GL shim (translated, or taken from the shader
+            // bundle): the same picture as VulkanModelBatch within a small tolerance. A scene that shows what the stock default shader cannot do is skipped.
+            if (scene.hasStockReference()) {
+                GLFW.glfwPollEvents();
+                assertTrue(frame.begin(bg[0], bg[1], bg[2], bg[3]));
+                final Gate5Scenes.ModelApi stockApi = Gate5Scenes.stock();
+                try {
+                    com.badlogic.gdx.Gdx.gl.glViewport(0, 0, w, h);
+                    scene.draw(stockApi, w, h);
+                } finally {
+                    stockApi.dispose();
+                }
+                final byte[] stockPx = frame.endAndCapture();
+                PictureCompare.assertSimilar(scene.name() + "_stock", px, stockPx, w, h, 4, 0.005);
+            }
         } finally {
             scene.dispose();
         }
