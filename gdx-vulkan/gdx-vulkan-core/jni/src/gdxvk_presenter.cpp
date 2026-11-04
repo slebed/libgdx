@@ -966,8 +966,11 @@ struct Presenter::Impl {
             vkCmdDispatch(cmd, job.groups, 1, 1);
             if (i + 1 < computeQueue.size()) barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, kRw);
         }
-        // The frame's draws (the next command buffer in the submit) read the results in their vertex shaders.
-        barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, kShaderStages, kRw);
+        // The frame's draws (the next command buffer in the submit) read the results: in vertex and fragment shaders, as indirect draw arguments
+        // and as vertex and index data (plan, Phase 5: COMPUTE_SHADER -> DRAW_INDIRECT | VERTEX_ATTRIBUTE_INPUT).
+        barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+                kShaderStages | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                kRw | VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT);
         computeQueue.clear();
         endLabel(h, cmd);
         return true;
@@ -1980,6 +1983,27 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 s.flushPush(cmd);
                 vkCmdDrawIndexed(cmd, static_cast<uint32_t>(w[i]), 1, static_cast<uint32_t>(w[i + 1]), w[i + 2], 0);
                 i += 3;
+                break;
+            case cmd::DrawIndexedIndirect: {
+                if (!need(5)) return s.fail("command stream truncated (DrawIndexedIndirect)");
+                if (!s.passOpen() && !s.beginPass(cmd, nullptr)) return s.fail(s.error);
+                s.flushPush(cmd);
+                VkBuffer buf;
+                uint64_t base, size;
+                if (!s.h.resources->bufferInfo(w[i], buf, base, size)) return s.fail("command stream: unknown indirect buffer");
+                const VkDeviceSize off = base + offset64(w[i + 1], w[i + 2]);
+                const uint32_t count = static_cast<uint32_t>(w[i + 3]), stride = static_cast<uint32_t>(w[i + 4]);
+                i += 5;
+                // One command per draw: several in one call need the multiDrawIndirect feature, which is not required.
+                for (uint32_t d = 0; d < count; ++d) vkCmdDrawIndexedIndirect(cmd, buf, off + static_cast<VkDeviceSize>(d) * stride, 1, stride);
+                break;
+            }
+            case cmd::DrawIndexedInstanced:
+                if (!need(4)) return s.fail("command stream truncated (DrawIndexedInstanced)");
+                if (!s.passOpen() && !s.beginPass(cmd, nullptr)) return s.fail(s.error);
+                s.flushPush(cmd);
+                vkCmdDrawIndexed(cmd, static_cast<uint32_t>(w[i]), static_cast<uint32_t>(w[i + 3]), static_cast<uint32_t>(w[i + 1]), w[i + 2], 0);
+                i += 4;
                 break;
             case cmd::BindStorage: {
                 if (!need(1)) return s.fail("command stream truncated (BindStorage)");

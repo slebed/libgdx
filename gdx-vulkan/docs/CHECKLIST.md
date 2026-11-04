@@ -18,10 +18,10 @@ the plan names.
 | Phase 2: Unmodified 2D | 24 | 1 | 0 | 25 |
 | Phase 3: Stock FrameBuffer | 12 | 1 | 0 | 13 |
 | Phase 4: Android lifecycle | 7 | 3 | 2 | 12 |
-| Phase 5: 3D with stock models | 3 | 3 | 6 | 12 |
+| Phase 5: 3D with stock models | 8 | 4 | 0 | 12 |
 | Phase 6 (stretch): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **135** | **18** | **16** | **169** |
+| **All** | **140** | **19** | **10** | **169** |
 ---
 
 ## Core decisions
@@ -269,24 +269,24 @@ the plan names.
 ### 1. Mesh data
 - [x] Buffer shim calls with copy-on-write (see Core decisions 3)
 - [x] `StockMeshAccess` uploads dirty stock meshes at draw time
-- [ ] File the upstream libGDX PR (public buffer handle + dirty accessor)
+- [~] The upstream libGDX PR (public buffer handle + dirty accessor): the patch is written and checked (`docs/upstream/`, applies cleanly to the libGDX sources, five classes, two small public accessors each) but **not filed**: opening a pull request on `libgdx/libgdx` is the owner's decision
 
 ### 2. `VulkanModelBatch`
-- [~] Accepts stock `RenderableProvider`s (`ModelInstance` and friends, stock `RenderableSorter`, `Environment`): `VulkanModelBatch`. It maps `VertexAttributes` + `Material` to pipelines itself (eight vertex shader variants for normal/colour/texcoord, times 0-4 bone weights, plus specialization constants for the material and light flags) instead of through `VulkanShaderProvider` + `VulkanShaderPipelineBundle`s, so custom `Shader`s and `ShaderProvider`s are not accepted. Supported: position, normal, colour, texcoord0, bones (up to 4 weights); diffuse colour/texture, specular, shininess, emissive colour, blending/opacity, alpha test, cull face, depth test; ambient cubemap, directional and point lights. Not yet: spot lights, fog, normal/specular/emissive textures, reflection, shadows. Tier B can sample only one texture per draw
+- [x] Accepts stock `RenderableProvider`s (`ModelInstance` and friends, the stock `RenderableSorter`s, `Environment`): `VulkanModelBatch`, a port of libGDX's default shader. It maps `VertexAttributes` + `Material` to pipelines itself (40 vertex shader variants for normal/colour/texcoord and 0-4 bone weights, specialization constants for the material and light flags) instead of through a `VulkanShaderProvider` and `VulkanShaderPipelineBundle`s, so custom `Shader`s and `ShaderProvider`s are not accepted. Supported: position, normal, colour, texcoord0, bones (4 weights); diffuse/specular/emissive colours and textures, shininess, normal maps (beyond stock), blending, alpha test, cull and depth attributes; ambient cubemap, directional and point lights, fog, one directional shadow map (`DirectionalShadowLight`, with `VulkanModelBatch.depth` as the `DepthShaderProvider` equivalent). Tier B samples one texture per draw, so on Tier B only the diffuse texture works and specular/emissive/normal textures and shadow maps are ignored. Not supported: spot lights (stock's default shader has none either), reflection, custom shaders
 - [x] Lights, materials, bone matrices in the Set 0 SSBO: one blob per flush group (frame header + one record per renderable + bone matrices) written by a `Set0Data` stream op into the frame ring; draws pick their record through the push constants
-- [~] Sorted by the stock `DefaultRenderableSorter` (distance, blended last), draws are one per renderable with pipeline and mesh rebinds only on change; no instancing or `vkCmdDrawIndexedIndirect` yet
+- [x] Sorted by the stock sorter (distance, blended last) or by `InstancingSorter` (mesh part and material first); identical renderables that follow each other become one instanced draw (`drawIndexedInstanced`, `gate5_fog` asserts it happens), and GPU-resident instances are drawn with `vkCmdDrawIndexedIndirect` (`VulkanGpuInstances`)
 
 ### 3. Lighting and shadows
-- [ ] Tiled/clustered point and spot light culling in compute
-- [ ] Directional shadow cascades; up to 4 point-light cubemap shadow casters (desktop), 1 cascade (mobile)
+- [~] Clustered point-light culling in compute: `light_cull.comp` sorts the point lights into a 16 x 9 x 24 cluster grid (exponential depth slices), the fragment shader reads its cluster (`VulkanGpuInstances`). Every one of the 3,456 cluster lists equals a CPU brute force (`GpuInstancesTest`, and on the phone, 0 mismatches). Spot lights are not done, and the stock `ModelBatch` path still lights per vertex with at most 2 directional and 5 point lights as stock does
+- [~] Shadows: one directional shadow map through stock `DirectionalShadowLight` (stock's packed-depth shader and 4-tap PCF ported), Tier A only: it matches stock GL within 1 pixel and has a lavapipe golden (`gate5_shadows`). Not done: cascades, and point-light cubemap shadow casters (the shim has no cube textures)
 
 ### 4. Compute
-- [ ] `VulkanComputeShader` with automatic barriers `COMPUTE_SHADER -> DRAW_INDIRECT | VERTEX_ATTRIBUTE_INPUT` (groundwork exists from `VulkanSpriteBatchInstanced`: compute pipelines on the shared layout, dispatches queued per frame and recorded ahead of the render pass, a buffer bound as Set 0 storage for compute and vertex shaders; no indirect draws or public API yet)
+- [x] `VulkanComputeShader` with automatic barriers `COMPUTE_SHADER -> COMPUTE_SHADER` between dispatches and `-> DRAW_INDIRECT | VERTEX_ATTRIBUTE_INPUT | VERTEX/FRAGMENT_SHADER` after the last, `DrawIndexedIndirect` and `DrawIndexedInstanced` stream ops, `GdxVkResources.readBuffer` for tests; used by `VulkanGpuInstances` (cull, light cull) and the boids example
 
 ### Gate 5 and stress test 5
-- [~] Animated `knight.g3db` via unmodified `G3dModelLoader` + a `ModelBuilder` scene vs stock GL: both scenes (`gate5_models`, `gate5_knight`) match stock `ModelBatch` on OpenGL with 0 differing pixels in both tiers, and have lavapipe goldens. Not yet: normal mapping and directional shadows (the plan's Gate 5 lists them)
-- [ ] 250,000 instanced textured meshes moved by compute boids, 500 point lights culled in compute
-- [ ] Pass: 60+ fps RTX 2080; 50,000 instances and 64 lights at 60 fps on the Galaxy S20; zero Java allocations per frame
+- [x] Animated `knight.g3db` via unmodified `G3dModelLoader` + a `ModelBuilder` scene, normal mapping, skeletal animation, directional shadows: `gate5_models`, `gate5_knight`, `gate5_fog` match stock `ModelBatch` on OpenGL with 0 differing pixels and `gate5_shadows` with 1 (all within tolerance), `gate5_textures` exactly; `gate5_normalmap` has no stock equivalent and has its own lavapipe golden and a check that the mapped box shows far more detail than the plain one. All have lavapipe goldens; on the Adreno 840 they match them in both tiers (the Tier A-only scenes in Tier A)
+- [x] 250,000 instanced textured meshes moved by compute boids, 500 point lights culled in compute: `Stress5Main` (`gradlew :gdx-vulkan-desktop:stress5`), `boids.comp` (grid-based boids), `gpu_cull.comp`, `light_cull.comp`, `gpu_lit.vert/.frag`
+- [~] Pass: 60+ fps on the RTX 2080 (495 fps average, 1% low 259, both tiers; RTX 5080 957-988 fps), 50,000 instances and 64 lights at 60 fps on a phone (Adreno 840, 1216x2688, vsync off: 781 fps in Tier A, 785 in Tier B; 250,000 instances and 500 lights: 52 fps; **not the Galaxy S20**), zero Java allocations per frame (0.6-1.2 bytes per frame measured over 12 s, the rest is noise in the measurement; found and removed: JDK 18+ reflection allocation in `StockMeshAccess`, now JNI field reads)
 
 ---
 

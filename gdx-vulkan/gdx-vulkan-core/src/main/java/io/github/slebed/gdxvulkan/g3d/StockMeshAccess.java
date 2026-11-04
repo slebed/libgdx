@@ -12,6 +12,7 @@ import com.badlogic.gdx.graphics.glutils.VertexData;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
 import io.github.slebed.gdxvulkan.CommandStream;
+import io.github.slebed.gdxvulkan.FieldAccess;
 import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkPresenter;
 import io.github.slebed.gdxvulkan.gl.VulkanGL20;
@@ -39,7 +40,9 @@ import java.util.Map;
 public final class StockMeshAccess {
     private final VulkanGL20 gl;
     private final Field meshVertices, meshIndices;
+    private long meshVerticesId, meshIndicesId; // JNI field ids: reading through Field allocates on JDK 18+ (see FieldAccess)
     private final Map<Class<?>, Field[]> bufferFields = new HashMap<Class<?>, Field[]>(); // class -> {bufferHandle, isDirty, byteBuffer}
+    private final Map<Class<?>, long[]> bufferIds = new HashMap<Class<?>, long[]>(); // the same fields' JNI ids
 
     public StockMeshAccess(VulkanGL20 gl) {
         this.gl = gl;
@@ -48,6 +51,8 @@ public final class StockMeshAccess {
             meshIndices = Mesh.class.getDeclaredField("indices");
             meshVertices.setAccessible(true);
             meshIndices.setAccessible(true);
+            meshVerticesId = FieldAccess.id(Mesh.class, "vertices", "Lcom/badlogic/gdx/graphics/glutils/VertexData;");
+            meshIndicesId = FieldAccess.id(Mesh.class, "indices", "Lcom/badlogic/gdx/graphics/glutils/IndexData;");
         } catch (Exception e) {
             throw new GdxRuntimeException("gdx-vulkan: this libGDX version's Mesh has no vertices/indices fields (" + e + ")", e);
         }
@@ -69,6 +74,8 @@ public final class StockMeshAccess {
                 throw new GdxRuntimeException("gdx-vulkan: " + type.getSimpleName() + " no longer has bufferHandle/isDirty/byteBuffer (" + e + "): the libGDX version is not supported", e);
             }
             bufferFields.put(type, f);
+            bufferIds.put(type, new long[] {FieldAccess.id(type, "bufferHandle", "I"), FieldAccess.id(type, "isDirty", "Z"),
+                FieldAccess.id(type, "byteBuffer", "Ljava/nio/ByteBuffer;")});
         }
         return f;
     }
@@ -86,6 +93,26 @@ public final class StockMeshAccess {
      * @return the native buffer id, marked as read by this frame's draws
      */
     private int sync(Object data) {
+        final Field[] f = fieldsOf(data.getClass());
+        {
+            final long[] o = bufferIds.get(data.getClass());
+            if (o[0] == 0 || o[1] == 0 || o[2] == 0) return syncByReflection(data); // the lookup found no such field: let reflection decide
+            final int handle = FieldAccess.getInt(data, o[0]);
+            if (handle == 0) throw new GdxRuntimeException("gdx-vulkan: the mesh data was disposed");
+            if (FieldAccess.getBoolean(data, o[1]) || gl.bufferSize(handle) == 0) {
+                final ByteBuffer bytes = (ByteBuffer)FieldAccess.getObject(data, o[2]);
+                // The size is the typed buffer's limit, not the byte buffer's: loaders fill the data through getBuffer(true) and stock only
+                // applies the limit to the byte buffer inside bind(ShaderProgram), which a Vulkan batch never calls.
+                final int n = data instanceof VertexData ? ((VertexData)data).getBuffer(false).limit() * 4 : ((IndexData)data).getBuffer(false).limit() * 2;
+                gl.uploadBuffer(handle, bytes, n);
+                FieldAccess.setBoolean(data, o[1], false);
+            }
+            return gl.nativeBuffer(handle);
+        }
+    }
+
+    /** The same by reflection, kept for a libGDX whose fields the JNI lookup cannot find (it does not allocate on Android's runtime). */
+    private int syncByReflection(Object data) {
         final Field[] f = fieldsOf(data.getClass());
         try {
             final int handle = f[0].getInt(data);
@@ -121,6 +148,7 @@ public final class StockMeshAccess {
     }
 
     public VertexData vertexData(Mesh mesh) {
+        if (meshVerticesId != 0) return (VertexData)FieldAccess.getObject(mesh, meshVerticesId);
         try {
             return (VertexData)meshVertices.get(mesh);
         } catch (IllegalAccessException e) {
@@ -129,6 +157,7 @@ public final class StockMeshAccess {
     }
 
     public IndexData indexData(Mesh mesh) {
+        if (meshIndicesId != 0) return (IndexData)FieldAccess.getObject(mesh, meshIndicesId);
         try {
             return (IndexData)meshIndices.get(mesh);
         } catch (IllegalAccessException e) {

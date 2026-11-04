@@ -1,3 +1,4 @@
+#include <cstring>
 #include "gdxvk_resources.h"
 
 #include <algorithm>
@@ -90,7 +91,7 @@ int Resources::createBuffer(uint64_t size) {
         p.size = std::max(kPoolSize, size);
         VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         bi.size = p.size;
-        bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+        bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT /* readBuffer */ | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
         VmaAllocationCreateInfo ai{};
         ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
@@ -592,6 +593,70 @@ bool Resources::flushUploads() {
         }
     }
     vkDestroyCommandPool(h_.device, pool, nullptr);
+    h_.staging->collect(h_.timeline->completed());
+    return ok;
+}
+
+bool Resources::readBuffer(int id, uint64_t offset, void* dst, uint64_t size) {
+    VkBuffer src;
+    uint64_t base, total;
+    if (!bufferInfo(id, src, base, total) || offset + size > total || size == 0) return false;
+    VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bi.size = size;
+    bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    VmaAllocationCreateInfo ai{};
+    ai.usage = VMA_MEMORY_USAGE_AUTO;
+    ai.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    VkBuffer host;
+    VmaAllocation alloc;
+    VmaAllocationInfo info{};
+    if (vmaCreateBuffer(h_.allocator, &bi, &ai, &host, &alloc, &info) != VK_SUCCESS) return false;
+    VkCommandPoolCreateInfo pi{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+    pi.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pi.queueFamilyIndex = h_.graphicsQueueFamily;
+    VkCommandPool pool;
+    bool ok = vkCreateCommandPool(h_.device, &pi, nullptr, &pool) == VK_SUCCESS;
+    if (ok) {
+        VkCommandBufferAllocateInfo ci{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        ci.commandPool = pool;
+        ci.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        ci.commandBufferCount = 1;
+        VkCommandBuffer cmd;
+        ok = vkAllocateCommandBuffers(h_.device, &ci, &cmd) == VK_SUCCESS;
+        if (ok) {
+            VkCommandBufferBeginInfo bgn{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+            bgn.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            vkBeginCommandBuffer(cmd, &bgn);
+            const bool any = h_.staging->recordPending(cmd); // writes queued so far land first
+            VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+            mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+            mb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &mb, 0,
+                                 nullptr, 0, nullptr);
+            const VkBufferCopy region{base + offset, 0, size};
+            vkCmdCopyBuffer(cmd, src, host, 1, &region);
+            VkMemoryBarrier hb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+            hb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            hb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &hb, 0, nullptr, 0, nullptr);
+            vkEndCommandBuffer(cmd);
+            VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+            si.commandBufferCount = 1;
+            si.pCommandBuffers = &cmd;
+            uint64_t serial = 0;
+            ok = h_.timeline->submit(si, &serial) == VK_SUCCESS;
+            if (ok) {
+                if (any) h_.staging->markSubmitted(serial);
+                ok = h_.timeline->waitSerial(serial) == VK_SUCCESS;
+            }
+            if (ok) {
+                vmaInvalidateAllocation(h_.allocator, alloc, 0, size);
+                std::memcpy(dst, info.pMappedData, static_cast<size_t>(size));
+            }
+        }
+        vkDestroyCommandPool(h_.device, pool, nullptr);
+    }
+    vmaDestroyBuffer(h_.allocator, host, alloc);
     h_.staging->collect(h_.timeline->completed());
     return ok;
 }

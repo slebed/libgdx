@@ -104,6 +104,34 @@ JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeSetDept
     reinterpret_cast<gdxvk::Presenter*>(presenter)->setDepth(static_cast<int>(mode));
 }
 
+// Reading another class's fields without allocating (stock Mesh data: private fields, read every frame). JDK 18+ reflection runs on method handles
+// and allocates on every Field access; a JNI field ID read does not, and works the same on Android.
+JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeFieldId(JNIEnv* env, jclass, jclass type, jstring name, jstring sig) {
+    const char* n = env->GetStringUTFChars(name, nullptr);
+    const char* s = env->GetStringUTFChars(sig, nullptr);
+    jfieldID id = env->GetFieldID(type, n, s);
+    env->ReleaseStringUTFChars(name, n);
+    env->ReleaseStringUTFChars(sig, s);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    return reinterpret_cast<jlong>(id);
+}
+
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeGetIntField(JNIEnv* env, jclass, jobject o, jlong id) {
+    return env->GetIntField(o, reinterpret_cast<jfieldID>(id));
+}
+
+JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeGetBooleanField(JNIEnv* env, jclass, jobject o, jlong id) {
+    return env->GetBooleanField(o, reinterpret_cast<jfieldID>(id));
+}
+
+JNIEXPORT void JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeSetBooleanField(JNIEnv* env, jclass, jobject o, jlong id, jboolean v) {
+    env->SetBooleanField(o, reinterpret_cast<jfieldID>(id), v);
+}
+
+JNIEXPORT jobject JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeGetObjectField(JNIEnv* env, jclass, jobject o, jlong id) {
+    return env->GetObjectField(o, reinterpret_cast<jfieldID>(id));
+}
+
 // Memory pressure: runs what the GPU has finished with and frees idle staging blocks. Call it on the render thread.
 JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeTrimMemory(JNIEnv*, jclass, jlong handle) {
     const gdxvk::ContextHandles& h = reinterpret_cast<gdxvk::Context*>(handle)->handles();
@@ -319,6 +347,14 @@ JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeWri
     const bool ok = res(ctx).writeBuffer(id, static_cast<uint64_t>(offset), p + start, static_cast<uint64_t>(length));
     env->ReleasePrimitiveArrayCritical(data, p, JNI_ABORT);
     return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeReadBuffer(JNIEnv* env, jclass, jlong ctx, jint id, jlong offset,
+                                                                                         jbyteArray out, jint start, jint length) {
+    std::vector<uint8_t> tmp(static_cast<size_t>(length));
+    if (!res(ctx).readBuffer(id, static_cast<uint64_t>(offset), tmp.data(), static_cast<uint64_t>(length))) return JNI_FALSE;
+    env->SetByteArrayRegion(out, start, length, reinterpret_cast<const jbyte*>(tmp.data()));
+    return JNI_TRUE;
 }
 
 // The same, from a direct ByteBuffer (stock Mesh data lives in one): no copy through the Java heap.

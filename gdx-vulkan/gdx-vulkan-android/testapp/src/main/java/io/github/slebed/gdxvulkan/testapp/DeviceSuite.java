@@ -24,6 +24,9 @@ import io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle;
 import io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch;
 import io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatchInstanced;
 import io.github.slebed.gdxvulkan.desktop.Gate3Scenes;
+import io.github.slebed.gdxvulkan.desktop.Gate5Scenes;
+import io.github.slebed.gdxvulkan.g3d.VulkanComputeShader;
+import io.github.slebed.gdxvulkan.g3d.VulkanGpuInstances;
 import io.github.slebed.gdxvulkan.desktop.ShapeApi;
 import io.github.slebed.gdxvulkan.gl.VulkanGL20;
 
@@ -43,6 +46,7 @@ final class DeviceSuite {
     private static final int S = 64; // scene size; the batch projection maps it onto the whole surface
 
     private final GdxVkContext ctx;
+    private final GdxVkPresenter presenter;
     private final VulkanGL20 gl;
     private final GdxVkFrame frame;
     private final int W, H;
@@ -55,6 +59,7 @@ final class DeviceSuite {
     private DeviceSuite(android.content.Context app, GdxVkContext ctx, GdxVkPresenter presenter) {
         this.app = app;
         this.ctx = ctx;
+        this.presenter = presenter;
         tierA = ctx.caps().tier == VulkanCaps.Tier.A;
         System.loadLibrary("gdx"); // gdx2d, for Pixmap
         gfxW = presenter.width();
@@ -84,14 +89,260 @@ final class DeviceSuite {
         s.check("frameBufferDepthAndStencil", s::frameBufferDepthAndStencil);
         s.check("multiTargetFrameBuffer", s::multiTargetFrameBuffer);
         s.check("gate3Scenes", s::gate3);
+        s.check("gate5Scenes", s::gate5);
+        s.check("gpuInstancesAgainstACpuReference", s::gpuInstancesCorrectness);
         s.check("stress3Recording", s::stress3);
         s.check("soakTextureChurn", () -> s.soak(soakSeconds));
         s.check("stress2Single", () -> s.stress(1, stressSeconds));
         s.check("stress2Textures128", () -> s.stress(128, stressSeconds));
         s.check("instancedMillionSprites", () -> s.instancedMillion(stressSeconds));
+        s.check("stress5Instances50k", () -> s.stress5(50_000, 64, stressSeconds));
+        s.check("stress5Instances250k", () -> s.stress5(250_000, 500, stressSeconds));
         TestLog.i(TAG, "validationMessages=" + ctx.validationMessageCount());
         TestLog.i(TAG, (s.failed == 0 ? "DEVICESUITE PASS " : "DEVICESUITE FAIL ") + s.passed + " passed, " + s.failed + " failed, "
             + s.skipped + " skipped");
+    }
+
+    // ----------------------------------------------------------------------------------------------------------- Phase 5 (3D)
+
+    /** Gate 5: stock models through VulkanModelBatch, each scene against its lavapipe golden (and the normal-map scene's own check). */
+    private void gate5() throws Exception {
+        final int size = Gate5Scenes.SIZE;
+        com.badlogic.gdx.files.FileHandle data = Gdx.files.internal("data");
+        presenter.setDepth(GdxVkPresenter.DEPTH);
+        try {
+            for (final Gate5Scenes.Scene scene : Gate5Scenes.all()) {
+                if (!tierA && !scene.runsOnTierB()) {
+                    TestLog.i(TAG, scene.name() + ": needs a second texture per draw, Tier A only");
+                    continue;
+                }
+                scene.prepare(data);
+                gfxW = gfxH = size;
+                Gate5Scenes.ModelApi api = null;
+                try {
+                    float[] bg = Gate5Scenes.BACKGROUND;
+                    beginFrame(bg[0], bg[1], bg[2]);
+                    Gdx.gl.glViewport(0, 0, size, size);
+                    api = scene.name().equals("gate5_fog") ? Gate5Scenes.vulkanInstancing(frame) : Gate5Scenes.vulkan(frame);
+                    scene.draw(api, size, size);
+                    if (scene.name().equals("gate5_fog")) require(api.instancedDraws() > 0, "the grid of identical boxes became instanced draws");
+                    api.dispose();
+                    api = null;
+                    byte[] px = frame.endAndCapture();
+                    final byte[] corner = new byte[size * size * 4]; // the scene was drawn into the bottom-left corner
+                    for (int y = 0; y < size; y++) System.arraycopy(px, ((H - size + y) * W) * 4, corner, y * size * 4, size * 4);
+                    scene.verify(corner, size, size);
+                    compareWithGolden(scene.name(), px, size, Math.round(bg[0] * 255), Math.round(bg[1] * 255), Math.round(bg[2] * 255), 0.02);
+                } finally {
+                    if (api != null) api.dispose();
+                    gfxW = W;
+                    gfxH = H;
+                    Gdx.gl.glViewport(0, 0, W, H);
+                    scene.dispose();
+                }
+            }
+        } finally {
+            presenter.setDepth(GdxVkPresenter.DEPTH_NONE);
+            beginFrame(0, 0, 0);
+            frame.end(); // the swapchain loses its depth buffer at the next frame
+        }
+    }
+
+    /** The GPU's frustum cull and light clustering against the same computed on the CPU (the desktop GpuInstancesTest, on the phone's driver). */
+    private void gpuInstancesCorrectness() throws Exception {
+        presenter.setDepth(GdxVkPresenter.DEPTH);
+        final int grid = 24;
+        com.badlogic.gdx.graphics.g3d.Model model = new com.badlogic.gdx.graphics.g3d.utils.ModelBuilder().createBox(1f, 1f, 1f,
+            new com.badlogic.gdx.graphics.g3d.Material(), com.badlogic.gdx.graphics.VertexAttributes.Usage.Position | com.badlogic.gdx.graphics.VertexAttributes.Usage.Normal);
+        com.badlogic.gdx.graphics.PerspectiveCamera cam = new com.badlogic.gdx.graphics.PerspectiveCamera(30f, 256, 256);
+        cam.position.set(0f, 0f, 28f);
+        cam.lookAt(0f, 0f, 0f);
+        cam.near = 1f;
+        cam.far = 80f;
+        cam.update();
+        VulkanGpuInstances gpu = new VulkanGpuInstances(frame, model.meshes.first(), null, grid * grid, 6, 0);
+        try {
+            float[] d = new float[grid * grid * VulkanGpuInstances.INSTANCE_FLOATS];
+            for (int y = 0; y < grid; y++) {
+                for (int x = 0; x < grid; x++) {
+                    final int i = (y * grid + x) * VulkanGpuInstances.INSTANCE_FLOATS;
+                    d[i] = (x - grid / 2f + 0.5f) * 1.6f;
+                    d[i + 1] = (y - grid / 2f + 0.5f) * 1.6f;
+                    d[i + 3] = 0.8f;
+                    d[i + 7] = 1f;
+                }
+            }
+            gpu.setInstances(d, grid * grid);
+            final float[][] spec = {{-6f, 3f, 4f, 5f}, {5f, -2f, 8f, 4f}, {0f, 0f, 2f, 3f}, {9f, 6f, -3f, 6f}, {-3f, -7f, 10f, 7f}, {2f, 4f, 20f, 9f}};
+            float[] lights = new float[6 * VulkanGpuInstances.LIGHT_FLOATS];
+            for (int l = 0; l < 6; l++) {
+                System.arraycopy(spec[l], 0, lights, l * VulkanGpuInstances.LIGHT_FLOATS, 4);
+                lights[l * VulkanGpuInstances.LIGHT_FLOATS + 4] = 1f;
+                lights[l * VulkanGpuInstances.LIGHT_FLOATS + 7] = 2f;
+            }
+            gpu.setLights(lights, 6);
+            beginFrame(0.05f, 0.06f, 0.1f);
+            Gdx.gl.glClearColor(0.05f, 0.06f, 0.1f, 1f);
+            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+            gpu.render(cam, W, H);
+            frame.endAndCapture();
+
+            int expected = 0;
+            final float radius = (float)Math.sqrt(3) * 0.5f * 0.8f;
+            final java.util.HashSet<Integer> want = new java.util.HashSet<Integer>();
+            for (int i = 0; i < grid * grid; i++) {
+                final int b = i * VulkanGpuInstances.INSTANCE_FLOATS;
+                if (cam.frustum.sphereInFrustum(d[b], d[b + 1], d[b + 2], radius)) {
+                    want.add(i);
+                    expected++;
+                }
+            }
+            require(expected > 50 && expected < grid * grid, "the camera sees part of the grid: " + expected);
+            final int visible = gpu.readVisibleCount();
+            require(visible == expected, "GPU frustum cull kept " + visible + ", the CPU's keeps " + expected);
+            for (int idx : gpu.readVisible(visible)) require(want.remove(idx), "instance " + idx + " should not be visible");
+            require(want.isEmpty(), want.size() + " visible instances are missing");
+
+            int nonEmpty = 0, mismatches = 0;
+            final int cx = VulkanGpuInstances.CLUSTERS_X, cy = VulkanGpuInstances.CLUSTERS_Y, cz = VulkanGpuInstances.CLUSTERS_Z;
+            final float p00 = cam.projection.val[Matrix4.M00], p11 = cam.projection.val[Matrix4.M11];
+            final com.badlogic.gdx.math.Vector3[] view = new com.badlogic.gdx.math.Vector3[6];
+            for (int l = 0; l < 6; l++) view[l] = new com.badlogic.gdx.math.Vector3(spec[l][0], spec[l][1], spec[l][2]).mul(cam.view);
+            for (int z = 0; z < cz; z++) {
+                for (int y = 0; y < cy; y++) {
+                    for (int x = 0; x < cx; x++) {
+                        final double d0 = cam.near * Math.pow(cam.far / cam.near, z / (double)cz), d1 = cam.near * Math.pow(cam.far / cam.near, (z + 1) / (double)cz);
+                        final double nx0 = -1 + 2.0 * x / cx, nx1 = -1 + 2.0 * (x + 1) / cx, ny1 = 1 - 2.0 * y / cy, ny0 = 1 - 2.0 * (y + 1) / cy;
+                        double loX = 1e30, loY = 1e30, loZ = 1e30, hiX = -1e30, hiY = -1e30, hiZ = -1e30;
+                        for (int k = 0; k < 8; k++) {
+                            final double dd = (k & 4) != 0 ? d1 : d0;
+                            final double px = ((k & 1) != 0 ? nx1 : nx0) * dd / p00, py = ((k & 2) != 0 ? ny1 : ny0) * dd / p11, pz = -dd;
+                            loX = Math.min(loX, px); loY = Math.min(loY, py); loZ = Math.min(loZ, pz);
+                            hiX = Math.max(hiX, px); hiY = Math.max(hiY, py); hiZ = Math.max(hiZ, pz);
+                        }
+                        final java.util.ArrayList<Integer> w = new java.util.ArrayList<Integer>();
+                        for (int l = 0; l < 6; l++) {
+                            final double qx = Math.min(Math.max(view[l].x, loX), hiX), qy = Math.min(Math.max(view[l].y, loY), hiY), qz = Math.min(Math.max(view[l].z, loZ), hiZ);
+                            final double dx = view[l].x - qx, dy = view[l].y - qy, dz = view[l].z - qz;
+                            if (dx * dx + dy * dy + dz * dz <= (double)spec[l][3] * spec[l][3]) w.add(l);
+                        }
+                        final int[] got = gpu.readCluster(x + cx * (y + cy * z));
+                        if (!w.isEmpty()) nonEmpty++;
+                        if (got.length != w.size()) mismatches++;
+                        else for (int i = 0; i < got.length; i++) if (got[i] != w.get(i)) mismatches++;
+                    }
+                }
+            }
+            require(nonEmpty > 50, "the lights reach clusters: " + nonEmpty);
+            require(mismatches <= 2, "cluster lists differing from the CPU's: " + mismatches);
+            TestLog.i(TAG, "gpu cull kept " + visible + " of " + grid * grid + "; " + nonEmpty + " clusters hold lights, " + mismatches + " mismatches");
+        } finally {
+            gpu.dispose();
+            model.dispose();
+            presenter.setDepth(GdxVkPresenter.DEPTH_NONE);
+            beginFrame(0, 0, 0);
+            frame.end();
+        }
+    }
+
+    /** Stress test 5 on the phone: instances moved by a compute boids simulation, culled and lit on the GPU, for {@code seconds}. */
+    private void stress5(int instances, int lights, int seconds) throws Exception {
+        presenter.setDepth(GdxVkPresenter.DEPTH);
+        final float half = 100f;
+        final int gridSide = 32, gridUints = gridSide * gridSide * gridSide * 8;
+        com.badlogic.gdx.graphics.g3d.utils.ModelBuilder mb = new com.badlogic.gdx.graphics.g3d.utils.ModelBuilder();
+        mb.begin();
+        com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder part = mb.part("cone", GL20.GL_TRIANGLES,
+            com.badlogic.gdx.graphics.VertexAttributes.Usage.Position | com.badlogic.gdx.graphics.VertexAttributes.Usage.Normal, new com.badlogic.gdx.graphics.g3d.Material());
+        part.setVertexTransform(new Matrix4().setToRotation(com.badlogic.gdx.math.Vector3.X, 90f));
+        part.cone(0.8f, 2.4f, 0.8f, 8);
+        com.badlogic.gdx.graphics.g3d.Model model = mb.end();
+        VulkanGpuInstances gpu = new VulkanGpuInstances(frame, model.meshes.first(), null, instances, lights, gridUints);
+        try {
+            Random rnd = new Random(42);
+            float[] d = new float[instances * VulkanGpuInstances.INSTANCE_FLOATS];
+            for (int i = 0; i < instances; i++) {
+                final int b = i * VulkanGpuInstances.INSTANCE_FLOATS;
+                float x, y, z;
+                do {
+                    x = rnd.nextFloat() * 2 - 1;
+                    y = rnd.nextFloat() * 2 - 1;
+                    z = rnd.nextFloat() * 2 - 1;
+                } while (x * x + y * y + z * z > 1);
+                d[b] = x * 0.7f * half;
+                d[b + 1] = y * 0.7f * half;
+                d[b + 2] = z * 0.7f * half;
+                d[b + 3] = 0.6f;
+                d[b + 7] = 1f;
+                d[b + 8] = (rnd.nextFloat() - 0.5f) * 24f;
+                d[b + 9] = (rnd.nextFloat() - 0.5f) * 24f;
+                d[b + 10] = (rnd.nextFloat() - 0.5f) * 24f;
+            }
+            gpu.setInstances(d, instances);
+            float[] l = new float[lights * VulkanGpuInstances.LIGHT_FLOATS];
+            for (int i = 0; i < lights; i++) {
+                final int b = i * VulkanGpuInstances.LIGHT_FLOATS;
+                l[b] = (rnd.nextFloat() * 2 - 1) * half * 0.8f;
+                l[b + 1] = (rnd.nextFloat() * 2 - 1) * half * 0.8f;
+                l[b + 2] = (rnd.nextFloat() * 2 - 1) * half * 0.8f;
+                l[b + 3] = 14f + rnd.nextFloat() * 10f;
+                l[b + 4] = 0.5f + 0.5f * rnd.nextFloat();
+                l[b + 5] = 0.5f + 0.5f * rnd.nextFloat();
+                l[b + 6] = 0.5f + 0.5f * rnd.nextFloat();
+                l[b + 7] = 2.5f;
+            }
+            gpu.setLights(l, lights);
+            final VulkanComputeShader boids = new VulkanComputeShader(frame, "boids", "boids.comp");
+            final float[][] push = new float[3][];
+            for (int m = 0; m < 3; m++) {
+                push[m] = VulkanComputeShader.ints(VulkanComputeShader.newPush(), m, instances, gpu.instanceOffsetUints(), gpu.userOffsetUints());
+                push[m][24] = 1f / 60f;
+                push[m][25] = half;
+                push[m][27] = 14f;
+                push[m][28] = 0.6f;
+                push[m][29] = 1.2f;
+                push[m][30] = 0.8f;
+                push[m][31] = 40f;
+            }
+            final int clearGroups = VulkanComputeShader.groups(gridUints, 256), groups = VulkanComputeShader.groups(instances, 256);
+            com.badlogic.gdx.graphics.PerspectiveCamera cam = new com.badlogic.gdx.graphics.PerspectiveCamera(60f, W, H);
+            cam.near = 1f;
+            cam.far = 600f;
+            int frames = 0, total = 0;
+            long start = 0;
+            final long end = System.nanoTime() + (long)(seconds + 1) * 1_000_000_000L;
+            while (System.nanoTime() < end) {
+                final float t = total * 0.004f;
+                cam.position.set((float)Math.cos(t) * half * 1.25f, half * 0.35f, (float)Math.sin(t) * half * 1.25f);
+                cam.lookAt(0f, 0f, 0f);
+                cam.update();
+                beginFrame(0.02f, 0.03f, 0.06f);
+                Gdx.gl.glViewport(0, 0, W, H);
+                Gdx.gl.glClearColor(0.02f, 0.03f, 0.06f, 1f);
+                Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+                boids.dispatch(clearGroups, push[0], gpu.buffer());
+                boids.dispatch(groups, push[1], gpu.buffer());
+                boids.dispatch(groups, push[2], gpu.buffer());
+                gpu.render(cam, W, H);
+                frame.end();
+                total++;
+                if (total == 30) start = System.nanoTime();
+                else if (total > 30) frames++;
+            }
+            final double secs = (System.nanoTime() - start) / 1e9, fps = frames / secs;
+            final int visible = gpu.readVisibleCount();
+            TestLog.i(TAG, String.format("stress 5, %d instances and %d lights at %dx%d: %.1f fps (%d frames in %.1f s), %d instances visible in the last frame", instances, lights, W, H,
+                fps, frames, secs, visible));
+            require(visible > 0, "the cull kept something");
+            // The plan's mobile target is 60 fps at 50,000 instances and 64 lights (the phone's display may cap it at its refresh rate).
+            if (instances <= 50_000) require(fps >= 55, "fps " + fps + " is below the 60 fps target for " + instances + " instances");
+        } finally {
+            gpu.dispose();
+            model.dispose();
+            presenter.setDepth(GdxVkPresenter.DEPTH_NONE);
+            beginFrame(0, 0, 0);
+            frame.end();
+        }
     }
 
     // ---------------------------------------------------------------------------------------------------------------- harness
@@ -630,8 +881,15 @@ final class DeviceSuite {
         }
     }
 
-    /** The captured frame's bottom-left size x size pixels against {@code goldens/<name>.png} (a lavapipe render). */
     private void compareWithGolden(String name, byte[] px, int size) throws java.io.IOException {
+        compareWithGolden(name, px, size, 10, 10, 18, 0.25);
+    }
+
+    /**
+     * The captured frame's bottom-left size x size pixels against {@code goldens/<name>.png} (a lavapipe render).
+     * @param bgR the background colour (not counted as drawn), and the share of the picture that must be something else
+     */
+    private void compareWithGolden(String name, byte[] px, int size, int bgR, int bgG, int bgB, double minDrawn) throws java.io.IOException {
         android.graphics.Bitmap golden;
         try (java.io.InputStream in = app.getAssets().open("goldens/" + name + ".png")) {
             golden = android.graphics.BitmapFactory.decodeStream(in);
@@ -648,13 +906,13 @@ final class DeviceSuite {
                     Math.abs((px[i + 2] & 0xFF) - (e & 0xFF)));
                 maxDelta = Math.max(maxDelta, d);
                 if (d > 12) differing++; // the desktop's GPU-vs-lavapipe tolerance
-                if ((px[i] & 0xFF) != 10 || (px[i + 1] & 0xFF) != 10 || (px[i + 2] & 0xFF) != 18) drawn++;
+                if (Math.abs((px[i] & 0xFF) - bgR) > 2 || Math.abs((px[i + 1] & 0xFF) - bgG) > 2 || Math.abs((px[i + 2] & 0xFF) - bgB) > 2) drawn++;
             }
         }
         double share = differing / (double)(size * size);
         TestLog.i(TAG, String.format("%s vs lavapipe golden: differing=%d (%.3f%%) maxDelta=%d, %d of %d pixels drawn", name, differing, share * 100,
             maxDelta, drawn, size * size));
-        require(drawn > size * size / 4, name + " is nearly blank");
+        require(drawn > size * size * minDrawn, name + " is nearly blank");
         require(share <= 0.01, name + " differs from the golden: " + differing + " pixels (" + share * 100 + "%), max delta " + maxDelta);
     }
 

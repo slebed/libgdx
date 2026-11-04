@@ -13,7 +13,7 @@ import java.nio.IntBuffer;
  */
 public final class CommandStream {
     public static final int BIND_PIPELINE = 1, PUSH_CONSTANTS = 2, VIEWPORT = 3, SCISSOR = 4, SCISSOR_ENABLE = 5, CLEAR = 6, BIND_VERTEX = 7,
-        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13, BIND_TARGET = 14, DEPTH_STATE = 15, STENCIL_STATE = 16, CULL_MODE = 17, PUSH_RANGE = 18, BIND_VERTEX_BUFFER = 19, SET0_DATA = 20;
+        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13, BIND_TARGET = 14, DEPTH_STATE = 15, STENCIL_STATE = 16, CULL_MODE = 17, PUSH_RANGE = 18, BIND_VERTEX_BUFFER = 19, SET0_DATA = 20, DRAW_INDEXED_INSTANCED = 21, DRAW_INDEXED_INDIRECT = 22;
     public static final int INDEX_U16 = 0, INDEX_U32 = 1;
 
     private ByteBuffer buffer;   // the stream as the native side reads it
@@ -267,6 +267,31 @@ public final class CommandStream {
         w[p++] = firstIndex;
         w[p++] = vertexOffset;
         n = p;
+    }
+
+    /**
+     * {@code drawCount} indexed draws whose arguments (VkDrawIndexedIndirectCommand: indexCount, instanceCount, firstIndex, vertexOffset, firstInstance
+     * = 0, as 20-byte records {@code stride} apart) the GPU wrote into a resource buffer, typically a compute shader that culled the instances.
+     * Compute dispatches queued before the frame's draws are ordered ahead of them (see {@code GdxVkFrame.dispatch}).
+     */
+    public void drawIndexedIndirect(int resourceBuffer, long offset, int drawCount, int stride) {
+        ensure(6);
+        put(DRAW_INDEXED_INDIRECT);
+        put(resourceBuffer);
+        put((int)offset);
+        put((int)(offset >>> 32));
+        put(drawCount);
+        put(stride);
+    }
+
+    /** {@code instanceCount} instances of an indexed draw; the vertex shader sees {@code gl_InstanceIndex} 0..n-1. */
+    public void drawIndexedInstanced(int indexCount, int firstIndex, int vertexOffset, int instanceCount) {
+        ensure(5);
+        put(DRAW_INDEXED_INSTANCED);
+        put(indexCount);
+        put(firstIndex);
+        put(vertexOffset);
+        put(instanceCount);
     }
 
     public void draw(int vertexCount, int firstVertex) {

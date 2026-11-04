@@ -15,6 +15,8 @@ Source derived from libGDX
   and these GLSL files are ports of libGDX's default.vertex.glsl and default.fragment.glsl (Apache-2.0): the lighting and material math is theirs, rewritten for
   Vulkan with specialization constants in place of #define flags:
     gdx-vulkan-core/src/main/shaders/model_default_vertex.glsl, model_default.frag and the generated model_default_v*.vert wrappers
+  and these are ports of libGDX's depth.vertex.glsl and depth.fragment.glsl (the shadow-map depth pass, Apache-2.0):
+    gdx-vulkan-core/src/main/shaders/model_depth_vertex.glsl, model_depth.frag and the generated model_depth_u*.vert wrappers
 
 Test assets (test-assets/data)
   Taken unchanged from libGDX's repository (tests/gdx-tests-android/assets/data), where they are distributed with libGDX's own tests:

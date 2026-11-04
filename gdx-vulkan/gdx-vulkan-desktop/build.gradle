@@ -129,6 +129,19 @@ tasks.register('runClearDemo', JavaExec) {
     systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
 }
 
+// Stress test 5 (plan, Phase 5): 250,000 boids moved by compute, culled and drawn indirectly, lit by 500 clustered point lights. Pass: 60+ fps on the
+// RTX 2080 (-Dgdxvulkan.device=1 on this machine) and no allocation per frame. -Dgdxvulkan.stress5.instances=N / .lights=N / .seconds=N / .report=true.
+tasks.register('stress5', JavaExec) {
+    description = 'Stress test 5: GPU-driven instancing, compute boids and clustered lights.'
+    group = 'verification'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.github.slebed.gdxvulkan.desktop.Stress5Main'
+    dependsOn 'testClasses', ':gdx-vulkan-core:buildNatives'
+    systemProperty 'gdxvulkan.native.path', coreNative.get().asFile.absolutePath
+    systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'false')
+    System.properties.each { k, v -> if (k.toString().startsWith('gdxvulkan.')) systemProperty k.toString(), v.toString() }
+}
+
 // Stress test 3 (plan, Phase 3): recording 100,000 draws as a plain C++ loop (the floor) against replaying them from Java through the
 // command stream. Pass: <= 1.3x the floor. -Dgdxvulkan.device=N, -Dgdxvulkan.forceTierB=true, -Dgdxvulkan.stress3.report=true.
 tasks.register('stress3', JavaExec) {

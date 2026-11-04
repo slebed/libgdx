@@ -19,11 +19,17 @@ final class GdxVkNative {
 
     /** Android only (the symbol is absent from desktop builds). {@code surface} is an android.view.Surface. */
     static native int nativeTrimMemory(long ctx);
+    static native long nativeFieldId(Class<?> type, String name, String signature);
+    static native int nativeGetIntField(Object o, long id);
+    static native boolean nativeGetBooleanField(Object o, long id);
+    static native void nativeSetBooleanField(Object o, long id, boolean v);
+    static native Object nativeGetObjectField(Object o, long id);
     static native void nativeSetDepth(long presenter, int mode);
     static native void nativeDebugForceRotation(long presenter, int quarterTurns);
     static native long nativeCreatePresenterAndroid(long ctx, Object surface, int width, int height, boolean vsync, boolean preRotate);
 
     static native int nativeCreateBuffer(long ctx, long size);
+    static native boolean nativeReadBuffer(long ctx, int id, long offset, byte[] out, int start, int length);
     static native boolean nativeWriteBufferDirect(long ctx, int id, long offset, java.nio.ByteBuffer data, int start, int length);
     static native boolean nativeWriteBuffer(long ctx, int id, long offset, byte[] data, int start, int length);
     static native void nativeDestroyBuffer(long ctx, int id);

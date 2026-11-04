@@ -66,6 +66,8 @@ public:
     bool writeBuffer(int id, uint64_t offset, const void* data, uint64_t size);
     void destroyBuffer(int id);
     bool bufferInfo(int id, VkBuffer& buffer, uint64_t& offset, uint64_t& size);
+    // Copies a buffer range back to the host and waits for it: for tests and diagnostics, never for a frame (it stalls the GPU).
+    bool readBuffer(int id, uint64_t offset, void* dst, uint64_t size);
 
     // ---- textures ----
     int createTexture(const TextureDesc& desc, const void* data, uint64_t dataBytes, const SamplerKey& sampler); // -1 on failure

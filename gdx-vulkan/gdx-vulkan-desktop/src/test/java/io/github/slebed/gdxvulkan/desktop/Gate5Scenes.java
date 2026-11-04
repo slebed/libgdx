@@ -22,6 +22,7 @@ import com.badlogic.gdx.graphics.g3d.environment.PointLight;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.graphics.g3d.environment.DirectionalShadowLight;
 import com.badlogic.gdx.utils.UBJsonReader;
 import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
 import com.badlogic.gdx.graphics.g3d.utils.AnimationController;
@@ -50,13 +51,30 @@ public final class Gate5Scenes {
 
         void render(Iterable<ModelInstance> instances, Environment environment);
 
+        void render(Iterable<ModelInstance> instances);
+
         void end();
 
         void dispose();
+
+        /** The batch for the shadow pass (stock: ModelBatch with a DepthShaderProvider). */
+        ModelApi depth();
+
+        /** How many draws were instanced (Vulkan only; -1 on stock). */
+        default int instancedDraws() { return -1; }
     }
 
     public interface Scene {
         String name();
+
+        /** False for scenes that need more than one texture per draw (specular/emissive textures, shadow maps): Tier B cannot sample them. */
+        default boolean runsOnTierB() { return true; }
+
+        /** False for a scene that shows a feature stock's default shader does not have (normal mapping): it has a lavapipe golden and its own check, no GL reference. */
+        default boolean hasStockReference() { return true; }
+
+        /** An extra check on the Vulkan picture (RGBA, row 0 at the top), for scenes whose point is something a golden alone cannot say. */
+        default void verify(byte[] rgba, int width, int height) {}
 
         /** @param data the bundled test assets' data directory */
         void prepare(FileHandle data) throws Exception;
@@ -69,7 +87,7 @@ public final class Gate5Scenes {
     private Gate5Scenes() {}
 
     public static Scene[] all() {
-        Scene[] all = {new Models(), new Knight()};
+        Scene[] all = {new Models(), new Knight(), new FogInstances(), new Textures(), new Shadows(), new NormalMap()};
         final String only = System.getenv("GDXVK_G5_ONLY"); // diagnosis: run one scene
         if (only == null) return all;
         for (Scene sc : all) if (sc.name().contains(only)) return new Scene[] {sc};
@@ -78,22 +96,38 @@ public final class Gate5Scenes {
 
     /** Stock ModelBatch on OpenGL. */
     public static ModelApi stock() {
-        final ModelBatch b = new ModelBatch();
+        return stockApi(new ModelBatch());
+    }
+
+    private static ModelApi stockApi(final ModelBatch b) {
         return new ModelApi() {
             public void begin(com.badlogic.gdx.graphics.Camera c) { b.begin(c); }
             public void render(Iterable<ModelInstance> p, Environment e) { b.render(p, e); }
+            public void render(Iterable<ModelInstance> p) { b.render(p); }
             public void end() { b.end(); }
             public void dispose() { b.dispose(); }
+            public ModelApi depth() { return stockApi(new ModelBatch(new com.badlogic.gdx.graphics.g3d.utils.DepthShaderProvider())); }
         };
     }
 
     public static ModelApi vulkan(GdxVkFrame frame) {
-        final VulkanModelBatch b = new VulkanModelBatch(frame);
+        return vulkanApi(frame, new VulkanModelBatch(frame), false);
+    }
+
+    /** Vulkan with the instancing sorter: identical renderables become instanced draws. */
+    public static ModelApi vulkanInstancing(GdxVkFrame frame) {
+        return vulkanApi(frame, new VulkanModelBatch(frame, new io.github.slebed.gdxvulkan.g3d.InstancingSorter()), false);
+    }
+
+    private static ModelApi vulkanApi(final GdxVkFrame frame, final VulkanModelBatch b, final boolean isDepth) {
         return new ModelApi() {
             public void begin(com.badlogic.gdx.graphics.Camera c) { b.begin(c); }
             public void render(Iterable<ModelInstance> p, Environment e) { b.render(p, e); }
+            public void render(Iterable<ModelInstance> p) { b.render(p); }
             public void end() { b.end(); }
             public void dispose() { b.dispose(); }
+            public ModelApi depth() { return vulkanApi(frame, VulkanModelBatch.depth(frame), true); }
+            public int instancedDraws() { return b.getInstancedDrawCalls(); }
         };
     }
 
@@ -221,6 +255,286 @@ public final class Gate5Scenes {
             if (model != null) model.dispose();
             model = null;
             instance = null;
+        }
+    }
+
+    /** A receding grid of identical boxes in fog: instanced draws on Vulkan, stock's per-object draws on GL, same picture. */
+    private static final class FogInstances implements Scene {
+        private Model box, ground;
+        private final Array<ModelInstance> instances = new Array<ModelInstance>();
+        private Environment environment;
+
+        @Override public String name() { return "gate5_fog"; }
+
+        @Override public void prepare(FileHandle data) {
+            final int usage = Usage.Position | Usage.Normal;
+            ModelBuilder mb = new ModelBuilder();
+            box = mb.createBox(1f, 1f, 1f, new Material(ColorAttribute.createDiffuse(0.8f, 0.45f, 0.2f, 1f)), usage);
+            ground = mb.createBox(30f, 0.1f, 60f, new Material(ColorAttribute.createDiffuse(0.4f, 0.5f, 0.35f, 1f)), usage);
+            instances.add(new ModelInstance(ground, 0f, -0.55f, -20f));
+            for (int row = 0; row < 8; row++) {
+                for (int col = 0; col < 5; col++) {
+                    instances.add(new ModelInstance(box, (col - 2) * 2.2f, 0f, -row * 4f));
+                }
+            }
+            environment = new Environment();
+            environment.set(new ColorAttribute(ColorAttribute.AmbientLight, 0.3f, 0.3f, 0.35f, 1f));
+            environment.set(new ColorAttribute(ColorAttribute.Fog, 0.45f, 0.5f, 0.6f, 1f));
+            environment.add(new DirectionalLight().set(0.85f, 0.8f, 0.75f, -0.5f, -1f, -0.4f));
+        }
+
+        @Override public void draw(ModelApi api, int width, int height) {
+            Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+            PerspectiveCamera camera = new PerspectiveCamera(55f, width, height);
+            camera.position.set(0f, 3f, 9f);
+            camera.lookAt(0f, 0f, -14f);
+            camera.near = 0.5f;
+            camera.far = 40f;
+            camera.update();
+            api.begin(camera);
+            api.render(instances, environment);
+            api.end();
+        }
+
+        @Override public void dispose() {
+            if (box != null) box.dispose();
+            if (ground != null) ground.dispose();
+            box = ground = null;
+            instances.clear();
+        }
+    }
+
+    /** Specular and emissive textures with their UV transforms. Needs a second texture per draw: Tier A. */
+    private static final class Textures implements Scene {
+        private Model model;
+        private final Array<ModelInstance> instances = new Array<ModelInstance>();
+        private Texture specular, emissive, diffuse;
+        private Environment environment;
+
+        @Override public String name() { return "gate5_textures"; }
+
+        @Override public boolean runsOnTierB() { return false; }
+
+        private static Texture pattern(int n, boolean stripes) {
+            Pixmap pm = new Pixmap(n, n, Pixmap.Format.RGBA8888);
+            for (int y = 0; y < n; y++) {
+                for (int x = 0; x < n; x++) {
+                    if (stripes) pm.setColor(((x / 2) & 1) == 0 ? new Color(1f, 0.2f, 0.9f, 1f) : Color.BLACK);
+                    else pm.setColor(((x / 2 + y / 2) & 1) == 0 ? Color.WHITE : new Color(0.1f, 0.1f, 0.1f, 1f));
+                    pm.drawPixel(x, y);
+                }
+            }
+            Texture t = new Texture(pm);
+            t.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
+            pm.dispose();
+            return t;
+        }
+
+        @Override public void prepare(FileHandle data) {
+            specular = pattern(8, false);
+            emissive = pattern(8, true);
+            diffuse = pattern(4, false);
+            final int usage = Usage.Position | Usage.Normal | Usage.TextureCoordinates;
+            ModelBuilder mb = new ModelBuilder();
+            TextureAttribute spec = TextureAttribute.createSpecular(specular);
+            spec.scaleU = spec.scaleV = 2f; // UV transform
+            model = mb.createBox(1.6f, 1.6f, 1.6f, new Material(ColorAttribute.createDiffuse(0.55f, 0.6f, 0.7f, 1f), TextureAttribute.createDiffuse(diffuse),
+                ColorAttribute.createSpecular(1f, 1f, 1f, 1f), spec, FloatAttribute.createShininess(24f), TextureAttribute.createEmissive(emissive)), usage);
+            instances.add(new ModelInstance(model, -1.1f, 0f, 0f));
+            instances.add(new ModelInstance(model, 1.3f, 0.2f, -0.6f));
+            instances.get(1).transform.rotate(0f, 1f, 0f, 40f);
+            environment = new Environment();
+            environment.set(new ColorAttribute(ColorAttribute.AmbientLight, 0.2f, 0.2f, 0.25f, 1f));
+            environment.add(new DirectionalLight().set(0.9f, 0.9f, 0.85f, -0.6f, -0.5f, -1f));
+            environment.add(new DirectionalLight().set(0.3f, 0.3f, 0.4f, 0.8f, -0.1f, -0.3f));
+        }
+
+        @Override public void draw(ModelApi api, int width, int height) {
+            Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+            PerspectiveCamera camera = new PerspectiveCamera(50f, width, height);
+            camera.position.set(1f, 1.4f, 5f);
+            camera.lookAt(0.1f, 0f, 0f);
+            camera.near = 0.5f;
+            camera.far = 20f;
+            camera.update();
+            api.begin(camera);
+            api.render(instances, environment);
+            api.end();
+        }
+
+        @Override public void dispose() {
+            if (model != null) model.dispose();
+            if (specular != null) specular.dispose();
+            if (emissive != null) emissive.dispose();
+            if (diffuse != null) diffuse.dispose();
+            model = null;
+            specular = emissive = diffuse = null;
+            instances.clear();
+        }
+    }
+
+    /** A directional shadow light: a depth pass into its framebuffer, then the lit pass samples it. Needs a second texture per draw: Tier A. */
+    private static final class Shadows implements Scene {
+        private Model floor, box, sphere, cone;
+        private final Array<ModelInstance> instances = new Array<ModelInstance>();
+        private DirectionalShadowLight shadowLight;
+        private Environment environment;
+
+        @Override public String name() { return "gate5_shadows"; }
+
+        @Override public boolean runsOnTierB() { return false; }
+
+        @Override public void prepare(FileHandle data) {
+            final int usage = Usage.Position | Usage.Normal;
+            ModelBuilder mb = new ModelBuilder();
+            floor = mb.createBox(10f, 0.2f, 10f, new Material(ColorAttribute.createDiffuse(0.7f, 0.7f, 0.65f, 1f)), usage);
+            box = mb.createBox(1.4f, 1.4f, 1.4f, new Material(ColorAttribute.createDiffuse(0.85f, 0.2f, 0.15f, 1f)), usage);
+            sphere = mb.createSphere(1.4f, 1.4f, 1.4f, 20, 14, new Material(ColorAttribute.createDiffuse(0.2f, 0.4f, 0.9f, 1f)), usage);
+            cone = mb.createCone(1.2f, 1.8f, 1.2f, 16, new Material(ColorAttribute.createDiffuse(0.2f, 0.8f, 0.3f, 1f)), usage);
+            instances.add(new ModelInstance(floor, 0f, -0.1f, 0f));
+            instances.add(new ModelInstance(box, -1.8f, 0.8f, 0.2f));
+            instances.add(new ModelInstance(sphere, 0.6f, 1.2f, -0.8f));
+            instances.add(new ModelInstance(cone, 1.8f, 0.9f, 1.0f));
+
+            shadowLight = new DirectionalShadowLight(1024, 1024, 14f, 14f, 1f, 30f);
+            shadowLight.set(0.85f, 0.82f, 0.75f, -0.6f, -1f, -0.5f);
+            environment = new Environment();
+            environment.set(new ColorAttribute(ColorAttribute.AmbientLight, 0.28f, 0.28f, 0.33f, 1f));
+            environment.add(shadowLight);
+            environment.shadowMap = shadowLight;
+        }
+
+        @Override public void draw(ModelApi api, int width, int height) {
+            shadowLight.begin(Vector3.Zero, new Vector3(0f, 0f, -1f));
+            ModelApi shadowPass = api.depth();
+            shadowPass.begin(shadowLight.getCamera());
+            shadowPass.render(instances);
+            shadowPass.end();
+            shadowPass.dispose();
+            shadowLight.end();
+
+            Gdx.gl.glViewport(0, 0, width, height);
+            Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+            PerspectiveCamera camera = new PerspectiveCamera(55f, width, height);
+            camera.position.set(4.6f, 4.8f, 6.4f);
+            camera.lookAt(0f, 0.3f, 0f);
+            camera.near = 0.5f;
+            camera.far = 40f;
+            camera.update();
+            api.begin(camera);
+            api.render(instances, environment);
+            api.end();
+        }
+
+        @Override public void dispose() {
+            if (shadowLight != null) shadowLight.dispose();
+            if (floor != null) floor.dispose();
+            if (box != null) box.dispose();
+            if (sphere != null) sphere.dispose();
+            if (cone != null) cone.dispose();
+            shadowLight = null;
+            floor = box = sphere = cone = null;
+            instances.clear();
+        }
+    }
+
+    /** Normal mapping (beyond stock's default shader): two identical boxes, the left one with a normal map under a grazing light. Tier A. */
+    private static final class NormalMap implements Scene {
+        private Model model;
+        private Texture normalMap;
+        private final Array<ModelInstance> instances = new Array<ModelInstance>();
+        private Environment environment;
+
+        @Override public String name() { return "gate5_normalmap"; }
+
+        @Override public boolean runsOnTierB() { return false; }
+
+        @Override public boolean hasStockReference() { return false; }
+
+        @Override public void prepare(FileHandle data) {
+            // A normal map of a grid of round bumps: the normal tilts away from the top of each bump.
+            final int n = 64;
+            Pixmap pm = new Pixmap(n, n, Pixmap.Format.RGBA8888);
+            for (int y = 0; y < n; y++) {
+                for (int x = 0; x < n; x++) {
+                    final double u = x / (double)n, v = y / (double)n;
+                    final double dhdu = 0.5 * 8 * Math.PI * Math.cos(8 * Math.PI * u) * Math.sin(8 * Math.PI * v);
+                    final double dhdv = 0.5 * 8 * Math.PI * Math.sin(8 * Math.PI * u) * Math.cos(8 * Math.PI * v);
+                    final double s = 0.18;
+                    double nx = -dhdu * s, ny = -dhdv * s, nz = 1;
+                    final double len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+                    pm.setColor((float)(nx / len * 0.5 + 0.5), (float)(ny / len * 0.5 + 0.5), (float)(nz / len * 0.5 + 0.5), 1f);
+                    pm.drawPixel(x, y);
+                }
+            }
+            normalMap = new Texture(pm);
+            normalMap.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+            normalMap.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
+            pm.dispose();
+
+            final int usage = Usage.Position | Usage.Normal | Usage.TextureCoordinates;
+            ModelBuilder mb = new ModelBuilder();
+            TextureAttribute normal = TextureAttribute.createNormal(normalMap);
+            normal.scaleU = normal.scaleV = 2f;
+            Model mapped = mb.createBox(2.2f, 2.2f, 2.2f, new Material(ColorAttribute.createDiffuse(0.7f, 0.7f, 0.72f, 1f), normal), usage);
+            Model plain = mb.createBox(2.2f, 2.2f, 2.2f, new Material(ColorAttribute.createDiffuse(0.7f, 0.7f, 0.72f, 1f)), usage);
+            // One model owning both, so there is one thing to dispose.
+            model = mapped;
+            instances.add(new ModelInstance(mapped, -1.5f, 0f, 0f));
+            plain2 = plain;
+            instances.add(new ModelInstance(plain, 1.5f, 0f, 0f));
+            environment = new Environment();
+            environment.set(new ColorAttribute(ColorAttribute.AmbientLight, 0.12f, 0.12f, 0.14f, 1f));
+            environment.add(new DirectionalLight().set(0.9f, 0.88f, 0.8f, -1f, -0.35f, -0.5f));
+            environment.add(new DirectionalLight().set(0.25f, 0.3f, 0.45f, 0.8f, 0.2f, -0.6f));
+        }
+
+        private Model plain2;
+
+        @Override public void draw(ModelApi api, int width, int height) {
+            Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+            PerspectiveCamera camera = new PerspectiveCamera(45f, width, height);
+            camera.position.set(0f, 0.6f, 7.5f);
+            camera.lookAt(0f, 0f, 0f);
+            camera.near = 0.5f;
+            camera.far = 30f;
+            camera.update();
+            api.begin(camera);
+            api.render(instances, environment);
+            api.end();
+        }
+
+        /** The mapped box's lit face varies a lot more than the plain box's flat-lit face. */
+        @Override public void verify(byte[] px, int w, int h) {
+            final double mapped = lumaVariance(px, w, h, w * 0.20, w * 0.45), plain = lumaVariance(px, w, h, w * 0.55, w * 0.80);
+            if (!(mapped > 2.5 * plain + 20)) {
+                throw new AssertionError("normal mapping should add detail: luminance variance " + mapped + " (mapped box) against " + plain + " (plain box)");
+            }
+        }
+
+        private static double lumaVariance(byte[] px, int w, int h, double x0, double x1) {
+            double sum = 0, sum2 = 0;
+            int n = 0;
+            for (int y = (int)(h * 0.42); y < (int)(h * 0.58); y++) {
+                for (int x = (int)x0; x < (int)x1; x++) {
+                    final int o = (y * w + x) * 4;
+                    final double l = 0.299 * (px[o] & 255) + 0.587 * (px[o + 1] & 255) + 0.114 * (px[o + 2] & 255);
+                    sum += l;
+                    sum2 += l * l;
+                    n++;
+                }
+            }
+            final double mean = sum / n;
+            return sum2 / n - mean * mean;
+        }
+
+        @Override public void dispose() {
+            if (model != null) model.dispose();
+            if (plain2 != null) plain2.dispose();
+            if (normalMap != null) normalMap.dispose();
+            model = plain2 = null;
+            normalMap = null;
+            instances.clear();
         }
     }
 }

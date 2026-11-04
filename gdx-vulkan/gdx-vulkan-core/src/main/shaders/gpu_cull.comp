@@ -1,0 +1,51 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#define GDX_SKIP_SET0
+#include "gdx_vk_common.glsl"
+#include "gpu_world.glsl"
+
+// VulkanGpuInstances, frustum culling: mode 0 (u_indices.x = 0) resets the indirect command, mode 1 tests every instance's bounding sphere against the
+// camera's six frustum planes and appends the survivors to the visible list while counting them in the indirect command's instanceCount. The two modes are
+// separate dispatches, so the reset is complete before any thread counts.
+layout(local_size_x = 256) in;
+
+layout(std430, set = 0, binding = 1) buffer GdxWorld {
+    uint w[];
+};
+
+float f(uint i) {
+    return uintBitsToFloat(w[i]);
+}
+
+void main() {
+    const uint indirect = w[H_OFFSETS + 2u];
+    if (gdx_pc.u_indices.x == 0) {
+        if (gl_GlobalInvocationID.x == 0u) {
+            w[indirect] = w[H_OFFSETS2 + 1u]; // indexCount
+            w[indirect + 1u] = 0u;            // instanceCount
+            w[indirect + 2u] = 0u;            // firstIndex
+            w[indirect + 3u] = 0u;            // vertexOffset
+            w[indirect + 4u] = 0u;            // firstInstance
+        }
+        return;
+    }
+
+    const uint i = gl_GlobalInvocationID.x;
+    if (i >= w[H_COUNTS]) return;
+    const uint b = w[H_OFFSETS] + i * INSTANCE_UINTS;
+    const vec3 centre = vec3(f(b), f(b + 1u), f(b + 2u));
+    const float radius = f(b + 3u) * f(H_PROJ + 3u);
+
+    // Frustum planes from the rows of the combined matrix (columns are stored one after another): row r = (m[r], m[4+r], m[8+r], m[12+r]).
+    vec4 row0 = vec4(f(H_VIEWPROJ + 0u), f(H_VIEWPROJ + 4u), f(H_VIEWPROJ + 8u), f(H_VIEWPROJ + 12u));
+    vec4 row1 = vec4(f(H_VIEWPROJ + 1u), f(H_VIEWPROJ + 5u), f(H_VIEWPROJ + 9u), f(H_VIEWPROJ + 13u));
+    vec4 row2 = vec4(f(H_VIEWPROJ + 2u), f(H_VIEWPROJ + 6u), f(H_VIEWPROJ + 10u), f(H_VIEWPROJ + 14u));
+    vec4 row3 = vec4(f(H_VIEWPROJ + 3u), f(H_VIEWPROJ + 7u), f(H_VIEWPROJ + 11u), f(H_VIEWPROJ + 15u));
+    const vec4 planes[6] = vec4[6](row3 + row0, row3 - row0, row3 + row1, row3 - row1, row3 + row2, row3 - row2);
+    for (int p = 0; p < 6; p++) {
+        const vec4 pl = planes[p];
+        if (dot(pl.xyz, centre) + pl.w < -radius * length(pl.xyz)) return;
+    }
+    const uint slot = atomicAdd(w[indirect + 1u], 1u);
+    w[w[H_OFFSETS + 1u] + slot] = i;
+}

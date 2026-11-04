@@ -8,7 +8,7 @@
 namespace gdxvk {
 
 namespace {
-constexpr uint32_t kMaxSetsPerFrame = 64; // one per block change; far more than a frame ever needs
+constexpr uint32_t kMaxSetsPerFrame = 512; // one per block change and per Set0Data (a model batch flush group); far more than a frame needs
 VkDeviceSize alignUp(VkDeviceSize v, VkDeviceSize a) { return (v + a - 1) & ~(a - 1); }
 } // namespace
 
@@ -157,12 +157,23 @@ bool FrameRing::allocate(const void* uniform, uint32_t uniformBytes, const void*
         storageOffset = static_cast<uint32_t>(off);
     }
 
+    if (storageBytes > 0) {
+        // The storage binding covers exactly what was just written, at a static offset: a dynamic storage descriptor with a whole-buffer range
+        // must have a zero dynamic offset, so a shared set cannot serve data that starts anywhere but the start of its block.
+        VkDescriptorSet exact;
+        if (!externalStorageSet(storage_.back().buffer, storageOffset, storageBytes, exact)) return false;
+        out.set = exact;
+        out.offsets[0] = uniformOffset;
+        out.offsets[1] = 0;
+        return true;
+    }
+
     if (set_ == VK_NULL_HANDLE || setUniform_ != uniform_.back().buffer || setStorage_ != storage_.back().buffer) {
         if (!writeSet(set_)) return false;
     }
     out.set = set_;
     out.offsets[0] = uniformOffset;
-    out.offsets[1] = storageOffset;
+    out.offsets[1] = 0; // the shared set's storage range is the whole block from its start
     return true;
 }
 

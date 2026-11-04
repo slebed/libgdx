@@ -29,6 +29,8 @@ enum Op : int32_t {
     DepthState = 15,    // test enable, write enable, compare func (GL enum)
     StencilState = 16,  // test enable, func (GL), ref, compare mask, write mask, sfail, dpfail, dppass (GL enums)
     PushRange = 18,     // first word, count, then count words: changes part of the push-constant block (pushed in full before the next draw)
+    DrawIndexedIndirect = 22,  // resource buffer id, offset lo, offset hi, draw count, stride: VkDrawIndexedIndirectCommand records written by the GPU (firstInstance must be 0)
+    DrawIndexedInstanced = 21, // index count, first index, vertex offset, instance count: instance i reads gl_InstanceIndex = i
     Set0Data = 20,      // uniform bytes, storage bytes, then the uniform words and the storage words (each rounded up to whole words): copied into the frame ring and bound as Set 0
     BindVertexBuffer = 19, // resource buffer id, offset lo, offset hi: vertex data that lives in a persistent buffer (stock Mesh), not the frame ring
     CullMode = 17,      // VkCullModeFlags (0 none, 1 front, 2 back, 3 both) replacing every pipeline's own cull mode, or -1 to go back to the pipelines' own

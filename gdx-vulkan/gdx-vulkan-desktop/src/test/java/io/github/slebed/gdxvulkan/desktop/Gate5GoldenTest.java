@@ -67,7 +67,9 @@ class Gate5GoldenTest {
 
     @TestFactory List<DynamicTest> scenes() {
         List<DynamicTest> tests = new ArrayList<DynamicTest>();
+        final boolean tierA = ctx.caps().tier == io.github.slebed.gdxvulkan.VulkanCaps.Tier.A;
         for (final Gate5Scenes.Scene scene : Gate5Scenes.all()) {
+            if (!tierA && !scene.runsOnTierB()) continue; // needs a second texture per draw, which Tier B cannot bind
             tests.add(DynamicTest.dynamicTest(scene.name(), () -> check(scene)));
         }
         return tests;
@@ -79,10 +81,11 @@ class Gate5GoldenTest {
             scene.prepare(data);
             GLFW.glfwPollEvents();
             assertTrue(frame.begin(bg[0], bg[1], bg[2], bg[3]));
-            final Gate5Scenes.ModelApi api = Gate5Scenes.vulkan(frame);
+            final Gate5Scenes.ModelApi api = scene.name().equals("gate5_fog") ? Gate5Scenes.vulkanInstancing(frame) : Gate5Scenes.vulkan(frame);
             try {
                 com.badlogic.gdx.Gdx.gl.glViewport(0, 0, w, h);
                 scene.draw(api, w, h);
+                if (scene.name().equals("gate5_fog")) assertTrue(api.instancedDraws() > 0, "the grid of identical boxes should have become instanced draws");
             } finally {
                 api.dispose();
             }
@@ -96,7 +99,8 @@ class Gate5GoldenTest {
 
             Throwable first = null;
             try {
-                boolean compared = OracleImages.compare(scene.name(), px, w, h);
+                scene.verify(px, w, h);
+                boolean compared = !scene.hasStockReference() || OracleImages.compare(scene.name(), px, w, h);
                 if (!compared && Boolean.getBoolean("gdxvulkan.requireGl")) {
                     throw new AssertionError("No stock-GL reference image for " + scene.name() + " in gdxvulkan.glReferenceDir");
                 }

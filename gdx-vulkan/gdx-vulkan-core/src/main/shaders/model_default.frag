@@ -11,21 +11,93 @@
 layout(constant_id = 1) const bool C_LIGHTING = false;
 layout(constant_id = 2) const bool C_DIFFUSE_TEX = false;
 layout(constant_id = 3) const bool C_DIFFUSE_COLOR = false;
-layout(constant_id = 4) const bool C_SPECULAR = false;
-layout(constant_id = 5) const bool C_EMISSIVE = false;
+layout(constant_id = 4) const bool C_SPECULAR = false;     // specularFlag: a specular colour or texture
+layout(constant_id = 5) const bool C_EMISSIVE = false;     // an emissive colour
 layout(constant_id = 6) const bool C_BLENDED = false;
 layout(constant_id = 7) const bool C_ALPHA_TEST = false;
-layout(constant_id = 11) const bool C_COLOR = false; // the mesh has vertex colours
+layout(constant_id = 11) const bool C_COLOR = false;       // the mesh has vertex colours
+layout(constant_id = 12) const bool C_FOG = false;
+layout(constant_id = 13) const bool C_SPECULAR_TEX = false;
+layout(constant_id = 14) const bool C_EMISSIVE_TEX = false;
+layout(constant_id = 15) const bool C_SPECULAR_COLOR = false;
+layout(constant_id = 16) const bool C_SHADOW = false;
+layout(constant_id = 17) const bool C_NORMAL_TEX = false;  // a normal map: lighting is done per pixel (stock's default shader has no normal mapping)
+layout(constant_id = 9) const int C_NUM_DIR = 0;
+layout(constant_id = 10) const int C_NUM_POINT = 0;
+layout(constant_id = 8) const bool C_SHININESS = false;
 
 layout(location = 0) in vec4 v_color;
 layout(location = 1) in vec2 v_diffuseUV;
 layout(location = 2) in vec3 v_lightDiffuse;
 layout(location = 3) in vec3 v_lightSpecular;
+layout(location = 4) in vec2 v_specularUV;
+layout(location = 5) in vec2 v_emissiveUV;
+layout(location = 6) in float v_fog;
+layout(location = 7) flat in int v_inst;
+layout(location = 8) in vec3 v_shadowUv;
+layout(location = 9) in vec3 v_ambientLight;
+layout(location = 10) in vec3 v_worldPos;
+layout(location = 11) in vec3 v_worldNormal;
+layout(location = 12) in vec2 v_normalUV;
 
 layout(location = 0) out vec4 outColor;
 
+const int H_AMBIENT = 5, H_DIR = 11, H_POINT = 19, H_FOGCOLOR = 35, H_SHADOWP = 40;
+
+// The normal from the normal map, in world space, through a tangent frame built from the screen-space derivatives of the position and the
+// texture coordinate ("normal mapping without precomputed tangents"); the mesh needs no tangent attribute.
+vec3 mappedNormal(vec3 N) {
+    const vec3 mapN = texture(GDX_TEXTURE(floatBitsToInt(gdx_pc.u_custom0.x)), v_normalUV).xyz * 2.0 - 1.0;
+    const vec3 dp1 = dFdx(v_worldPos), dp2 = dFdy(v_worldPos);
+    const vec2 duv1 = dFdx(v_normalUV), duv2 = dFdy(v_normalUV);
+    const vec3 dp2perp = cross(dp2, N), dp1perp = cross(N, dp1);
+    const vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
+    const vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+    const float invmax = inversesqrt(max(max(dot(T, T), dot(B, B)), 1e-20));
+    return normalize(mat3(T * invmax, B * invmax, N) * mapN);
+}
+
+// The vertex shader's lighting, per pixel: ambient cubemap, directional and point lights, specular.
+void lightPixel(vec3 normal, float shininess, out vec3 ambient, out vec3 diffuseLight, out vec3 specularLight) {
+    const vec3 squaredNormal = normal * normal;
+    const vec3 isPositive = step(0.0, normal);
+    ambient = squaredNormal.x * mix(gdx_data[H_AMBIENT + 0].xyz, gdx_data[H_AMBIENT + 1].xyz, isPositive.x)
+            + squaredNormal.y * mix(gdx_data[H_AMBIENT + 2].xyz, gdx_data[H_AMBIENT + 3].xyz, isPositive.y)
+            + squaredNormal.z * mix(gdx_data[H_AMBIENT + 4].xyz, gdx_data[H_AMBIENT + 5].xyz, isPositive.z);
+    diffuseLight = vec3(0.0);
+    specularLight = vec3(0.0);
+    const vec3 viewVec = normalize(gdx_data[4].xyz - v_worldPos);
+    for (int i = 0; i < C_NUM_DIR; i++) {
+        const vec3 lightDir = -gdx_data[H_DIR + i * 2 + 1].xyz;
+        const float NdotL = clamp(dot(normal, lightDir), 0.0, 1.0);
+        const vec3 value = gdx_data[H_DIR + i * 2].xyz * NdotL;
+        diffuseLight += value;
+        specularLight += value * pow(max(0.0, dot(normal, normalize(lightDir + viewVec))), shininess);
+    }
+    for (int i = 0; i < C_NUM_POINT; i++) {
+        vec3 lightDir = gdx_data[H_POINT + i * 2 + 1].xyz - v_worldPos;
+        const float dist2 = dot(lightDir, lightDir);
+        lightDir *= inversesqrt(dist2);
+        const float NdotL = clamp(dot(normal, lightDir), 0.0, 1.0);
+        const vec3 value = gdx_data[H_POINT + i * 2].xyz * (NdotL / (1.0 + dist2));
+        diffuseLight += value;
+        specularLight += value * pow(max(0.0, dot(normal, normalize(lightDir + viewVec))), shininess);
+    }
+}
+
+float getShadowness(vec2 offset) {
+    const vec4 bitShifts = vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0);
+    const int slot = floatBitsToInt(gdx_data[H_SHADOWP].y);
+    return step(v_shadowUv.z, dot(texture(GDX_TEXTURE(slot), v_shadowUv.xy + offset), bitShifts));
+}
+
+float getShadow() {
+    const float o = gdx_data[H_SHADOWP].x;
+    return (getShadowness(vec2(o, o)) + getShadowness(vec2(-o, o)) + getShadowness(vec2(o, -o)) + getShadowness(vec2(-o, -o))) * 0.25;
+}
+
 void main() {
-    const int inst = gdx_pc.u_indices.x;
+    const int inst = v_inst;
     const vec4 params = gdx_data[inst + 10];
 
     vec4 diffuse = vec4(1.0);
@@ -34,17 +106,38 @@ void main() {
     if (C_COLOR) diffuse *= v_color;
 
     vec4 emissive = vec4(0.0);
-    if (C_EMISSIVE) emissive = gdx_data[inst + 9];
+    if (C_EMISSIVE_TEX && C_EMISSIVE) emissive = texture(GDX_TEXTURE(gdx_pc.u_indices.w), v_emissiveUV) * gdx_data[inst + 9];
+    else if (C_EMISSIVE_TEX) emissive = texture(GDX_TEXTURE(gdx_pc.u_indices.w), v_emissiveUV);
+    else if (C_EMISSIVE) emissive = gdx_data[inst + 9];
 
     vec3 rgb;
-    if (!C_LIGHTING) {
+    if (C_LIGHTING && C_NORMAL_TEX) {
+        vec3 ambientLight, diffuseLight, specularLight;
+        lightPixel(mappedNormal(normalize(v_worldNormal)), C_SHININESS ? params.x : 20.0, ambientLight, diffuseLight, specularLight);
+        vec3 specular = vec3(0.0);
+        if (C_SPECULAR) {
+            specular = specularLight;
+            if (C_SPECULAR_TEX && C_SPECULAR_COLOR) specular = texture(GDX_TEXTURE(gdx_pc.u_indices.z), v_specularUV).rgb * gdx_data[inst + 8].rgb * specularLight;
+            else if (C_SPECULAR_TEX) specular = texture(GDX_TEXTURE(gdx_pc.u_indices.z), v_specularUV).rgb * specularLight;
+            else if (C_SPECULAR_COLOR) specular = gdx_data[inst + 8].rgb * specularLight;
+        }
+        const float shadow = C_SHADOW ? getShadow() : 1.0;
+        rgb = diffuse.rgb * (ambientLight + shadow * diffuseLight) + specular + emissive.rgb;
+    } else if (!C_LIGHTING) {
         rgb = diffuse.rgb + emissive.rgb;
     } else if (!C_SPECULAR) {
-        rgb = (diffuse.rgb * v_lightDiffuse) + emissive.rgb;
+        if (C_SHADOW) rgb = (diffuse.rgb * (v_ambientLight + getShadow() * v_lightDiffuse)) + emissive.rgb;
+        else rgb = (diffuse.rgb * v_lightDiffuse) + emissive.rgb;
     } else {
-        const vec3 specular = gdx_data[inst + 8].rgb * v_lightSpecular;
-        rgb = (diffuse.rgb * v_lightDiffuse) + specular + emissive.rgb;
+        vec3 specular = v_lightSpecular;
+        if (C_SPECULAR_TEX && C_SPECULAR_COLOR) specular = texture(GDX_TEXTURE(gdx_pc.u_indices.z), v_specularUV).rgb * gdx_data[inst + 8].rgb * v_lightSpecular;
+        else if (C_SPECULAR_TEX) specular = texture(GDX_TEXTURE(gdx_pc.u_indices.z), v_specularUV).rgb * v_lightSpecular;
+        else if (C_SPECULAR_COLOR) specular = gdx_data[inst + 8].rgb * v_lightSpecular;
+        if (C_SHADOW) rgb = (diffuse.rgb * (getShadow() * v_lightDiffuse + v_ambientLight)) + specular + emissive.rgb;
+        else rgb = (diffuse.rgb * v_lightDiffuse) + specular + emissive.rgb;
     }
+
+    if (C_FOG) rgb = mix(rgb, gdx_data[H_FOGCOLOR].rgb, v_fog);
 
     float a = 1.0;
     if (C_BLENDED) {

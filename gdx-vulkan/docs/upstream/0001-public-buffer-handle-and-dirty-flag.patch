@@ -1,0 +1,110 @@
+diff --git a/gdx/src/com/badlogic/gdx/graphics/glutils/IndexBufferObject.java b/gdx/src/com/badlogic/gdx/graphics/glutils/IndexBufferObject.java
+index 5a1c4c3..bee7166 100644
+--- a/gdx/src/com/badlogic/gdx/graphics/glutils/IndexBufferObject.java
++++ b/gdx/src/com/badlogic/gdx/graphics/glutils/IndexBufferObject.java
+@@ -100,6 +100,17 @@ public class IndexBufferObject implements IndexData {
+ 		usage = isStatic ? GL20.GL_STATIC_DRAW : GL20.GL_DYNAMIC_DRAW;
+ 	}
+ 
++	/** @return the name of the OpenGL buffer object holding this data, or 0 once it was disposed. Backends that draw without calling
++	 *         {@code bind(ShaderProgram)} (such as a Vulkan one) use it to find the buffer that stands for this data. */
++	public int getBufferHandle () {
++		return bufferHandle;
++	}
++
++	/** @return whether the CPU-side data changed since it was last uploaded: the buffer object has to be refreshed from it before it is used. */
++	public boolean isDirty () {
++		return isDirty;
++	}
++
+ 	/** @return the number of indices currently stored in this buffer */
+ 	public int getNumIndices () {
+ 		return empty ? 0 : buffer.limit();
+diff --git a/gdx/src/com/badlogic/gdx/graphics/glutils/IndexBufferObjectSubData.java b/gdx/src/com/badlogic/gdx/graphics/glutils/IndexBufferObjectSubData.java
+index 68bbc1c..32d679e 100644
+--- a/gdx/src/com/badlogic/gdx/graphics/glutils/IndexBufferObjectSubData.java
++++ b/gdx/src/com/badlogic/gdx/graphics/glutils/IndexBufferObjectSubData.java
+@@ -87,6 +87,17 @@ public class IndexBufferObjectSubData implements IndexData {
+ 		return result;
+ 	}
+ 
++	/** @return the name of the OpenGL buffer object holding this data, or 0 once it was disposed. Backends that draw without calling
++	 *         {@code bind(ShaderProgram)} (such as a Vulkan one) use it to find the buffer that stands for this data. */
++	public int getBufferHandle () {
++		return bufferHandle;
++	}
++
++	/** @return whether the CPU-side data changed since it was last uploaded: the buffer object has to be refreshed from it before it is used. */
++	public boolean isDirty () {
++		return isDirty;
++	}
++
+ 	/** @return the number of indices currently stored in this buffer */
+ 	public int getNumIndices () {
+ 		return buffer.limit();
+diff --git a/gdx/src/com/badlogic/gdx/graphics/glutils/VertexBufferObject.java b/gdx/src/com/badlogic/gdx/graphics/glutils/VertexBufferObject.java
+index 30ba6cb..88642e1 100644
+--- a/gdx/src/com/badlogic/gdx/graphics/glutils/VertexBufferObject.java
++++ b/gdx/src/com/badlogic/gdx/graphics/glutils/VertexBufferObject.java
+@@ -84,6 +84,17 @@ public class VertexBufferObject implements VertexData {
+ 		return attributes;
+ 	}
+ 
++	/** @return the name of the OpenGL buffer object holding this data, or 0 once it was disposed. Backends that draw without calling
++	 *         {@code bind(ShaderProgram)} (such as a Vulkan one) use it to find the buffer that stands for this data. */
++	public int getBufferHandle () {
++		return bufferHandle;
++	}
++
++	/** @return whether the CPU-side data changed since it was last uploaded: the buffer object has to be refreshed from it before it is used. */
++	public boolean isDirty () {
++		return isDirty;
++	}
++
+ 	@Override
+ 	public int getNumVertices () {
+ 		return buffer.limit() * 4 / attributes.vertexSize;
+diff --git a/gdx/src/com/badlogic/gdx/graphics/glutils/VertexBufferObjectSubData.java b/gdx/src/com/badlogic/gdx/graphics/glutils/VertexBufferObjectSubData.java
+index 44ab175..0b2ca3b 100644
+--- a/gdx/src/com/badlogic/gdx/graphics/glutils/VertexBufferObjectSubData.java
++++ b/gdx/src/com/badlogic/gdx/graphics/glutils/VertexBufferObjectSubData.java
+@@ -90,6 +90,17 @@ public class VertexBufferObjectSubData implements VertexData {
+ 		return attributes;
+ 	}
+ 
++	/** @return the name of the OpenGL buffer object holding this data, or 0 once it was disposed. Backends that draw without calling
++	 *         {@code bind(ShaderProgram)} (such as a Vulkan one) use it to find the buffer that stands for this data. */
++	public int getBufferHandle () {
++		return bufferHandle;
++	}
++
++	/** @return whether the CPU-side data changed since it was last uploaded: the buffer object has to be refreshed from it before it is used. */
++	public boolean isDirty () {
++		return isDirty;
++	}
++
+ 	@Override
+ 	public int getNumVertices () {
+ 		return buffer.limit() * 4 / attributes.vertexSize;
+diff --git a/gdx/src/com/badlogic/gdx/graphics/glutils/VertexBufferObjectWithVAO.java b/gdx/src/com/badlogic/gdx/graphics/glutils/VertexBufferObjectWithVAO.java
+index 92b1a80..ab0071c 100644
+--- a/gdx/src/com/badlogic/gdx/graphics/glutils/VertexBufferObjectWithVAO.java
++++ b/gdx/src/com/badlogic/gdx/graphics/glutils/VertexBufferObjectWithVAO.java
+@@ -94,6 +94,17 @@ public class VertexBufferObjectWithVAO implements VertexData {
+ 		return attributes;
+ 	}
+ 
++	/** @return the name of the OpenGL buffer object holding this data, or 0 once it was disposed. Backends that draw without calling
++	 *         {@code bind(ShaderProgram)} (such as a Vulkan one) use it to find the buffer that stands for this data. */
++	public int getBufferHandle () {
++		return bufferHandle;
++	}
++
++	/** @return whether the CPU-side data changed since it was last uploaded: the buffer object has to be refreshed from it before it is used. */
++	public boolean isDirty () {
++		return isDirty;
++	}
++
+ 	@Override
+ 	public int getNumVertices () {
+ 		return buffer.limit() * 4 / attributes.vertexSize;

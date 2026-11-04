@@ -63,6 +63,16 @@ public final class GdxVkResources {
         }
     }
 
+    /**
+     * Copies a range of a buffer back to the host, waiting for the GPU: for tests and diagnostics (it stalls). Everything recorded before it,
+     * including a finished frame's compute work, is visible in the result.
+     */
+    public void readBuffer(int id, long offset, byte[] out, int start, int length) {
+        if (!GdxVkNative.nativeReadBuffer(context.nativeHandle(), id, offset, out, start, length)) {
+            throw new IllegalArgumentException("readBuffer failed: no such buffer " + id + " or range out of bounds");
+        }
+    }
+
     public void destroyBuffer(int id) {
         GdxVkNative.nativeDestroyBuffer(context.nativeHandle(), id);
     }

@@ -147,6 +147,7 @@ public final class GlReferenceMain extends ApplicationAdapter {
     /** The Gate 5 scenes: stock ModelBuilder models drawn by stock ModelBatch and its GLSL default shader. */
     private void renderGate5() {
         Gate5Scenes.Scene scene = scenes5[next5++];
+        if (!scene.hasStockReference()) return; // shows something stock's default shader cannot draw
         final int w = Gdx.graphics.getBackBufferWidth(), h = Gdx.graphics.getBackBufferHeight();
         Gate5Scenes.ModelApi api = null;
         try {

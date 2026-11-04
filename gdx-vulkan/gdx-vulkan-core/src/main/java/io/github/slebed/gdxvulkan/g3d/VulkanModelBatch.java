@@ -1,6 +1,5 @@
 package io.github.slebed.gdxvulkan.g3d;
 
-import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
@@ -24,6 +23,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.AmbientCubemap;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.badlogic.gdx.graphics.g3d.environment.PointLight;
+import com.badlogic.gdx.graphics.g3d.environment.ShadowMap;
 import com.badlogic.gdx.graphics.g3d.utils.DefaultRenderableSorter;
 import com.badlogic.gdx.graphics.g3d.utils.RenderableSorter;
 import com.badlogic.gdx.graphics.g3d.utils.TextureDescriptor;
@@ -36,8 +36,10 @@ import com.badlogic.gdx.utils.FlushablePool;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
 import io.github.slebed.gdxvulkan.CommandStream;
+import io.github.slebed.gdxvulkan.GdxVkContext;
 import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkPipelineDesc;
+import io.github.slebed.gdxvulkan.GdxVkSampler;
 import io.github.slebed.gdxvulkan.gl.VulkanGL20;
 
 import java.util.HashMap;
@@ -46,18 +48,24 @@ import java.util.Map;
 /**
  * The 3D batch (plan, Phase 5): the stock {@code ModelBatch} API on Vulkan. It takes stock {@code RenderableProvider}s ({@code ModelInstance},
  * ...), sorts them with the stock sorter, and draws them with a port of libGDX's default shader (per-vertex lighting with the ambient cubemap,
- * directional and point lights, specular, diffuse and emissive, opacity and alpha test, the same material-to-state rules as {@code DefaultShader}),
- * so a scene looks as it does on OpenGL.
+ * directional and point lights, specular, diffuse, specular and emissive textures, fog, directional shadow maps, opacity and alpha test, the same
+ * material-to-state rules as {@code DefaultShader}), so a scene looks as it does on OpenGL.
  *
- * <p>Per flush, one record per renderable (transform, normal matrix, material) and one header (camera, lights) go to Set 0's storage binding
- * through a {@code Set0Data} command; the draws pick their record by an index in the push constants. Meshes come from {@link StockMeshAccess}.
- * The vertex shader is one of eight (a mesh has or lacks normals, colours and texture coordinates); the material and lighting flags are
- * specialization constants, so one pipeline per distinct material shape.
+ * <p>Per flush, one record per renderable (transform, normal matrix, material) and one header (camera, lights, fog, shadow map) go to Set 0's
+ * storage binding through a {@code Set0Data} command; the draws pick their record by an index in the push constants, and identical renderables that
+ * follow one another in the sorted order become one instanced draw. Meshes come from {@link StockMeshAccess}. The vertex shader is one of 40 (a mesh
+ * has or lacks normals, colours and texture coordinates, and 0 to 4 bone weights); the material and lighting flags are specialization constants,
+ * so there is one pipeline per distinct material shape.
  *
- * <p>Supported: position, normal, colour (packed or unpacked) and the first texture coordinate set; diffuse colour and texture, specular
- * colour and shininess, emissive colour, blending (with opacity), alpha test, cull face and depth-test attributes; an ambient light, up to
- * {@link #MAX_DIRECTIONAL_LIGHTS} directional and {@link #MAX_POINT_LIGHTS} point lights (the stock configuration is 2 and 5; further lights
- * go into the ambient cubemap as stock does). Not yet: bones, spot lights, fog, shadows, normal/specular/emissive textures, reflection.
+ * <p>{@link #depth} makes the batch for the shadow pass ({@code DepthShaderProvider}'s job in stock): it draws packed depth, with front-face
+ * culling and the blended-texture alpha test, into the shadow light's framebuffer.
+ *
+ * <p>Supported: position, normal, colour (packed or unpacked), the first texture coordinate set and up to 4 bone weights; diffuse colour and
+ * texture, specular colour and texture, shininess, emissive colour and texture, blending (with opacity), alpha test, cull face and depth-test
+ * attributes; an ambient light, up to {@link #MAX_DIRECTIONAL_LIGHTS} directional and {@link #MAX_POINT_LIGHTS} point lights (the stock configuration
+ * is 2 and 5; further lights go into the ambient cubemap as stock does), fog, one shadow map. Not supported: spot lights (stock's default shader has
+ * none either), reflection, custom shaders. On Tier B (one texture per draw) only the diffuse texture is sampled: specular and emissive textures and
+ * shadow maps are ignored there.
  *
  * <p>Like the other Vulkan batches it holds a {@link GdxVkFrame} and belongs to the render thread.
  */
@@ -65,7 +73,8 @@ public class VulkanModelBatch implements Disposable {
     public static final int MAX_DIRECTIONAL_LIGHTS = 4, MAX_POINT_LIGHTS = 8;
 
     // Layout of the data blob in vec4 units; mirrors model_default_vertex.glsl.
-    private static final int H_PROJVIEW = 0, H_CAMERA = 4, H_AMBIENT = 5, H_DIR = 11, H_POINT = 19, H_FOG = 35, HEADER = 36, RECORD = 12;
+    private static final int H_PROJVIEW = 0, H_CAMERA = 4, H_AMBIENT = 5, H_DIR = 11, H_POINT = 19, H_FOG = 35, H_SHADOW = 36, H_SHADOWP = 40, HEADER = 41,
+        RECORD = 15;
 
     /** The number of directional and point lights the shaders evaluate; the stock {@code DefaultShader.Config} defaults. */
     public static final class Config {
@@ -92,21 +101,23 @@ public class VulkanModelBatch implements Disposable {
     private final GdxVkFrame frame;
     private final VulkanGL20 gl;
     private final boolean tierA;
+    private final boolean depthPass;
     private final StockMeshAccess meshes;
     private final RenderableSorter sorter;
     private final Config config;
     private final RenderablePool pool = new RenderablePool();
     private final Array<Renderable> renderables = new Array<Renderable>();
     private Camera camera;
-    private boolean drawing;
 
     private final Map<String, Integer> pipelineIds = new HashMap<String, Integer>();
     private static final Matrix4 IDENTITY = new Matrix4();
     private final Matrix3 tmpM3 = new Matrix3();
     private final Vector3 tmpV = new Vector3();
     private final AmbientCubemap cubemap = new AmbientCubemap();
-    private final float[] pushIndices = new float[2];
+    private final float[] pushIndices = new float[4];
+    private final float[] pushNormalSlot = new float[1];
     private int[] words = new int[(HEADER + 64 * RECORD) * 4];
+    private int instancedDraws, draws;
 
     // GL state as DefaultShader's RenderContext keeps it, so only changes reach the stream.
     private int cullFace, depthFunc;
@@ -114,20 +125,30 @@ public class VulkanModelBatch implements Disposable {
     private int blendSrc, blendDst;
 
     public VulkanModelBatch (GdxVkFrame frame) {
-        this(frame, new DefaultRenderableSorter(), new Config());
+        this(frame, new DefaultRenderableSorter(), new Config(), false);
     }
 
     public VulkanModelBatch (GdxVkFrame frame, RenderableSorter sorter) {
-        this(frame, sorter, new Config());
+        this(frame, sorter, new Config(), false);
     }
 
     public VulkanModelBatch (GdxVkFrame frame, RenderableSorter sorter, Config config) {
+        this(frame, sorter, config, false);
+    }
+
+    /** The batch for the shadow pass: what stock does with {@code new ModelBatch(new DepthShaderProvider())}. */
+    public static VulkanModelBatch depth (GdxVkFrame frame) {
+        return new VulkanModelBatch(frame, new DefaultRenderableSorter(), new Config(), true);
+    }
+
+    private VulkanModelBatch (GdxVkFrame frame, RenderableSorter sorter, Config config, boolean depthPass) {
         if (config.numDirectionalLights > MAX_DIRECTIONAL_LIGHTS || config.numPointLights > MAX_POINT_LIGHTS) {
             throw new IllegalArgumentException("at most " + MAX_DIRECTIONAL_LIGHTS + " directional and " + MAX_POINT_LIGHTS + " point lights");
         }
         this.frame = frame;
         this.gl = frame.gl();
         this.tierA = frame.isTierA();
+        this.depthPass = depthPass;
         this.meshes = new StockMeshAccess(gl);
         this.sorter = sorter;
         this.config = config;
@@ -138,7 +159,6 @@ public class VulkanModelBatch implements Disposable {
     public void begin (final Camera cam) {
         if (camera != null) throw new GdxRuntimeException("Call end() first.");
         camera = cam;
-        drawing = true;
     }
 
     public void setCamera (final Camera cam) {
@@ -167,7 +187,6 @@ public class VulkanModelBatch implements Disposable {
     public void end () {
         flush();
         camera = null;
-        drawing = false;
     }
 
     public void render (final Renderable renderable) {
@@ -203,15 +222,23 @@ public class VulkanModelBatch implements Disposable {
         // before the frame that used it is submitted, as callers do, must not pull anything out from under the recorded draws.)
     }
 
-    private static final java.util.Map<io.github.slebed.gdxvulkan.GdxVkContext, Integer> WHITE =
-        new java.util.WeakHashMap<io.github.slebed.gdxvulkan.GdxVkContext, Integer>();
+    /** Draw calls issued since the batch was made, and how many of them were instanced (diagnostics). */
+    public int getDrawCalls () {
+        return draws;
+    }
+
+    public int getInstancedDrawCalls () {
+        return instancedDraws;
+    }
+
+    private static final java.util.Map<GdxVkContext, Integer> WHITE = new java.util.WeakHashMap<GdxVkContext, Integer>();
 
     /** A 1 x 1 white texture, bound for draws that sample nothing (Tier B has exactly one texture set bound at a time). One per context. */
     private int whiteTexture () {
         synchronized (WHITE) {
             Integer id = WHITE.get(frame.context());
             if (id == null) {
-                id = frame.context().resources().createTexture(1, 1, new byte[] {-1, -1, -1, -1}, new io.github.slebed.gdxvulkan.GdxVkSampler());
+                id = frame.context().resources().createTexture(1, 1, new byte[] {-1, -1, -1, -1}, new GdxVkSampler());
                 WHITE.put(frame.context(), id);
             }
             return id;
@@ -326,10 +353,27 @@ public class VulkanModelBatch implements Disposable {
         for (int k = 0; k < 16; k++) putF(vec4 * 4 + k, m.val[k]);
     }
 
-    /** The header of a group: camera, ambient cubemap and lights, as DefaultShader's setters compute them. */
+    /** What the depth pass draws: not a degenerate transform, and a blended material only when its opacity reaches the alpha-test value. */
+    private boolean visible (Renderable r) {
+        if (r.worldTransform.det3x3() == 0) return false;
+        if (depthPass) {
+            final BlendingAttribute blend = (BlendingAttribute)attr(r, BlendingAttribute.Type);
+            if (blend != null && blend.opacity < alphaTestValue(r)) return false;
+        }
+        return true;
+    }
+
+    /** The depth pass's alpha-test threshold: the material's, else DepthShader.Config's default of 0.5. */
+    private static float alphaTestValue (Renderable r) {
+        final FloatAttribute a = (FloatAttribute)attr(r, FloatAttribute.AlphaTest);
+        return a != null ? a.value : 0.5f;
+    }
+
+    /** The header of a group: camera, ambient cubemap, lights, fog and the shadow map, as DefaultShader's setters compute them. */
     private void writeHeader (Environment env, Renderable first) {
         putMatrix4(H_PROJVIEW, camera.combined);
         putVec4(H_CAMERA, camera.position.x, camera.position.y, camera.position.z, 1.1881f / (camera.far * camera.far));
+        if (depthPass) return;
 
         final boolean lit = env != null;
         if (!lit) {
@@ -374,7 +418,26 @@ public class VulkanModelBatch implements Disposable {
                 }
             }
         }
-        putVec4(H_FOG, 0, 0, 0, 0);
+        final ColorAttribute fog = env == null ? null : env.get(ColorAttribute.class, ColorAttribute.Fog);
+        if (fog != null) putColor(H_FOG, fog.color);
+        else putVec4(H_FOG, 0, 0, 0, 0);
+
+        final ShadowMap shadow = shadowOf(env);
+        if (shadow != null) {
+            putMatrix4(H_SHADOW, shadow.getProjViewTrans());
+            final TextureDescriptor<Texture> desc = shadow.getDepthMap();
+            final Texture t = bindTextureState(desc);
+            final int nativeId = nativeTexture(t);
+            putF(H_SHADOWP * 4, 1f / (2f * t.getWidth())); // u_shadowPCFOffset
+            words[H_SHADOWP * 4 + 1] = gl.slotOf(nativeId);
+        } else {
+            putVec4(H_SHADOWP, 0, 0, 0, 0);
+        }
+    }
+
+    /** The environment's shadow map, where this tier can use it (the main shader would need a second texture on Tier B). */
+    private ShadowMap shadowOf (Environment env) {
+        return tierA && !depthPass && env != null ? env.shadowMap : null;
     }
 
     /** One renderable's record at vec4 {@code at}: transform, normal matrix, material colours and parameters. */
@@ -399,32 +462,39 @@ public class VulkanModelBatch implements Disposable {
         final FloatAttribute shininess = (FloatAttribute)attr(r, FloatAttribute.Shininess);
         final BlendingAttribute blend = (BlendingAttribute)attr(r, BlendingAttribute.Type);
         final FloatAttribute alphaTest = (FloatAttribute)attr(r, FloatAttribute.AlphaTest);
-        putVec4(at + 10, shininess != null ? shininess.value : 20f, blend != null ? blend.opacity : 1f, alphaTest != null ? alphaTest.value : 0f, 0);
+        putVec4(at + 10, shininess != null ? shininess.value : 20f, blend != null ? blend.opacity : 1f,
+            depthPass ? alphaTestValue(r) : alphaTest != null ? alphaTest.value : 0f, 0);
 
-        final TextureAttribute tex = (TextureAttribute)attr(r, TextureAttribute.Diffuse);
-        if (tex != null) putVec4(at + 11, tex.offsetU, tex.offsetV, tex.scaleU, tex.scaleV);
-        else putVec4(at + 11, 0, 0, 1, 1);
+        putUV(at + 11, (TextureAttribute)attr(r, TextureAttribute.Diffuse));
+        putUV(at + 12, (TextureAttribute)attr(r, TextureAttribute.Specular));
+        putUV(at + 13, (TextureAttribute)attr(r, TextureAttribute.Emissive));
+        putUV(at + 14, (TextureAttribute)attr(r, TextureAttribute.Normal));
+    }
+
+    private void putUV (int vec4, TextureAttribute t) {
+        if (t != null) putVec4(vec4, t.offsetU, t.offsetV, t.scaleU, t.scaleV);
+        else putVec4(vec4, 0, 0, 1, 1);
     }
 
     private void drawGroup (Array<Renderable> list, int from, int to, Environment env) {
-        // The records of the renderables that will draw (a degenerate transform is skipped, as stock does).
+        // The records of the renderables that will draw.
         int count = 0, boneVec4s = 0;
+        Renderable first = null;
         for (int i = from; i < to; i++) {
             final Renderable r = list.get(i);
-            if (r.worldTransform.det3x3() == 0) continue;
+            if (!visible(r)) continue;
+            if (first == null) first = r;
             count++;
             if (r.bones != null) boneVec4s += r.bones.length * 4;
         }
         if (count == 0) return;
         final int vec4s = HEADER + count * RECORD + boneVec4s;
         ensure(vec4s * 4);
-        Renderable first = null;
-        for (int i = from; i < to && first == null; i++) if (list.get(i).worldTransform.det3x3() != 0) first = list.get(i);
         writeHeader(env, first);
         int k = 0, boneAt = HEADER + count * RECORD;
         for (int i = from; i < to; i++) {
             final Renderable r = list.get(i);
-            if (r.worldTransform.det3x3() == 0) continue;
+            if (!visible(r)) continue;
             writeRecord(HEADER + k * RECORD, r);
             if (r.bones != null) { // the bone matrices follow the records; the record names where its own start
                 putF((HEADER + k * RECORD + 10) * 4 + 3, boneAt);
@@ -441,11 +511,34 @@ public class VulkanModelBatch implements Disposable {
         Mesh lastMesh = null;
         int lastPipeline = -1;
         k = 0;
-        for (int i = from; i < to; i++) {
+        int i = from;
+        while (i < to) {
             final Renderable r = list.get(i);
-            if (r.worldTransform.det3x3() == 0) continue;
+            if (!visible(r)) {
+                i++;
+                continue;
+            }
+            // Identical renderables that follow in the sorted order are one instanced draw: their records are consecutive.
+            int run = 1;
+            int j = i + 1;
+            if (r.bones == null) {
+                while (j < to) {
+                    final Renderable n = list.get(j);
+                    if (!visible(n)) {
+                        j++;
+                        continue;
+                    }
+                    if (!sameDraw(r, n)) break;
+                    run++;
+                    j++;
+                }
+            } else {
+                j = i + 1;
+            }
             final int record = HEADER + k * RECORD;
-            k++;
+            k += run;
+            i = j;
+
             applyMaterialState(r);
             final Mesh mesh = r.meshPart.mesh;
             final int pipeline = pipelineFor(r, mesh);
@@ -453,32 +546,81 @@ public class VulkanModelBatch implements Disposable {
                 s.bindPipeline(pipeline);
                 lastPipeline = pipeline;
             }
-            int slot = 0;
-            final TextureAttribute tex = (TextureAttribute)attr(r, TextureAttribute.Diffuse);
-            if (tex == null || (mesh.getVertexAttributes().getMask() & Usage.TextureCoordinates) == 0) {
-                if (!tierA) s.bindTexture(whiteTexture()); // Tier B shaders reference the texture binding, so every draw needs one bound
-            } else {
-                final Texture t = bindTextureState(tex.textureDescription);
-                final int nativeId = gl.nativeTexture(t.getTextureObjectHandle());
-                if (nativeId < 0) throw new GdxRuntimeException("gdx-vulkan: texture has no storage (nothing was uploaded to it)");
-                if (tierA) slot = gl.slotOf(nativeId);
-                else s.bindTexture(nativeId);
-            }
+            final int[] slots = bindMaterialTextures(r, mesh, s);
             pushIndices[0] = Float.intBitsToFloat(record);
-            pushIndices[1] = Float.intBitsToFloat(slot);
-            s.pushRange(20, pushIndices, 0, 2); // u_indices.xy
+            pushIndices[1] = Float.intBitsToFloat(slots[0]);
+            pushIndices[2] = Float.intBitsToFloat(slots[1]);
+            pushIndices[3] = Float.intBitsToFloat(slots[2]);
+            s.pushRange(20, pushIndices, 0, 4); // u_indices: record, diffuse, specular, emissive slot
+            pushNormalSlot[0] = Float.intBitsToFloat(slots[3]);
+            s.pushRange(24, pushNormalSlot, 0, 1); // u_custom0.x: the normal map's slot
             if (mesh != lastMesh) {
                 meshes.bind(frame, mesh);
                 lastMesh = mesh;
             }
-            if (mesh.getNumIndices() > 0) s.drawIndexed(r.meshPart.size, r.meshPart.offset, 0);
-            else s.draw(r.meshPart.size, r.meshPart.offset);
+            draws++;
+            if (mesh.getNumIndices() > 0) {
+                if (run > 1) {
+                    instancedDraws++;
+                    s.drawIndexedInstanced(r.meshPart.size, r.meshPart.offset, 0, run);
+                } else {
+                    s.drawIndexed(r.meshPart.size, r.meshPart.offset, 0);
+                }
+            } else {
+                s.draw(r.meshPart.size, r.meshPart.offset);
+            }
         }
+    }
+
+    /** Two renderables that one instanced draw can render: the same mesh part and material, no bones. */
+    private boolean sameDraw (Renderable a, Renderable b) {
+        if (b.bones != null || a.meshPart.mesh != b.meshPart.mesh || a.meshPart.offset != b.meshPart.offset || a.meshPart.size != b.meshPart.size
+            || a.meshPart.primitiveType != b.meshPart.primitiveType || a.environment != b.environment) return false;
+        if (a.meshPart.mesh.getNumIndices() == 0) return false;
+        return a.material == b.material || (a.material != null && a.material.equals(b.material));
+    }
+
+    /** The texture slots (Tier A) or the one bound texture (Tier B) of a draw: diffuse, specular, emissive. */
+    private final int[] slotScratch = new int[4];
+
+    private int[] bindMaterialTextures (Renderable r, Mesh mesh, CommandStream s) {
+        slotScratch[0] = slotScratch[1] = slotScratch[2] = slotScratch[3] = 0;
+        final boolean uv = (mesh.getVertexAttributes().getMask() & Usage.TextureCoordinates) != 0;
+        // The depth pass samples the diffuse texture only to alpha-test a blended material.
+        final boolean wantsDiffuse = uv && (!depthPass || attr(r, BlendingAttribute.Type) != null);
+        final TextureAttribute diffuse = wantsDiffuse ? (TextureAttribute)attr(r, TextureAttribute.Diffuse) : null;
+        boolean boundOne = false;
+        if (diffuse != null) {
+            final Texture t = bindTextureState(diffuse.textureDescription);
+            final int nativeId = nativeTexture(t);
+            if (tierA) slotScratch[0] = gl.slotOf(nativeId);
+            else {
+                s.bindTexture(nativeId);
+                boundOne = true;
+            }
+        }
+        if (tierA && uv && !depthPass) {
+            final TextureAttribute spec = (TextureAttribute)attr(r, TextureAttribute.Specular);
+            if (spec != null) slotScratch[1] = gl.slotOf(nativeTexture(bindTextureState(spec.textureDescription)));
+            final TextureAttribute emi = (TextureAttribute)attr(r, TextureAttribute.Emissive);
+            if (emi != null) slotScratch[2] = gl.slotOf(nativeTexture(bindTextureState(emi.textureDescription)));
+            final TextureAttribute nor = (TextureAttribute)attr(r, TextureAttribute.Normal);
+            if (nor != null && r.environment != null && (mesh.getVertexAttributes().getMask() & Usage.Normal) != 0)
+                slotScratch[3] = gl.slotOf(nativeTexture(bindTextureState(nor.textureDescription)));
+        }
+        if (!tierA && !boundOne) s.bindTexture(whiteTexture()); // Tier B shaders reference the texture binding, so every draw needs one bound
+        return slotScratch;
+    }
+
+    private int nativeTexture (Texture t) {
+        final int id = gl.nativeTexture(t.getTextureObjectHandle());
+        if (id < 0) throw new GdxRuntimeException("gdx-vulkan: texture has no storage (nothing was uploaded to it)");
+        return id;
     }
 
     /** DefaultShader.bindMaterial: blending, cull face and depth test from the material's attributes, defaults otherwise. */
     private void applyMaterialState (Renderable r) {
-        int cull = GL20.GL_BACK;
+        int cull = depthPass ? GL20.GL_FRONT : GL20.GL_BACK; // DepthShader.Config.defaultCullFace
         int depth = GL20.GL_LEQUAL;
         boolean mask = true;
         boolean blended = false;
@@ -487,7 +629,7 @@ public class VulkanModelBatch implements Disposable {
             for (final Attribute a : r.material) {
                 final long t = a.type;
                 if (BlendingAttribute.is(t)) {
-                    blended = true;
+                    blended = !depthPass; // the depth pass removes blending
                     src = ((BlendingAttribute)a).sourceFunction;
                     dst = ((BlendingAttribute)a).destFunction;
                 } else if ((t & IntAttribute.CullFace) == IntAttribute.CullFace) {
@@ -532,16 +674,19 @@ public class VulkanModelBatch implements Disposable {
                 layout.append('P').append(a.numComponents).append('@').append(a.offset).append(' ');
                 break;
             case Usage.Normal:
+                if (depthPass) break; // depth does not read it
                 d.attribute(1, GdxVkPipelineDesc.FORMAT_R32G32B32_SFLOAT, a.offset);
                 mask |= 1;
                 layout.append('N').append(a.offset).append(' ');
                 break;
             case Usage.ColorPacked:
+                if (depthPass) break;
                 d.attribute(2, GdxVkPipelineDesc.FORMAT_R8G8B8A8_UNORM, a.offset);
                 mask |= 2;
                 layout.append("Cp").append(a.offset).append(' ');
                 break;
             case Usage.ColorUnpacked:
+                if (depthPass) break;
                 d.attribute(2, floatFormat(a.numComponents), a.offset);
                 mask |= 2;
                 layout.append("Cu").append(a.numComponents).append('@').append(a.offset).append(' ');
@@ -559,30 +704,54 @@ public class VulkanModelBatch implements Disposable {
                 bones = Math.max(bones, a.unit + 1);
                 layout.append('B').append(a.unit).append('@').append(a.offset).append(' ');
                 break;
-            default: // tangents, ...: not read by this shader
+            default: // tangents, ...: not read by these shaders
                 break;
             }
         }
         layout.append('/').append(va.vertexSize);
-
-        final ColorAttribute diffuse = (ColorAttribute)attr(r, ColorAttribute.Diffuse);
-        final TextureAttribute diffuseTex = (TextureAttribute)attr(r, TextureAttribute.Diffuse);
-        final ColorAttribute specular = (ColorAttribute)attr(r, ColorAttribute.Specular);
-        final ColorAttribute emissive = (ColorAttribute)attr(r, ColorAttribute.Emissive);
-        final BlendingAttribute blend = (BlendingAttribute)attr(r, BlendingAttribute.Type);
-        final FloatAttribute alphaTest = (FloatAttribute)attr(r, FloatAttribute.AlphaTest);
-        final FloatAttribute shininess = (FloatAttribute)attr(r, FloatAttribute.Shininess);
         if (r.bones == null) bones = 0; // a skinned mesh drawn without bones is drawn as it is in the bind pose, as stock does
-        final boolean lighting = r.environment != null && (mask & 1) != 0;
-        final boolean tex = diffuseTex != null && (mask & 4) != 0;
-        final boolean spec = lighting && specular != null;
 
-        // Specialization constants 1..11 of model_default_v*.vert / model_default.frag.
-        d.specConstants = new int[] {lighting ? 1 : 0, tex ? 1 : 0, diffuse != null ? 1 : 0, spec ? 1 : 0, emissive != null ? 1 : 0,
-            blend != null ? 1 : 0, blend != null && alphaTest != null ? 1 : 0, shininess != null ? 1 : 0,
-            config.numDirectionalLights, config.numPointLights, (mask & 2) != 0 ? 1 : 0};
         d.topology = topology(r.meshPart.primitiveType);
         d.cullMode = GdxVkPipelineDesc.CULL_BACK; // replaced by the GL cull state the batch sets
+        final StringBuilder key = new StringBuilder(depthPass ? "depth|" : "model|").append(bones).append('|').append(layout).append('|').append(d.topology);
+        final String vert, name;
+        if (depthPass) {
+            final BlendingAttribute blend = (BlendingAttribute)attr(r, BlendingAttribute.Type);
+            final boolean alphaTestTex = blend != null && attr(r, TextureAttribute.Diffuse) != null && (mask & 4) != 0;
+            d.specConstants = new int[] {0, 0, 0, 0, 0, 0, alphaTestTex ? 1 : 0}; // id 7: C_ALPHA_TEST
+            key.append(alphaTestTex ? "|a" : "");
+            vert = "model_depth_u" + ((mask & 4) != 0 ? 1 : 0) + (bones > 0 ? "b" + bones : "") + ".vert";
+            name = "depth:" + mask + "b" + bones;
+        } else {
+            final ColorAttribute diffuse = (ColorAttribute)attr(r, ColorAttribute.Diffuse);
+            final TextureAttribute diffuseTex = (TextureAttribute)attr(r, TextureAttribute.Diffuse);
+            final ColorAttribute specular = (ColorAttribute)attr(r, ColorAttribute.Specular);
+            final TextureAttribute specularTex = (TextureAttribute)attr(r, TextureAttribute.Specular);
+            final ColorAttribute emissive = (ColorAttribute)attr(r, ColorAttribute.Emissive);
+            final TextureAttribute emissiveTex = (TextureAttribute)attr(r, TextureAttribute.Emissive);
+            final BlendingAttribute blend = (BlendingAttribute)attr(r, BlendingAttribute.Type);
+            final FloatAttribute alphaTest = (FloatAttribute)attr(r, FloatAttribute.AlphaTest);
+            final FloatAttribute shininess = (FloatAttribute)attr(r, FloatAttribute.Shininess);
+            final boolean uv = (mask & 4) != 0;
+            final boolean lighting = r.environment != null && (mask & 1) != 0;
+            final boolean tex = diffuseTex != null && uv;
+            final boolean specTex = tierA && specularTex != null && uv;
+            final boolean emiTex = tierA && emissiveTex != null && uv;
+            final boolean specAny = lighting && (specular != null || specTex);
+            final boolean fog = lighting && r.environment.get(ColorAttribute.Fog) != null;
+            final boolean shadow = lighting && shadowOf(r.environment) != null;
+            final TextureAttribute normalTex = (TextureAttribute)attr(r, TextureAttribute.Normal);
+            final boolean normalMap = tierA && lighting && uv && normalTex != null;
+
+            // Specialization constants 1..17 of model_default_v*.vert / model_default.frag (ids documented there).
+            d.specConstants = new int[] {lighting ? 1 : 0, tex ? 1 : 0, diffuse != null ? 1 : 0, specAny ? 1 : 0, emissive != null ? 1 : 0,
+                blend != null ? 1 : 0, blend != null && alphaTest != null ? 1 : 0, shininess != null ? 1 : 0,
+                config.numDirectionalLights, config.numPointLights, (mask & 2) != 0 ? 1 : 0, fog ? 1 : 0, specTex ? 1 : 0, emiTex ? 1 : 0,
+                specular != null ? 1 : 0, shadow ? 1 : 0, normalMap ? 1 : 0};
+            key.append('|').append(java.util.Arrays.toString(d.specConstants));
+            vert = "model_default_v" + mask + (bones > 0 ? "b" + bones : "") + ".vert";
+            name = "model:" + mask + "b" + bones;
+        }
         if (gl.isBlendEnabled()) {
             final int[] f = gl.blendFunctions();
             d.blend = true;
@@ -590,13 +759,12 @@ public class VulkanModelBatch implements Disposable {
             d.dstColor = f[1];
             d.srcAlpha = f[2];
             d.dstAlpha = f[3];
+            key.append("|b").append(d.srcColor).append(',').append(d.dstColor).append(',').append(d.srcAlpha).append(',').append(d.dstAlpha);
         }
-        final StringBuilder key = new StringBuilder("model|").append(bones).append('|').append(layout).append('|').append(d.topology).append('|').append(java.util.Arrays.toString(d.specConstants));
-        if (d.blend) key.append("|b").append(d.srcColor).append(',').append(d.dstColor).append(',').append(d.srcAlpha).append(',').append(d.dstAlpha);
         final String k = key.toString();
         Integer id = pipelineIds.get(k);
-        if (id == null || !frameKnows(k)) {
-            id = frame.pipeline(k, "model:" + mask + "b" + bones, "model_default_v" + mask + (bones > 0 ? "b" + bones : "") + ".vert", "model_default.frag", d);
+        if (id == null || !frameKnows()) {
+            id = frame.pipeline(k, name, vert, depthPass ? "model_depth.frag" : "model_default.frag", d);
             pipelineIds.put(k, id);
         }
         return id;
@@ -604,7 +772,8 @@ public class VulkanModelBatch implements Disposable {
 
     /** The frame forgets its pipelines when its presenter is replaced (Android surface loss); then ours are stale too. */
     private int knownPresenterEpoch = -1;
-    private boolean frameKnows (String key) {
+
+    private boolean frameKnows () {
         final int epoch = System.identityHashCode(frame.presenter());
         if (epoch != knownPresenterEpoch) {
             pipelineIds.clear();

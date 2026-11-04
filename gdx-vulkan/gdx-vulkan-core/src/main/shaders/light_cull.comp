@@ -1,0 +1,59 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#define GDX_SKIP_SET0
+#include "gdx_vk_common.glsl"
+#include "gpu_world.glsl"
+
+// VulkanGpuInstances, clustered light culling: one invocation per cluster of a (clusters x, y, z) grid over the view frustum, with exponentially spaced
+// depth slices between near and far. Each cluster's bounding box in view space is tested against every point light's sphere; the indices of the lights
+// that touch it (at most maxPerCluster) go to the cluster's list. The fragment shader finds its cluster from its pixel and depth.
+layout(local_size_x = 64) in;
+
+layout(std430, set = 0, binding = 1) buffer GdxWorld {
+    uint w[];
+};
+
+float f(uint i) {
+    return uintBitsToFloat(w[i]);
+}
+
+void main() {
+    const uint cx = w[H_CLUSTER], cy = w[H_CLUSTER + 1u], cz = w[H_CLUSTER + 2u], maxPer = w[H_CLUSTER + 3u];
+    const uint id = gl_GlobalInvocationID.x;
+    if (id >= cx * cy * cz) return;
+    const uint x = id % cx, y = (id / cx) % cy, z = id / (cx * cy);
+
+    const float near = f(H_CAMERA + 3u), far = f(H_PROJ);
+    const float p00 = f(H_PROJ + 1u), p11 = f(H_PROJ + 2u);
+    const float d0 = near * pow(far / near, float(z) / float(cz));
+    const float d1 = near * pow(far / near, float(z + 1u) / float(cz));
+    // Tile bounds in GL normalized device coordinates; tile row 0 is the top of the screen (the swapchain is drawn upside down).
+    const float nx0 = -1.0 + 2.0 * float(x) / float(cx), nx1 = -1.0 + 2.0 * float(x + 1u) / float(cx);
+    const float ny1 = 1.0 - 2.0 * float(y) / float(cy), ny0 = 1.0 - 2.0 * float(y + 1u) / float(cy);
+    vec3 lo = vec3(1e30), hi = vec3(-1e30);
+    for (int k = 0; k < 8; k++) {
+        const float d = (k & 4) != 0 ? d1 : d0;
+        const vec3 p = vec3(((k & 1) != 0 ? nx1 : nx0) * d / p00, ((k & 2) != 0 ? ny1 : ny0) * d / p11, -d); // view space looks down -z
+        lo = min(lo, p);
+        hi = max(hi, p);
+    }
+
+    const mat4 view = mat4(vec4(f(H_VIEW), f(H_VIEW + 1u), f(H_VIEW + 2u), f(H_VIEW + 3u)), vec4(f(H_VIEW + 4u), f(H_VIEW + 5u), f(H_VIEW + 6u), f(H_VIEW + 7u)),
+        vec4(f(H_VIEW + 8u), f(H_VIEW + 9u), f(H_VIEW + 10u), f(H_VIEW + 11u)), vec4(f(H_VIEW + 12u), f(H_VIEW + 13u), f(H_VIEW + 14u), f(H_VIEW + 15u)));
+    const uint lightCount = w[H_COUNTS + 1u];
+    const uint lights = w[H_OFFSETS + 3u];
+    const uint list = w[H_OFFSETS2] + id * (1u + maxPer);
+    uint n = 0u;
+    for (uint l = 0u; l < lightCount && n < maxPer; l++) {
+        const uint b = lights + l * 8u;
+        const vec4 pr = vec4(f(b), f(b + 1u), f(b + 2u), f(b + 3u));
+        const vec3 c = (view * vec4(pr.xyz, 1.0)).xyz;
+        const vec3 q = clamp(c, lo, hi);
+        const vec3 dv = c - q;
+        if (dot(dv, dv) <= pr.w * pr.w) {
+            w[list + 1u + n] = l;
+            n++;
+        }
+    }
+    w[list] = n;
+}

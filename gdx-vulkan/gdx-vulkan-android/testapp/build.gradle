@@ -45,7 +45,7 @@ dependencies {
 def sharedJava = layout.buildDirectory.dir('generated/shared-java')
 def copySharedScenes = tasks.register('copySharedScenes', Copy) {
     from('../../gdx-vulkan-desktop/src/test/java/io/github/slebed/gdxvulkan/desktop') {
-        include 'Gate3Scenes.java', 'ShapeApi.java'
+        include 'Gate3Scenes.java', 'Gate5Scenes.java', 'ShapeApi.java'
         into 'io/github/slebed/gdxvulkan/desktop'
     }
     into sharedJava
@@ -54,7 +54,7 @@ def deviceAssets = layout.buildDirectory.dir('generated/assets')
 def copyDeviceAssets = tasks.register('copyDeviceAssets', Copy) {
     from('../../test-assets') { include 'data/**' }
     from('../../gdx-vulkan-desktop/src/test/resources/goldens') {
-        include 'gate3_*.png'
+        include 'gate3_*.png', 'gate5_*.png'
         into 'goldens'
     }
     into deviceAssets
