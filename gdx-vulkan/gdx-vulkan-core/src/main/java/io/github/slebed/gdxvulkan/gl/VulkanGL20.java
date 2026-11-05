@@ -956,20 +956,10 @@ public class VulkanGL20 extends VulkanGL20Base {
         for (int i = 0; i < n; i++) out.put(glGenBuffer());
     }
 
-    private static final boolean TRACE_BIND = Boolean.getBoolean("gdxvulkan.traceBind"); // diagnosis
-
     @Override public void glBindBuffer (int target, int buffer) {
         if (target == GL_ARRAY_BUFFER) boundArrayBuffer = buffer;
-        else if (target == GL_ELEMENT_ARRAY_BUFFER) {
-            boundElementBuffer = buffer;
-            if (TRACE_BIND) {
-                final Throwable t = new Throwable("[trace] element buffer bound to " + buffer);
-                for (StackTraceElement e : t.getStackTrace()) if (e.getClassName().contains("srlgames") && !e.getMethodName().equals("dispose")) {
-                    t.printStackTrace();
-                    break;
-                }
-            }
-        } else throw unsupported("glBindBuffer(target 0x" + Integer.toHexString(target) + ")");
+        else if (target == GL_ELEMENT_ARRAY_BUFFER) boundElementBuffer = buffer;
+        else throw unsupported("glBindBuffer(target 0x" + Integer.toHexString(target) + ")");
         if (buffer != 0 && buffers.get(buffer) == null) buffers.put(buffer, new GlBuffer(buffer)); // GL lets a name be bound before it was generated
     }
 
