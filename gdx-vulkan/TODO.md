@@ -45,9 +45,11 @@ on the Adreno 840 and 1.1 s on the Adreno 650, each further shader 10 to 25 ms, 
 ### Shaders and the GL shim
 - **[build] Custom 3D shaders for `VulkanModelBatch`** (`Shader` / `ShaderProvider` built on `VulkanShaderProgram`). Today the answer is "use stock `ModelBatch` through the
   shim", which accepts any stock shader but costs more CPU. Decide whether `VulkanModelBatch` still needs its own provider API.
-- **[build] Shim performance.** Stock code through the shim costs more render-thread CPU than OpenGL (0.83 against 0.33 ms in the shadow demo; the stock `SpriteBatch` reaches
-  0.72x to 0.96x of `VulkanSpriteBatch`). Known cost: a pipeline-key string is built per draw (use an integer key); profile the rest (`DefaultShader` uniform writes,
-  pipeline lookup, per-draw push/ring writes).
+- **[done 2026-11-04, mostly] Shim performance.** Pipelines are found by a 64-bit signature (no string per draw), the draw walks the program's attribute array, push constants go
+  out as words, matrix uniforms compare words. Stock `ModelBatch` shadow demo, render thread: 0.69 to 0.72 ms (was 0.75 to 0.83; OpenGL's render thread is 0.20 ms but its driver thread
+  does the rest: total process CPU per frame is equal, 0.69 against 0.70 ms). What remains is `vkQueuePresentKHR` (about 0.27 ms per frame, 38% of the render thread; not shim specific) and the stock
+  `SpriteBatch` staging copies (0.75x to 0.93x of `VulkanSpriteBatch`: every flush copies its 655 KB of vertices through the staging ring). Ideas not done: dynamic VBOs through the vertex ring,
+  a second vertex binding for `glVertexAttrib` constants, a present thread (considered; risk with Swappy/resizing/present fences, and it only matters above 1,000 fps).
 - **[build] Shim coverage:** instancing through GL (needs `Gdx.gl30`, which stays null), several vertex buffers per draw, vertex formats other than float and
   normalised ubyte, unsigned-byte indices, query objects.
 - **[build] Translator:** `#version 300 es` / `330` shaders passing through; `#define` flags as specialization constants so variants share SPIR-V; precision qualifiers to

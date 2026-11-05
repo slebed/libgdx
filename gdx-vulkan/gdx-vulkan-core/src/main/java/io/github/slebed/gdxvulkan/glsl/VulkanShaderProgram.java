@@ -281,6 +281,23 @@ public class VulkanShaderProgram implements Disposable {
         return a == null ? -1 : a.location;
     }
 
+    private int[] attributeLocations;
+
+    /** The vertex input locations of the program's attributes, as an array to walk without an iterator. */
+    public int[] attributeLocations () {
+        if (attributeLocations == null) {
+            final int[] out = new int[t.attributes.size()];
+            for (int i = 0; i < out.length; i++) out[i] = t.attributes.get(i).location;
+            attributeLocations = out;
+        }
+        return attributeLocations;
+    }
+
+    /** A number for this program, unique in the process: what the GL shim keys its pipelines by. */
+    public int id () {
+        return id;
+    }
+
     /** Whether the shader has an attribute at this vertex input location. */
     public boolean hasAttributeLocation (int location) {
         for (Attribute a : t.attributes) if (a.location == location) return true;
@@ -684,12 +701,19 @@ public class VulkanShaderProgram implements Disposable {
     private void writeMatrix (Uniform u, int element, float[] src, int srcOffset, int n, boolean transpose) {
         final int base = u.offset + (element + elementBase) * u.arrayStride;
         final int stride = u.columnStride;
+        final int[] words = u.push ? pushWords : ringWords;
+        boolean changed = false;
         for (int col = 0; col < n; col++) {
             for (int row = 0; row < n; row++) {
-                final float value = transpose ? src[srcOffset + row * n + col] : src[srcOffset + col * n + row];
-                write(u, base + col * stride + row * 4, Float.floatToRawIntBits(value));
+                final int word = Float.floatToRawIntBits(transpose ? src[srcOffset + row * n + col] : src[srcOffset + col * n + row]);
+                final int i = (base + col * stride + row * 4) >> 2;
+                if (words[i] != word) {
+                    words[i] = word;
+                    changed = true;
+                }
             }
         }
+        if (changed && !u.push) ringVersion++;
     }
 
     // ---------------------------------------------------------------------------------------------------------------- used by the batches
@@ -743,6 +767,20 @@ public class VulkanShaderProgram implements Disposable {
      * @param unitZeroTexture the GL handle of the texture the batch is drawing with, which is the one at texture unit 0 as in stock
      */
     public void prepareDraw (CommandStream s, float[] block32, int unitZeroTexture) {
+        prepareDraw(s, unitZeroTexture);
+        for (int i = 0; i < 32; i++) block32[i] = Float.intBitsToFloat(pushWords[i]);
+    }
+
+    /**
+     * {@link #prepareDraw(CommandStream, float[], int)} without the conversion: the push constants are left in the program's own word array, which {@code CommandStream.pushConstantWords}
+     * sends as it is. Returns that array (do not keep or change it).
+     */
+    public int[] prepareDrawWords (CommandStream s, int unitZeroTexture) {
+        prepareDraw(s, unitZeroTexture);
+        return pushWords;
+    }
+
+    private void prepareDraw (CommandStream s, int unitZeroTexture) {
         final VulkanGL20 gl = frame.gl();
         final boolean bindless = t.bindless;
         for (int i = 0; i < t.samplers.size(); i++) {
@@ -755,7 +793,6 @@ public class VulkanShaderProgram implements Disposable {
             if (bindless) pushWords[sampler.slotOffset >> 2] = gl.slotOf(nativeId);
             else s.bindTexture(nativeId);
         }
-        for (int i = 0; i < 32; i++) block32[i] = Float.intBitsToFloat(pushWords[i]);
         if (t.blockBytes > 0) {
             // Set 0 data lives for the frame's command stream; rebind when the frame, the data, or somebody else's Set 0 binding changed.
             final long generation = s.set0Generation();

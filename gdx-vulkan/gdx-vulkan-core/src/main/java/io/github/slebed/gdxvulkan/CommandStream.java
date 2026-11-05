@@ -90,6 +90,16 @@ public final class CommandStream {
         n = p;
     }
 
+    /** {@link #pushConstants(float[])} from the words themselves: no conversion through floats and back. */
+    public void pushConstantWords(int[] words32) {
+        ensure(33);
+        final int[] w = a;
+        int p = n;
+        w[p++] = PUSH_CONSTANTS;
+        System.arraycopy(words32, 0, w, p, 32);
+        n = p + 32;
+    }
+
     /**
      * Changes {@code count} words of the push-constant block, from word {@code firstWord} (0-31), leaving the rest as it was: a draw loop that
      * changes one colour or one matrix per draw sends a few words, not 33. The native side keeps the block and pushes it, in full, once

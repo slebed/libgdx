@@ -70,8 +70,7 @@ final class StockPrograms {
     private final IntMap<Program> programs = new IntMap<Program>();
     private final Pointer[] pointers = new Pointer[MAX_ATTRIBUTES];
     private final float[] push = new float[32];
-    private final StringBuilder key = new StringBuilder(128);
-    private final Map<String, Integer> pipelines = new HashMap<String, Integer>();
+    private final com.badlogic.gdx.utils.LongMap<Integer> pipelines = new com.badlogic.gdx.utils.LongMap<Integer>();
     private int nextName = 1;
     private Program current;
 
@@ -335,25 +334,24 @@ final class StockPrograms {
         final CommandStream s = gl.stream();
         if (frame == null || s == null) throw new GdxRuntimeException("gdx-vulkan: a draw outside a frame (frame.begin() was not called)");
 
-        // The layout of the vertex data: every enabled array the program reads, from one buffer.
+        // The layout of the vertex data: every enabled array the program reads, from one buffer. The pipeline is found by a 64-bit signature of what makes
+        // pipelines differ (the program, the primitive type, the blend state and each attribute's format, offset and stride): nothing is built as a string or allocated per draw.
         int buffer = 0, stride = 0;
         Buffer client = null;
         int clientBytes = Integer.MAX_VALUE;
-        key.setLength(0);
-        key.append(mode).append('|');
+        long signature = mix(program.id(), mode);
         final boolean blend = gl.isBlendEnabled();
         if (blend) {
             final int[] f = gl.blendFunctions();
-            key.append(f[0]).append(',').append(f[1]).append(',').append(f[2]).append(',').append(f[3]);
-        } else {
-            key.append('o');
+            signature = mix(mix(mix(mix(signature, 1), f[0]), f[1]), mix(f[2], f[3]));
         }
-        key.append('|');
+        final int[] locations = program.attributeLocations();
         int enabledReadByProgram = 0;
-        for (int i = 0; i < MAX_ATTRIBUTES; i++) {
+        for (int k = 0; k < locations.length; k++) {
+            final int i = locations[k];
+            if (i < 0 || i >= MAX_ATTRIBUTES) continue;
             final Pointer p = pointers[i];
             if (!p.enabled || p.size == 0) continue;
-            if (!program.hasAttributeLocation(i)) continue; // an array the program does not read
             if (buffer != 0 && p.buffer != buffer) { // in-memory pointers are all CLIENT: Mesh passes a FloatBuffer and a ByteBuffer, two views of the one array
                 throw new GdxRuntimeException("gdx-vulkan: the vertex attributes come from more than one buffer; interleave them in one (stock Mesh does)");
             }
@@ -363,14 +361,13 @@ final class StockPrograms {
                 clientBytes = Math.min(clientBytes, p.client instanceof FloatBuffer ? ((FloatBuffer)p.client).limit() * 4 : ((ByteBuffer)p.client).limit());
             }
             stride = p.stride != 0 ? p.stride : p.size * typeBytes(p.type);
-            key.append(i).append(':').append(p.size).append(':').append(p.type).append(p.normalized ? 'n' : 'r').append(':').append(p.offset).append(';');
+            signature = mix(mix(mix(signature, i), (p.size << 20) ^ (p.type << 1) ^ (p.normalized ? 1 : 0)), ((long)p.offset << 32) ^ stride);
             enabledReadByProgram++;
         }
         if (enabledReadByProgram == 0) throw new GdxRuntimeException("gdx-vulkan: a draw with the program using no enabled vertex attribute");
-        key.append(stride);
-        final String variant = key.toString();
-        Integer pipeline = pipelines.get(program.key() + "|" + variant);
+        Integer pipeline = pipelines.get(signature);
         if (pipeline == null) {
+            final StringBuilder variant = new StringBuilder("gl|").append(mode).append('|');
             final GdxVkPipelineDesc d = new GdxVkPipelineDesc();
             d.stride = stride;
             d.topology = topology(mode);
@@ -382,14 +379,22 @@ final class StockPrograms {
                 d.dstColor = f[1];
                 d.srcAlpha = f[2];
                 d.dstAlpha = f[3];
+                variant.append(f[0]).append(',').append(f[1]).append(',').append(f[2]).append(',').append(f[3]);
+            } else {
+                variant.append('o');
             }
-            for (int i = 0; i < MAX_ATTRIBUTES; i++) {
+            variant.append('|');
+            for (int k = 0; k < locations.length; k++) {
+                final int i = locations[k];
+                if (i < 0 || i >= MAX_ATTRIBUTES) continue;
                 final Pointer p = pointers[i];
-                if (!p.enabled || p.size == 0 || !program.hasAttributeLocation(i)) continue;
+                if (!p.enabled || p.size == 0) continue;
                 d.attribute(i, format(p), p.offset);
+                variant.append(i).append(':').append(p.size).append(':').append(p.type).append(p.normalized ? 'n' : 'r').append(':').append(p.offset).append(';');
             }
-            pipeline = program.pipeline("gl|" + variant, d);
-            pipelines.put(program.key() + "|" + variant, pipeline);
+            variant.append(stride);
+            pipeline = program.pipeline(variant.toString(), d);
+            pipelines.put(signature, pipeline);
         }
 
         // Data in memory goes through the frame's ring: the vertices up to the highest one this draw reads, and the indices of the draw.
@@ -408,8 +413,7 @@ final class StockPrograms {
             program.setPushFloat(96, thin ? -2f / 256f / Math.max(1, frame.height()) : 0f);
         }
         s.bindPipeline(pipeline);
-        program.prepareDraw(s, push, gl.boundTexture(0));
-        s.pushConstants(push);
+        s.pushConstantWords(program.prepareDrawWords(s, gl.boundTexture(0)));
         if (client != null) {
             final int bytes = Math.min((maxVertex + 1) * stride, clientBytes);
             final long a = frame.presenter().allocVertex(bytes);
@@ -464,6 +468,14 @@ final class StockPrograms {
         } else {
             s.draw(count, first);
         }
+    }
+
+    /** Mixes a value into a 64-bit signature (splitmix-style), so that equal state gives equal numbers and different state almost never does. */
+    private static long mix (long h, long v) {
+        long x = h ^ (v + 0x9E3779B97F4A7C15L + (h << 6) + (h >>> 2));
+        x = (x ^ (x >>> 30)) * 0xBF58476D1CE4E5B9L;
+        x = (x ^ (x >>> 27)) * 0x94D049BB133111EBL;
+        return x ^ (x >>> 31);
     }
 
     /** The highest vertex index among the {@code count} indices from the buffer's position. */
