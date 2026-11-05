@@ -6,14 +6,27 @@ renderer underneath them.
 
 ## Why
 
-- **Speed where OpenGL is slow.** Switching textures is cheap in Vulkan. A scene drawn from many separate textures runs up to 24 times faster than stock libGDX
-  on the same machine (see [Performance](#performance)), and a game that already uses atlases still gains 20%.
-- **The GPU can do work OpenGL could not give you.** Compute shaders, indirect draws and GPU-side culling are available from libGDX: one million sprites
-  moved by a compute shader at 722 frames per second on a 2018 graphics card; 250,000 lit 3D meshes at 495.
+- **Speed where OpenGL is slow.** Switching textures is cheap in Vulkan. A scene drawn from many separate textures runs 17 to 24 times faster than stock libGDX
+  on the same machine, on a desktop card and on both phones we test with (see [Performance](#performance)). A game that already packs its art into atlases gains little:
+  about the same speed on a desktop card, and on phones between 0.8x and 1.3x depending on the GPU.
+- **The GPU can do work OpenGL could not give you, and do it with less CPU.** Compute shaders, indirect draws and GPU-side culling are available from libGDX: one million sprites
+  moved by a compute shader at 722 frames per second on a 2018 graphics card; 250,000 lit 3D meshes at 495. Against stock libGDX doing the same boid simulation with OpenGL compute shaders,
+  250,000 boids run 2x faster on an RTX 5080 at a fifth of the CPU.
 - **No fork to maintain.** gdx-vulkan implements libGDX's own `GL20` interface on top of Vulkan, so the stock classes run as they are. When libGDX is updated,
   you update libGDX.
 - **Android that survives the lifecycle.** The Vulkan surface can be destroyed and recreated (rotation, background, foreground) without reloading a single
   texture: recreation takes about 2 ms on the phone we test with. There is no "managed texture" reload.
+
+### What to expect
+
+Measured against stock libGDX on the same machines (details and the cases gdx-vulkan loses in [Demo measurements](#demo-measurements)):
+
+- **Big wins:** many separate textures (17 to 24x) and GPU-driven rendering (compute, culling, indirect draws: 2x at 250,000 boids on the desktop, up to 4.5x on one phone, a fifth of the CPU).
+- **About equal:** a texture atlas on a desktop card.
+- **Mixed on phones:** atlases and sprites sorted by texture are 1.1 to 1.3x faster on the Adreno 650 and slower on the Adreno 840 (0.82x with an atlas, 0.2 to 0.3x sorted by texture), until the
+  texture index is taken out of the varying there (`TODO.md`).
+- **Slower:** libGDX's own classes run unchanged through the GL shim at 0.6 to 1.0x of OpenGL's speed, with about the same CPU. The `Vulkan...` classes are the fast path.
+- **Not measured:** energy use. Text drawn with stock `ShapeRenderer` and fonts costs more per frame than on OpenGL (0.2 ms on the desktop, about 1.7 ms on the REDMAGIC): open.
 
 ## Status
 
@@ -27,7 +40,7 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | GPU-driven | compute shaders, GPU culling, indirect drawing, clustered lighting for hundreds of lights |
 | Stock classes, unchanged | libGDX's own `SpriteBatch`, `PolygonSpriteBatch`, `ShapeRenderer`, `Stage`, `ModelBatch` (`DefaultShader`, `DepthShader`) and your own `ShaderProgram`s run as they are, through the GL shim. The `Vulkan...` classes do the same work written straight against Vulkan and are the fast path |
 | Shaders | libGDX's GLSL (`attribute`, `varying`, `uniform`, `gl_FragColor`) is translated to Vulkan at run time and cached on disk; libGDX's own sprite, shape and model shaders are compiled when the library is built, so they cost no start-up compile; SPIR-V bundles are accepted too |
-| Demos | `gdx-vulkan-demos`: a demo app with a menu, and stock OpenGL versions to start beside it (see [Demos](#demos)) |
+| Demos | `gdx-vulkan-demos`: a demo app with a menu, with stock OpenGL versions to start beside it on the desktop; the same app on Android (`gdx-vulkan-android/demoapp`, with a stock OpenGL ES activity to measure against); see [Demos](#demos) |
 | Platforms | Windows x64, Linux x64 (X11), Android 10+ (arm64) |
 | Application | a desktop `Application` (`VulkanDesktopApplication`) and an Android one (`VulkanAndroidApplication`), with stock input, audio and files |
 
@@ -37,14 +50,13 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Wayland | X11 only on Linux |
 | Some GLSL | cube maps and 3D samplers, structs with array or matrix members, `bool` arrays, array varyings, and (on a Vulkan 1.1 driver) more than one texture per draw are refused with a message that names the line |
 | More of OpenGL | the shim covers what libGDX's classes use: programs, uniforms, one vertex buffer (or vertex data in memory) and array or indexed draws. `Gdx.gl30` and `gl31` stay null, so instancing, several vertex buffers, vertex formats other than floats and normalised bytes, query objects and compute through GL are not available; use the Vulkan classes (`VulkanComputeShader`, `VulkanGpuInstances`) |
-| Demos on Android | `gdx-vulkan-android/demoapp`: the same three demos behind a touch menu (the OpenGL counterparts stay desktop only); run on the Galaxy S20 FE |
 | Spot lights, point-light shadows in `VulkanModelBatch` | libGDX's own default shader has neither. Stock `ModelBatch` through the shim compiled and drew a spot light without error, but no picture of it has been compared with OpenGL |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (192 of 240 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (195 of 242 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
-Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). Both phones pass the whole device suite (32 checks, 3D included); what each GPU needed is in [`docs/DRIVER_NOTES.md`](docs/DRIVER_NOTES.md). Other GPUs and drivers should work but have not been tried.
+Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). Both phones pass the whole device suite (32 checks, 3D included, both code paths on the REDMAGIC), and the demos run on both; what each GPU needed is in [`docs/DRIVER_NOTES.md`](docs/DRIVER_NOTES.md). Other GPUs and drivers should work but have not been tried.
 
 ## Performance
 
@@ -130,7 +142,7 @@ How to read these:
 - T7 is the cost of not renaming: libGDX's own batch, with the shader replaced by the dedicated one, runs at about three quarters of the speed of `VulkanSpriteBatch` on the RTX 5080 (a CPU-bound test: the shim records one draw per flush, the generated batch writes straight into GPU-visible memory) and at 0.9x to 1.0x on the RTX 2080 and the phone.
 - The whole device suite was re-run on RM-11P on 2026-11-04 on the current code (32 checks, both code paths, all passed, no validation messages: the layers are not on the device): T1 1,462 fps (modern) and 1,230 (compatibility), T2 37.3 and 10.4 fps, T3 208 fps on both, T4 48.5 and 47.9 fps, T5 791 and 733 fps; GPU time per frame (timestamp queries) for the T7 sprites 0.62 ms (`VulkanSpriteBatch`) and 0.69 ms (stock `SpriteBatch` on the shim).
 - The S20-FE was re-run on 2026-11-04 on the current code (32 checks, all passed, 3D included): T1 517 fps (the phone was in a lower clock state than for the 717 above), T2 10.9 fps, T3 69 fps, T4 7.5 fps, T5 72 fps.
-- No phone has a stock OpenGL number yet; those cells will be filled in as the stock-against-Vulkan demo runs on phones.
+- The phones' stock OpenGL ES numbers are in [Demo measurements](#demo-measurements) (the same scenes on stock libGDX and on gdx-vulkan); the T-rows above have no stock number on a phone because the benchmark programs for them run on the desktop.
 
 Rendering matches stock libGDX: the test scenes are drawn by stock OpenGL and by gdx-vulkan and compared pixel by pixel. The framebuffer scenes are identical;
 the 2D and 3D scenes differ in at most 0.2% of pixels, at the ends of lines and edges.
@@ -291,7 +303,7 @@ Vulkan context yourself (a test, a tool), pass the frame explicitly: `new Vulkan
 | 3 Shadows, stock libGDX code | libGDX's own shadow recipe (`DirectionalShadowLight`, `DepthShaderProvider`), the same class on both backends | yes: the same code on OpenGL |
 | 4 Cascaded shadows | the same road with four cascaded shadow maps: a feature stock libGDX does not have | no |
 
-`gradlew :gdx-vulkan-demos:demoGl -Ddemo=shadows-stock` (or `boids`) runs a demo on OpenGL alone. Options: `-Ddemo.boids=N`, `-Ddemo.vsync=true` (off by default, so the frame rate shown is what the GPU can do), `-Ddemo.width=` and `-Ddemo.height=`, `-Ddemo.lights=false`, `-Ddemo.start=2 -Ddemo.screenshot=out.png` (saves a picture and leaves). Every demo shows the same fields on both backends: the API and its version, the device, the driver and the code path, then the frame time, the CPU time per frame (all threads of the process, the graphics driver's own included), the render thread's CPU time per frame, and the GPU time per frame. gdx-vulkan reads the GPU time from timestamp queries (`GdxVkPresenter.gpuFrameNanos()`); the OpenGL main uses a timer query. The OpenGL driver's device name carries a `/PCIe/SSE2` suffix (the bus the card is on and the CPU instruction set the driver's software paths use); the Vulkan device name has none, so the OpenGL one is cut there to read the same. On the RTX 5080 at 1280 x 720 with vsync off, the boids take 0.5 ms of CPU a frame on gdx-vulkan and 2.5 ms on OpenGL for the same work (simulation, culling, indirect draw), and the stock shadow code through the shim takes about the same CPU in total as on OpenGL (1.0 ms) but more of it on the render thread; `docs/CHECKLIST.md` has the table and what the numbers do and do not show.
+`gradlew :gdx-vulkan-demos:demoGl -Ddemo=sprites` (or `boids`, `shadows-stock`) runs a demo on OpenGL alone. Options: `-Ddemo.sprites=N` and `-Ddemo.mode=0|1|2` (scattered, sorted, atlas), `-Ddemo.boids=N`, `-Ddemo.vsync=true` (off by default, so the frame rate shown is what the GPU can do), `-Ddemo.hud=false` (no text: measures the scene alone), `-Ddemo.width=` and `-Ddemo.height=`, `-Ddemo.lights=true` (the boids start with the 500 point lights, which OpenGL does not have), `-Ddemo.start=2 -Ddemo.screenshot=out.png` (saves a picture and leaves). Every demo shows the same fields on both backends: the API and its version, the device, the driver and the code path, then the frame time, the CPU time per frame (all threads of the process, the graphics driver's own included), the render thread's CPU time per frame, and the GPU time per frame. gdx-vulkan reads the GPU time from timestamp queries (`GdxVkPresenter.gpuFrameNanos()`); the OpenGL main uses a timer query (not available for OpenGL ES on the phones). The OpenGL driver's device name carries a `/PCIe/SSE2` suffix (the bus the card is on and the CPU instruction set the driver's software paths use); the Vulkan device name has none, so the OpenGL one is cut there to read the same. The results, with the cases where gdx-vulkan is not ahead, are under [Demo measurements](#demo-measurements); `docs/CHECKLIST.md` has the item list.
 
 ### Moving an existing game over
 
@@ -374,9 +386,9 @@ Stock classes run unchanged because the same shim also serves what they use to d
 - `gdx-vulkan-core/` the Java API and the C++ core (`jni/`: CMake, with volk, VMA, SPIRV-Reflect and the Vulkan headers vendored); shaders in `src/main/shaders`
 - `gdx-vulkan-desktop/` the desktop `Application`, plus the desktop tests and benchmarks
 - `gdx-vulkan-demos/` the demo app and the OpenGL counterparts of its demos (see Demos)
-- `gdx-vulkan-android/` the Android library and a test app (its own Gradle build)
+- `gdx-vulkan-android/` the Android library, a test app and the demo app (its own Gradle build)
 - `ci/`, `.github/` the Docker image and workflow that run every test on a software Vulkan driver
-- `tools/` generators that copy code from stock libGDX (so the comparison stays honest)
+- `tools/` generators that copy code from stock libGDX (so the comparison stays honest), and the scripts that run the tests and comparisons on phones (`device-suite.sh`, `demos-test.sh`, `compare-phone.sh`, `compare-demos.sh`)
 - `test-assets/` libGDX's own test assets, used by the scene tests (see `NOTICE`)
 - `docs/` [`PLAN.md`](docs/PLAN.md) the design, [`CHECKLIST.md`](docs/CHECKLIST.md) the detailed status, [`TESTING.md`](docs/TESTING.md) building, testing and benchmarking,
   [`RELEASE.md`](docs/RELEASE.md) the manual checks before a release
@@ -390,7 +402,7 @@ Stock classes run unchanged because the same shim also serves what they use to d
 - On Android, `Gdx.input.setOnscreenKeyboardVisible` (what Scene2D's `TextField` uses) and `Gdx.input.getTextInput` work; a newer libGDX's `openTextInputField` overlay needs the stock `AndroidApplication` and is not covered.
 - Natives are built for Windows x64, Linux x64 and Android arm64. Android armeabi-v7a and x86_64 compile but have never been run.
 - Offscreen framebuffer passes recorded after a draw to the screen keep their order: a framebuffer pass in the middle of a frame interrupts the main pass.
-- The demo app is desktop only, and clustered lights and shadows are not combined in one scene: lights are sorted into clusters on the GPU-driven path (one mesh, no shadows), cascaded shadows work with `VulkanModelBatch` (up to 8 point lights).
+- Clustered lights and shadows are not combined in one scene: lights are sorted into clusters on the GPU-driven path (one mesh, no shadows), cascaded shadows work with `VulkanModelBatch` (up to 8 point lights).
 
 ## Contributing and licence
 Issues and pull requests are welcome; run the tests first (`docs/TESTING.md`). What is left to do and the open problems are in [`TODO.md`](TODO.md). Apache License 2.0, see `LICENSE`. Third-party code is vendored in

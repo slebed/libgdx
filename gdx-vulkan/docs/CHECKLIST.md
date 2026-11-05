@@ -21,10 +21,10 @@ the plan names.
 | Phase 5: 3D with stock models | 10 | 3 | 0 | 13 |
 | Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 28 | 9 | 9 | 46 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
-| Demos (gdx-vulkan-demos) | 4 | 3 | 3 | 10 |
+| Demos (gdx-vulkan-demos) | 7 | 3 | 2 | 12 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **192** | **19** | **29** | **240** |
+| **All** | **195** | **19** | **28** | **242** |
 ---
 
 ## Core decisions
