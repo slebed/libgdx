@@ -25,7 +25,7 @@ Measured against stock libGDX on the same machines (details and the cases gdx-vu
   desktop at under a third of the CPU, 3.7x at 60,000 boids on the REDMAGIC).
 - **About equal:** a texture atlas (1.0x to 1.15x on the desktop card and the S20, 0.81x on the REDMAGIC) and a small GPU-driven scene (10,000 boids on a phone).
 - **Slower:** libGDX's own classes run unchanged through the GL shim at 0.6 to 0.8x of OpenGL's speed on the desktop and the REDMAGIC, with about the same CPU. The `Vulkan...` classes are the fast path.
-- **Power:** one measurement on the REDMAGIC, 10,000 boids at 60 fps: gdx-vulkan used about 6% more battery power than OpenGL ES. Do not expect Vulkan to save energy by itself.
+- **Power:** the same as OpenGL ES within the noise (about 5%) on the REDMAGIC at 60 fps: boids, an atlas of sprites and the stock shadow demo each within 4% either way. gdx-vulkan does not save battery by itself.
 
 ## Status
 
@@ -180,10 +180,7 @@ The numbers were taken on 2026-11-04 after the batch fix described below; the RE
 
 CPU per frame (all threads), with the text: 250,000 boids on the RTX 5080 take 2.4 ms on OpenGL against 0.69 ms; at a fixed 60 fps 3.7 ms against 2.5 ms of CPU. The many-texture sprites take 72 ms against 2.4 ms.
 
-**Energy** (REDMAGIC on battery, display at 60 Hz, vsync on, text on, 10,000 boids, mean battery power over a minute with the screen on, `tools/energy-phone.sh`): OpenGL ES 1,606, 1,584 and
-1,536 mW (three runs), gdx-vulkan 1,667 and 1,667 mW (two runs; a third was lost when the phone was plugged in). So gdx-vulkan used about 6% **more** power than stock OpenGL ES for this scene at the same
-frame rate, in step with its higher CPU time per frame (3.0 against 2.4 ms over all threads). The sprite and shadow scenes were not measured: the phone started charging. On the desktop card the power at 60 fps was the
-same on both backends within noise (about 27 W).
+**Energy** (REDMAGIC on battery, display at 60 Hz, vsync on, screen kept on, mean battery power over a minute after a 15-second warm-up, three runs of each (`tools/energy-phone.sh`): boids (10,000) OpenGL ES 1,178 and 1,104 mW against gdx-vulkan 1,212 and 1,151 mW (+4%, two quiet runs without Swappy); sprites on one atlas 1,612, 1,576 and 1,564 mW against 1,615, 1,649 and 1,630 mW (+3%); the stock shadow demo 1,641, 1,965 and 1,759 mW against 1,724, 1,768 and 1,767 mW (equal). Run to run the noise is about 5%, so **the two backends use the same power on this phone**; gdx-vulkan does not save energy by itself, and does not cost any. gdx-vulkan's CPU time per frame is higher (the device log: 2.5 against 2.3 ms for the boids, 4.6 against 3.7 for the sprites, 6.3 against 4.5 for the shadows), but that did not show in the battery. The first set of runs was spoiled because the phone's screen went to sleep during them (the demos now keep it on) and the next because other adb traffic ran at the same time; keep the phone alone while it is measured. On the desktop card the power at 60 fps was the same on both backends within noise (about 27 W).
 
 What the numbers say:
 
