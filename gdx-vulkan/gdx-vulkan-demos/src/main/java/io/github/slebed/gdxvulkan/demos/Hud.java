@@ -26,7 +26,9 @@ public final class Hud implements Disposable {
     private static final Color BODY = new Color(0.95f, 0.96f, 1f, 1f);
     private static final Color STATS = new Color(0.55f, 0.95f, 0.7f, 1f);
 
-    private static final boolean HIDDEN = !Boolean.parseBoolean(System.getProperty("demo.hud", "true"));
+    /** -Ddemo.hud: true (default), false (nothing), or one part for finding out what the text costs: layout, shapes, text. */
+    private static final String PART = System.getProperty("demo.hud", "true");
+    private static final boolean HIDDEN = PART.equals("false");
     private final Batch batch = Backend.vulkan ? new io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch() : new SpriteBatch(); // the batch of the backend the demo runs on
     private final ShapeRenderer shapes = new ShapeRenderer();
     private final FreeTypeFontGenerator generator = new FreeTypeFontGenerator(Gdx.files.classpath("data/lsans.ttf"));
@@ -94,15 +96,22 @@ public final class Hud implements Disposable {
             statsWidth = Math.max(statsWidth, layout.width);
         }
 
+        if (PART.equals("layout")) return;
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
-        shapes.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
-        shapes.begin(ShapeRenderer.ShapeType.Filled);
-        shapes.setColor(PANEL);
-        shapes.rect(margin * 0.5f, h - margin * 0.5f - textHeight - margin, textWidth + margin * 2f, textHeight + margin * 1.5f);
-        if (stats.length > 0) shapes.rect(margin * 0.5f, margin * 0.5f, statsWidth + margin * 1.5f, statsHeight + margin);
-        shapes.end();
+        if (!PART.equals("text")) {
+            shapes.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
+            shapes.begin(ShapeRenderer.ShapeType.Filled);
+            shapes.setColor(PANEL);
+            shapes.rect(margin * 0.5f, h - margin * 0.5f - textHeight - margin, textWidth + margin * 2f, textHeight + margin * 1.5f);
+            if (stats.length > 0) shapes.rect(margin * 0.5f, margin * 0.5f, statsWidth + margin * 1.5f, statsHeight + margin);
+            shapes.end();
+        }
+        if (PART.equals("shapes")) {
+            Gdx.gl.glDisable(GL20.GL_BLEND);
+            return;
+        }
 
         batch.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
         batch.begin();
@@ -126,8 +135,11 @@ public final class Hud implements Disposable {
             sy -= bodyFont.getLineHeight();
         }
         batch.end();
+        if (DEBUGCALLS && ++dbg % 120 == 0) System.out.println("[hud] flushes " + (batch instanceof SpriteBatch ? ((SpriteBatch)batch).renderCalls : ((io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch)batch).renderCalls));
         Gdx.gl.glDisable(GL20.GL_BLEND);
     }
+    private static final boolean DEBUGCALLS = Boolean.getBoolean("demo.hudcalls");
+    private int dbg;
 
     /**
      * Draws a column of large buttons at the right of the screen, for the menu of a phone (call it after {@link #draw}), and remembers where they are for

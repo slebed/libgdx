@@ -75,6 +75,10 @@ adb shell am start -n io.github.slebed.gdxvulkan.testapp/.MainActivity --ez suit
 adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # look for "DEVICESUITE PASS"
 tools/stress4.sh [cycles=50] [--tier-b] [--no-prerotate] [--no-stream]             # rotate + background/foreground while textures stream
 tools/keyboard-test.sh <adb serial>                                                  # the on-screen keyboard: shown, a key arrives as libGDX input, hidden
+tools/demos-test.sh <adb serial> [seconds]                                          # the four demos on one phone: the numbers they show and a screenshot of each
+tools/compare-phone.sh <adb serial> sprites|boids|shadows [count] [seconds] [vsync] [rounds]   # the same demo on stock libGDX (OpenGL ES) and on gdx-vulkan, on one phone; MODE=0|1|2, HUD=true|false|layout|shapes|text
+tools/energy-phone.sh <adb serial> sprites|boids|shadows [count] [seconds] [rounds]    # battery power of the same two, on a phone that is not plugged in (wireless adb), at the display's rate
+tools/compare-demos.sh sprites|boids|shadows [count] [frames] [vsync]                  # the same on the desktop: stock OpenGL against gdx-vulkan, with the GPU's power draw from nvidia-smi
 tools/device-suite.sh <adb serial> [--es only stress2,shaderPrograms]              # the device suite on one phone, or only the checks whose names contain those words
 tools/device-suite.sh <adb serial> --es only stockClasses,gate3Stock,stockSpriteBatch   # libGDX's own classes on the shim: same picture as the Vulkan classes, and the speed (2D; the 3D check is gate5Stock)
 ```

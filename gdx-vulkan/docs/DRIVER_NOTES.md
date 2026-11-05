@@ -41,6 +41,16 @@ The sprite batch's single-texture fragment shader got its texture slot through a
 indexing the bindless table took a slow path (548 fps against 1,428 on the compatibility path). **Rule:** an index that is the same for the whole draw comes from the
 push constants (`sprite_single.frag`), never through a varying.
 
+The same rule applies to a draw with several textures. `VulkanSpriteBatch` used to write the slot into every vertex of a mixed-texture flush; sorted by texture, 10,000 sprites from 128
+textures drew at 71 to 116 fps on the Adreno 840 against 470 on OpenGL ES. A flush whose texture runs average 16 sprites or more is now drawn as one call per run, 20-byte vertices, the slot written to
+push-constant word 21 between the calls: 952 fps. Shorter runs (the texture changes every few sprites) still go out as one draw with the slot in the vertex, because a draw per sprite would be what stock
+libGDX does; that case is GPU-bound on this phone (180 fps for 10,000 scattered sprites, against 4 on OpenGL ES).
+
+## ART: a put on a ByteBuffer view costs about 80 ns
+
+Not a driver rule, but it looked like one: the on-screen text cost 1.7 ms a frame on the REDMAGIC because the batch's 24-byte vertex expansion made six `putFloat`/`putInt` calls per vertex into the mapped
+buffer. Write into a Java array and copy it in one block (`CommandStream` does the same).
+
 ## Windows: a runtime DLL from the JVM's folder
 
 Android Studio's bundled Java has an old `msvcp140.dll` in its own `bin`; Windows loads that one first, and a library built with a newer Visual C++ crashes in it the

@@ -19,14 +19,13 @@ renderer underneath them.
 
 ### What to expect
 
-Measured against stock libGDX on the same machines (details and the cases gdx-vulkan loses in [Demo measurements](#demo-measurements)):
+Measured against stock libGDX on the same machines (details and the cases gdx-vulkan does not win in [Demo measurements](#demo-measurements)):
 
-- **Big wins:** many separate textures (17 to 24x) and GPU-driven rendering (compute, culling, indirect draws: 2x at 250,000 boids on the desktop, up to 4.5x on one phone, a fifth of the CPU).
-- **About equal:** a texture atlas on a desktop card.
-- **Mixed on phones:** atlases and sprites sorted by texture are 1.1 to 1.3x faster on the Adreno 650 and slower on the Adreno 840 (0.82x with an atlas, 0.2 to 0.3x sorted by texture), until the
-  texture index is taken out of the varying there (`TODO.md`).
-- **Slower:** libGDX's own classes run unchanged through the GL shim at 0.6 to 1.0x of OpenGL's speed, with about the same CPU. The `Vulkan...` classes are the fast path.
-- **Not measured:** energy use. Text drawn with stock `ShapeRenderer` and fonts costs more per frame than on OpenGL (0.2 ms on the desktop, about 1.7 ms on the REDMAGIC): open.
+- **Big wins:** many separate textures (18 to 47x), sprites sorted by texture (1.4 to 2x on the desktop card and the REDMAGIC), and GPU-driven rendering (compute, culling, indirect draws: 2x at 250,000 boids on the
+  desktop at under a third of the CPU, 3.7x at 60,000 boids on the REDMAGIC).
+- **About equal:** a texture atlas (1.0x to 1.15x on the desktop card and the S20, 0.81x on the REDMAGIC) and a small GPU-driven scene (10,000 boids on a phone).
+- **Slower:** libGDX's own classes run unchanged through the GL shim at 0.6 to 0.8x of OpenGL's speed on the desktop and the REDMAGIC, with about the same CPU. The `Vulkan...` classes are the fast path.
+- **Power:** one measurement on the REDMAGIC, 10,000 boids at 60 fps: gdx-vulkan used about 6% more battery power than OpenGL ES. Do not expect Vulkan to save energy by itself.
 
 ## Status
 
@@ -53,7 +52,7 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Spot lights, point-light shadows in `VulkanModelBatch` | libGDX's own default shader has neither. Stock `ModelBatch` through the shim compiled and drew a spot light without error, but no picture of it has been compared with OpenGL |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (195 of 242 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (198 of 245 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). Both phones pass the whole device suite (32 checks, 3D included, both code paths on the REDMAGIC), and the demos run on both; what each GPU needed is in [`docs/DRIVER_NOTES.md`](docs/DRIVER_NOTES.md). Other GPUs and drivers should work but have not been tried.
@@ -151,19 +150,20 @@ the 2D and 3D scenes differ in at most 0.2% of pixels, at the ends of lines and 
 
 The demos run the **same scene on both backends** and show the same numbers on screen (frame time, CPU per frame over all threads, CPU of the render thread, GPU time). The
 scenes match pixel for pixel where a comparison is claimed (the boids' shaders do the same arithmetic on both; the sprite demo is the same `Batch` code with one line changed).
-Reproduce them with `tools/compare-demos.sh <sprites|boids|shadows>` (desktop) and `tools/compare-phone.sh <serial> <sprites|boids|shadows>` (phone). Frames per second, vsync off;
-`HUD=false` in the environment (`-Ddemo.hud=false`) leaves the text off, so that the table measures the scene.
+Reproduce them with `tools/compare-demos.sh <sprites|boids|shadows>` (desktop) and `tools/compare-phone.sh <serial> <sprites|boids|shadows>` (phone). Frames per second, vsync off,
+stock libGDX on OpenGL / OpenGL ES first and gdx-vulkan second in every cell. `HUD=false` in the environment (`-Ddemo.hud=false`) leaves the on-screen text off, so that the first table measures the scene.
+The numbers were taken on 2026-11-04 after the batch fix described below; the REDMAGIC was charging during them (it was on battery for the energy runs).
 
-**The scene alone** (no text on screen), stock libGDX on OpenGL / OpenGL ES against gdx-vulkan:
+**The scene alone** (no text on screen):
 
 | Scene | RTX 5080 | Galaxy S20 FE (Adreno 650, Tier B) | REDMAGIC (Adreno 840, Tier A) |
 |---|---|---|---|
-| Sprites, 128 textures, scattered | 21 / **369** | 1.1 / **22** | 3 / **62** |
-| Sprites, sorted by texture | 793 / 599 | 289 / 384 | 388 / 71 to 116 |
-| Sprites, one atlas | 1,171 / 1,253 | 415 / 506 | 1,190 / 980 |
-| Boids (250,000 on the desktop, 10,000 on the phones) | 489 / **983** | 152 / 552 (see below) | 1,590 / **2,000** |
-| Boids, 60,000 on the phones | | 26 / 116 (see below) | 355 / **1,590** |
-| Stock shadow demo through the shim | 1,832 / 1,308 | 481 / 447 | 866 / 545 |
+| Sprites, 128 textures, scattered | 21 / **380** | 1.1 / **23** | 4 / **180** |
+| Sprites, sorted by texture | 793 / **1,111** | 349 / 382 | 470 / **952** |
+| Sprites, one atlas | 1,171 / 1,253 | 441 / 505 | 1,217 / 985 |
+| Boids (250,000 on the desktop, 10,000 on the phones) | 489 / **983** | 142 / 541 (see below) | 1,731 / 1,952 |
+| Boids, 60,000 on the phones | | 25 / 114 (see below) | 394 / **1,467** |
+| Stock shadow demo through the shim | 1,832 / 1,308 | 414 / 515 | 798 / 508 |
 
 (20,000 sprites on the desktop, 10,000 on the phones.)
 
@@ -171,32 +171,37 @@ Reproduce them with `tools/compare-demos.sh <sprites|boids|shadows>` (desktop) a
 
 | Scene | RTX 5080 | Galaxy S20 FE | REDMAGIC |
 |---|---|---|---|
-| Sprites, scattered | 20 / **400** | 1.1 / **22** | 3 / **54** |
-| Sprites, sorted | 865 / 606 | 306 / 350 | 320 / 62 to 76 |
-| Sprites, one atlas | 1,096 / 1,028 | 394 / 508 | 798 / 345 |
-| Boids | 413 / **726** (250,000) | 463 / 432 (10,000); 138 / 112 (60,000) | 1,645 / 454 (10,000); 337 to 425 / 396 to 443 (60,000) |
-| Stock shadow demo through the shim | 1,648 / 1,092 | | 644 / 282 |
+| Sprites, scattered | 18 / **416** | 1.1 / **22** | 3 / **141** |
+| Sprites, sorted | 892 / 886 | 309 / 346 | 311 / **645** |
+| Sprites, one atlas | 1,034 / 1,139 | 402 / 438 | 809 / 656 |
+| Boids (250,000 on the desktop, 10,000 on the phones) | 487 / **859** | 451 / 469 | 1,173 / 1,177 |
+| Boids, 60,000 on the phones | | 127 / 108 | 293 / **439** |
+| Stock shadow demo through the shim | 1,497 / 1,177 | 406 / 376 | 632 / 439 |
 
-CPU per frame, where it was measured: 250,000 boids on the RTX 5080 take 2.2 ms (OpenGL, all threads) against 0.48 ms; the many-texture sprites take 61 ms against 2.4 ms; at a fixed
-60 fps the 250,000 boids take 4.0 ms against 1.5 ms of CPU and 2.25 against 1.81 ms of GPU.
+CPU per frame (all threads), with the text: 250,000 boids on the RTX 5080 take 2.4 ms on OpenGL against 0.69 ms; at a fixed 60 fps 3.7 ms against 2.5 ms of CPU. The many-texture sprites take 72 ms against 2.4 ms.
+
+**Energy** (REDMAGIC on battery, display at 60 Hz, vsync on, text on, 10,000 boids, mean battery power over a minute with the screen on, `tools/energy-phone.sh`): OpenGL ES 1,606, 1,584 and
+1,536 mW (three runs), gdx-vulkan 1,667 and 1,667 mW (two runs; a third was lost when the phone was plugged in). So gdx-vulkan used about 6% **more** power than stock OpenGL ES for this scene at the same
+frame rate, in step with its higher CPU time per frame (3.0 against 2.4 ms over all threads). The sprite and shadow scenes were not measured: the phone started charging. On the desktop card the power at 60 fps was the
+same on both backends within noise (about 27 W).
 
 What the numbers say:
 
-- **Many textures is the case where gdx-vulkan wins big**: 17 to 20x on all three machines, with no change to the drawing code. This is the one result that does not depend on anything else.
-- **GPU-driven work** (compute simulation, GPU culling, one indirect draw) is where it wins next: 2x for 250,000 boids on the desktop card at a fifth of the CPU, 1.26x to 4.5x on the REDMAGIC.
-- **Sorted sprites and atlases are not a win, and on the REDMAGIC they are a loss**: with an atlas the desktop is about equal and the REDMAGIC 0.82x without text; sorted by texture, the desktop is
-  0.76x and the REDMAGIC 0.2 to 0.3x. A texture index that differs between the sprites of one draw reaches the shader through a varying, which is the case the Adreno 840's compiler handles badly
-  (`docs/DRIVER_NOTES.md`); the same cost appears in the 128-texture row of the sprite results. This is the open "Adreno Tier A throughput" item.
-- **The text on screen costs gdx-vulkan more than it costs OpenGL**: 0.2 ms against 0.07 ms per frame on the desktop and about 1.7 ms against 0.2 ms on the REDMAGIC, enough to turn the REDMAGIC's boids
-  from 2.0x ahead (without text) to 0.28x (with it, 454 against 1,645 fps). The text is plain stock libGDX code (`ShapeRenderer`, FreeType glyphs), so this is a real cost of stock classes through the shim
-  and of the font batch, and it is open (`TODO.md`).
-- **The Galaxy S20's OpenGL numbers depend on the text**: with the text the boids run at 463 fps, without it at 152 (a tile-based driver doing something different when a frame has no overlay). Do not
-  read the S20's no-text boid rows as a gdx-vulkan win; with the text it is 0.93x (10,000) and 0.81x (60,000).
-- **Stock code through the shim is slower than OpenGL** (0.63 to 0.71x on the desktop and the REDMAGIC, equal on the S20) and uses about the same CPU. The shim is for porting without changing code; the gains come
-  with the `Vulkan...` classes.
-- **Energy is not measured.** A phone cannot be measured over USB (it charges), and on the desktop card the power at the same frame rate was the same within noise (about 34 to 35 W at 60 fps). Less busy
-  time at the same frame rate is the only energy claim these measurements support.
-- The OpenGL ES numbers on the phones carry no GPU time (the Android SDK has no binding for the timer query).
+- **Many textures is the case where gdx-vulkan wins big**: 18 to 47x on the three machines, with no change to the drawing code.
+- **Sorting sprites by texture is now a win on the desktop card and the REDMAGIC** (1.4x and 2.0x without text; with the text on screen the desktop is level and the REDMAGIC 2.1x). It was a loss (0.76x, 0.2 to 0.3x) until the batch drew one call per run of
+  sprites that share a texture, with the texture index taken from the push constants, instead of passing it through the vertices: the Adreno compiler is slow on an index that arrives through a varying
+  (`docs/DRIVER_NOTES.md`).
+- **GPU-driven work** (compute simulation, GPU culling, one indirect draw): 2x for 250,000 boids on the desktop card at under a third of the CPU, 3.7x for 60,000 boids on the REDMAGIC without text, 1.5x with it. At
+  10,000 boids the REDMAGIC is level with OpenGL ES.
+- **One atlas is not a win**: equal or 15% better on the desktop and the S20, 0.81x on the REDMAGIC (0.8 ms of GPU time for 10,000 sprites against 0.47 ms on OpenGL ES; the cause is open).
+- **On-screen text** costs gdx-vulkan 0.4 ms against 0.2 ms per frame on the REDMAGIC now (it was 1.7 ms: the text uses two fonts, and the batch wrote every vertex of a mixed-texture draw through a
+  `ByteBuffer`, which is slow on ART). It is still about twice OpenGL's cost.
+- **The Galaxy S20's OpenGL ES boids depend on a 2D draw following the scene**: without any draw after the scene they run at 142 fps, with the text or even just two filled rectangles at 529 (a tile-based driver
+  behaviour; the GL demo's `glMapBufferRange` of the visible count is not the cause, the layout-only runs stay at 145). gdx-vulkan's speed does not change (541 and 469). The fair rows are the ones with the text
+  on screen, where the two are equal.
+- **Stock code through the shim is slower than OpenGL** (0.6 to 0.8x on the desktop and the REDMAGIC, 0.93 to 1.25x on the S20) and uses about the same CPU. The shim is for porting without changing code; the gains
+  come with the `Vulkan...` classes.
+- **GPU times** on the phones are measured differently (timestamps across the whole frame for gdx-vulkan, a timer query around the demo's work for OpenGL ES), so the frame time is the figure to compare.
 
 ### Adding a device
 

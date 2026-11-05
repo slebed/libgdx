@@ -30,7 +30,7 @@ public class GlDemosActivity extends AndroidApplication {
         final String id = getIntent().hasExtra("demo") ? getIntent().getStringExtra("demo") : "boids";
         if (getIntent().hasExtra("boids")) System.setProperty("demo.boids", String.valueOf(getIntent().getIntExtra("boids", 0)));
         if (getIntent().hasExtra("sprites")) System.setProperty("demo.sprites", String.valueOf(getIntent().getIntExtra("sprites", 0)));
-        if (getIntent().hasExtra("hud")) System.setProperty("demo.hud", String.valueOf(getIntent().getBooleanExtra("hud", true)));
+        if (getIntent().hasExtra("hud")) System.setProperty("demo.hud", getIntent().getStringExtra("hud"));
         if (getIntent().hasExtra("mode")) System.setProperty("demo.mode", String.valueOf(getIntent().getIntExtra("mode", 0)));
         final PhoneStats stats = new PhoneStats(getFilesDir(), getIntent().getIntExtra("logSeconds", 0));
         final AndroidApplicationConfiguration config = new AndroidApplicationConfiguration();
@@ -44,6 +44,8 @@ public class GlDemosActivity extends AndroidApplication {
         final Demo demo = id.equals("sprites") ? new SpritesDemo() : id.equals("shadows-stock") ? new StockShadowsDemo() : new GpuBoidsOpenGlDemo();
         final boolean vsync = getIntent().getBooleanExtra("vsync", true);
         initialize(new ApplicationAdapter() {
+            private GlesTimer timer;
+
             @Override public void create () {
                 if (!vsync) android.opengl.EGL14.eglSwapInterval(android.opengl.EGL14.eglGetCurrentDisplay(), 0); // libGDX's Android setVSync does nothing
                 Backend.menu = false;
@@ -62,7 +64,8 @@ public class GlDemosActivity extends AndroidApplication {
                         GLES31.glDrawElementsIndirect(mode, type, offset);
                     }
                 };
-                // Android's SDK has no binding for GL_EXT_disjoint_timer_query, so the GPU time of stock OpenGL ES is not measured here.
+                timer = new GlesTimer(); // GL_EXT_disjoint_timer_query through a few lines of JNI; the time stays 0 ("not measured") where the phone lacks it
+                Backend.gpuNanos = timer::nanos;
                 demo.create();
             }
 
@@ -71,7 +74,9 @@ public class GlDemosActivity extends AndroidApplication {
             }
 
             @Override public void render () {
+                timer.begin();
                 demo.render();
+                timer.end();
                 stats.frame();
             }
 

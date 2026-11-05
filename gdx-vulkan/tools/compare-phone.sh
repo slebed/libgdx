@@ -35,7 +35,7 @@ one() { # one <gl|vulkan> -> prints the last logged line, reduced
     activity=DemosActivity
     extra="--ei start $(case $DEMO in sprites) echo 1;; boids) echo 2;; *) echo 3;; esac)"
   fi
-  adb_ shell am start -n "$PKG/io.github.slebed.gdxvulkan.demoapp.$activity" $extra --ei boids "$BOIDS" --ei sprites "$BOIDS" --ei mode "${MODE:-0}" --ez hud "${HUD:-true}" --ez vsync "$VSYNC" --ei logSeconds 2 >/dev/null
+  adb_ shell am start -n "$PKG/io.github.slebed.gdxvulkan.demoapp.$activity" $extra --ei boids "$BOIDS" --ei sprites "$BOIDS" --ei mode "${MODE:-0}" --es hud "${HUD:-true}" --ez vsync "$VSYNC" --ei logSeconds 2 >/dev/null
   sleep "$SECS"
   adb_ shell run-as "$PKG" cat files/gdxvk-demos.log 2>/dev/null | tail -1 | sed 's/^\[demo\] //' | awk -F' [|] ' -v w="$which" '{ printf "%-7s %s | %s | %s | %s | %s\n", w, $3, $4, $5, $6, $2 }' | cut -c1-260
   adb_ shell am force-stop "$PKG"

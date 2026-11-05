@@ -71,22 +71,25 @@ on the Adreno 840 and 1.1 s on the Adreno 650, each further shader 10 to 25 ms, 
 
 Built: stock shadow recipe (both backends), cascaded shadows, GPU boids with an OpenGL 4.3 version. Decisions are in the checklist "Demos" section.
 - **[decide] Owner's review of the demo code and looks** (clean, copyable, visually interesting, readable text at your screen size).
-- **[perf] The text on screen (`Hud`) is expensive on gdx-vulkan**: about 0.2 ms per frame against 0.07 on the desktop and about 1.7 ms against 0.2 on the REDMAGIC (a stock `ShapeRenderer`
-  through the shim, plus a few hundred FreeType glyphs through `VulkanSpriteBatch`). It turns the REDMAGIC's boids from 2.0x ahead to 0.28x in the demo as shipped. Profile it (`-Ddemo.hud=false`
-  isolates it), then fix what is slow (shim ShapeRenderer path? per-glyph cost? state changes) or draw the panel with `VulkanShapeRenderer`.
-- **[perf] Sprites with several textures per draw on the Adreno 840** (Tier A): sorted by texture 0.2 to 0.3x of OpenGL ES, one atlas 0.82x, 10,000 sprites on the REDMAGIC; the desktop is 0.76x and 1.07x.
-  The slot index reaches the fragment shader through a varying, which the Adreno compiler cannot prove uniform (`docs/DRIVER_NOTES.md`). Idea: break the batch per texture run and take the slot from the push
-  constants (the single-texture path already does), or sort the vertices by texture inside the batch.
-- **[verify] The Galaxy S20's OpenGL ES boids run 3x slower without the text on screen** (152 against 463 fps). Not gdx-vulkan's problem, but it makes the no-text boid rows unusable as a claim there;
-  check whether it is the driver's tiling or a stall in the OpenGL demo (`glMapBufferRange` of the visible count every 30 frames).
-- **[verify] Energy.** Nothing measures it yet. Over USB the phone charges; a run unplugged (wireless adb) with `dumpsys batterystats` or the battery's current would settle it. On the desktop the card's
-  power at 60 fps was the same on both backends.
-- **[build] GPU time for OpenGL ES on the phone** (`GL_EXT_disjoint_timer_query` needs a small JNI binding; the Android SDK has none).
+- **[done 2026-11-04] The text on screen was expensive on gdx-vulkan** (1.7 ms per frame on the REDMAGIC against 0.2 on OpenGL ES). Cause: the text uses two fonts, so a flush had two textures and the batch
+  wrote its 24-byte vertices through a `ByteBuffer` (six puts per vertex, about 80 ns each on ART). Fixed in `VulkanSpriteBatch`: the expansion goes into an `int[]` and is copied in one block. Now 0.4 ms
+  against 0.2. The rest is `ShapeRenderer` through the shim and the glyph vertex copy; `VulkanPolygonSpriteBatch` has the same per-vertex puts (line 196) and is not changed.
+- **[done 2026-11-04] Sprites sorted by texture on the Adreno 840 were 0.2 to 0.3x of OpenGL ES.** A flush whose texture runs average 16 sprites or more now goes out as one draw per run with the slot in the
+  push constants (`docs/DRIVER_NOTES.md`): 952 fps against 470 without text, up from 71 to 116. Scattered textures went from 62 to 180 fps on the same phone (the faster expansion).
+- **[perf] One texture atlas on the Adreno 840 is 0.81x of OpenGL ES** (985 against 1,217 fps, 10,000 sprites, no text): 0.80 ms of GPU time against 0.47. Not the texture index (a single texture already takes
+  its slot from the push constants). Candidates: the bindless table read, the vertex fetch format, the blend state, the render pass. Use GPU timestamps around the flush.
+- **[perf] Scattered textures on the Adreno 650** (Tier B, 10,000 sprites): 22 fps, 38 ms of GPU time: Tier B binds a descriptor set per texture change; a bindless table needs the 1.3 features the driver lacks.
+- **[verify] The Galaxy S20's OpenGL ES boids are 3.7x slower when no 2D draw follows the scene** (142 against 529 fps): any draw after the scene (even two filled rectangles) fixes it, the layout work alone does
+  not, and `glMapBufferRange` is not the cause. A tile-based driver behaviour (binning mode?); the README reads the rows with the text on screen. Nothing is wrong in gdx-vulkan.
+- **[done 2026-11-04, partly] Energy**: `tools/energy-phone.sh` (unplugged phone, wireless adb, mean battery power over a minute at the display's rate). One scene so far: 10,000 boids on the REDMAGIC,
+  gdx-vulkan 1,667 mW against OpenGL ES 1,575 mW (+6%). **Not measured:** the sprite and shadow scenes (the phone began charging); the S20 (needs wireless adb, unplugged).
+- **[done 2026-11-04] GPU time for OpenGL ES on the phones**: `GlesTimer` (JNI, `GL_EXT_disjoint_timer_query`). It times the demo's work; gdx-vulkan's timestamps span the whole frame, so the two are not
+  comparable and the README says so.
 - **[done 2026-11-04] The comparison demos**: sprites, boids and shadows run the same scene on both backends (`tools/compare-demos.sh`, `tools/compare-phone.sh`, `GlDemosActivity`); the cascaded shadows demo is
   labelled a feature demo with no OpenGL counterpart. Results are in the README ("Demo measurements"), including the cases gdx-vulkan does not win.
 - **[done 2026-11-04] The demo app on Android** (`gdx-vulkan-android/demoapp`, `tools/demos-test.sh`; touch menu, three demos, Back returns). Passes on the Galaxy S20 FE (Adreno 650, Tier B); not yet run on the REDMAGIC (USB only). The owner's review of the demos' code and looks is still to do.
 - **[build] More demos:** sprite storm (100k+ sprites, stock against Vulkan), post-processing over a Scene2D UI; a scene with clustered lights and shadows once section 3 allows.
-- **[build] Demo numbers on a phone and on the second GPU** (the table in the README is the RTX 5080 only).
+- **[build] Demo numbers on the second GPU** (the RTX 2080 has no fair OpenGL comparison on this PC; phones and the RTX 5080 are in the README).
 - **[decide] Demo screenshots in the README** (a 1280 x 720 PNG per demo; the repository has none yet).
 
 ## 5. Release and adoption (only when the owner says so)

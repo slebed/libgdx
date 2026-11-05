@@ -56,6 +56,7 @@ public class VulkanSpriteBatch extends VulkanSpriteBatchDraws implements VulkanG
 
     // Tier A: where in the batch the texture slot changes. Quad markerQuad[i] onward uses markerSlot[i].
     private final int[] markerQuad, markerSlot;
+    private final int[] expanded; // the 24-byte vertices of a flush that has several textures, before they are copied out
     private int markerCount;
 
     public int renderCalls = 0;
@@ -84,6 +85,7 @@ public class VulkanSpriteBatch extends VulkanSpriteBatchDraws implements VulkanG
         vertices = new float[size * 20];
         markerQuad = new int[size + 1];
         markerSlot = new int[size + 1];
+        expanded = new int[size * 4 * 6];
         projectionMatrix.setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         gl.addTextureRebindListener(this);
     }
@@ -176,7 +178,11 @@ public class VulkanSpriteBatch extends VulkanSpriteBatchDraws implements VulkanG
         if (sprites > maxSpritesInBatch) maxSpritesInBatch = sprites;
         // One texture in the whole batch and no custom shaders: stock's vertices go out as they are (20 bytes, one block copy); the
         // Tier A slot rides in the push constants. Several textures: expand to 24 bytes with the slot in every vertex.
-        single = program != null || (bundle == null && (!tierA || markerCount <= 1));
+        // Tier A with several textures: when each texture is used for a good run of sprites, one draw per run takes its slot from the push constants (the shader's index is then
+        // the same for the whole draw, which Adreno compilers need to be fast) and the vertices go out as they are; when the textures change every few sprites, one draw with the
+        // slot in every vertex draws them all (a draw per run would be a draw per sprite).
+        perRun = tierA && program == null && bundle == null && markerCount > 1 && sprites >= markerCount * RUN_MIN_SPRITES;
+        single = program != null || (bundle == null && (!tierA || markerCount <= 1 || perRun));
         final int vertexBytes = single ? VERTEX_BYTES - 4 : VERTEX_BYTES;
         final long bytes = (long)sprites * 4 * vertexBytes;
 
@@ -216,7 +222,19 @@ public class VulkanSpriteBatch extends VulkanSpriteBatchDraws implements VulkanG
         }
         s.bindVertex(block, offset);
         s.bindIndexBuffer(frame.quadIndexBuffer(), 0, CommandStream.INDEX_U16);
-        s.drawIndexed(sprites * 6, 0, 0);
+        if (perRun) {
+            for (int r = 0; r < markerCount; r++) {
+                final int first = markerQuad[r], end = r + 1 < markerCount ? markerQuad[r + 1] : sprites;
+                if (end <= first) continue;
+                if (r > 0) {
+                    runSlot[0] = Float.intBitsToFloat(markerSlot[r]);
+                    s.pushRange(21, runSlot, 0, 1);
+                }
+                s.drawIndexed((end - first) * 6, first * 6, 0);
+            }
+        } else {
+            s.drawIndexed(sprites * 6, 0, 0);
+        }
 
         idx = 0;
         markerCount = 0;
@@ -225,28 +243,36 @@ public class VulkanSpriteBatch extends VulkanSpriteBatchDraws implements VulkanG
 
     /** Expands stock's 5-float vertices to 24 bytes by adding the texture slot, which changes at the recorded markers (Tier A). */
     private void expandVertices (ByteBuffer out, int offset, int sprites) {
+        // Written into an int array and copied in one block: a put on a ByteBuffer view costs about 80 ns on ART, and this loop made six of them per vertex.
         final float[] v = vertices;
+        final int[] e = expanded;
         int marker = 0, slot = tierA ? markerSlot[0] : 0;
         int nextChange = (tierA && markerCount > 1) ? markerQuad[1] : Integer.MAX_VALUE;
-        int pos = offset, src = 0;
+        int dst = 0, src = 0;
         for (int q = 0; q < sprites; q++) {
             while (q >= nextChange) {
                 marker++;
                 slot = markerSlot[marker];
                 nextChange = marker + 1 < markerCount ? markerQuad[marker + 1] : Integer.MAX_VALUE;
             }
-            for (int k = 0; k < 4; k++, src += 5, pos += VERTEX_BYTES) {
-                out.putFloat(pos, v[src]);
-                out.putFloat(pos + 4, v[src + 1]);
-                out.putInt(pos + 8, Float.floatToRawIntBits(v[src + 2]));
-                out.putFloat(pos + 12, v[src + 3]);
-                out.putFloat(pos + 16, v[src + 4]);
-                out.putInt(pos + 20, slot);
+            for (int k = 0; k < 4; k++, src += 5, dst += 6) {
+                e[dst] = Float.floatToRawIntBits(v[src]);
+                e[dst + 1] = Float.floatToRawIntBits(v[src + 1]);
+                e[dst + 2] = Float.floatToRawIntBits(v[src + 2]);
+                e[dst + 3] = Float.floatToRawIntBits(v[src + 3]);
+                e[dst + 4] = Float.floatToRawIntBits(v[src + 4]);
+                e[dst + 5] = slot;
             }
         }
+        final ByteBuffer d = out.duplicate().order(ByteOrder.nativeOrder());
+        d.position(offset);
+        d.asIntBuffer().put(e, 0, dst);
     }
 
     private boolean single; // this flush takes the 20-byte path
+    private boolean perRun; // ... with one draw per texture run
+    private final float[] runSlot = new float[1];
+    private static final int RUN_MIN_SPRITES = 16; // the average run a draw per run needs
 
     private int pipeline () {
         return SpritePipelines.get(frame, bundle, program, single, blendingDisabled, blendSrcFunc, blendDstFunc, blendSrcFuncAlpha, blendDstFuncAlpha);
