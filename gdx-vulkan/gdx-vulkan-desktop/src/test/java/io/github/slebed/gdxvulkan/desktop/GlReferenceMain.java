@@ -155,7 +155,7 @@ public final class GlReferenceMain extends ApplicationAdapter {
             float[] bg = Gate5Scenes.BACKGROUND;
             ScreenUtils.clear(bg[0], bg[1], bg[2], bg[3]);
             Gdx.gl.glViewport(0, 0, w, h);
-            api = Gate5Scenes.stock();
+            api = scene.stockApi();
             scene.draw(api, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             byte[] rgba = ScreenUtils.getFrameBufferPixels(0, 0, w, h, true); // row 0 at the top
             BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);

@@ -38,6 +38,7 @@ enum class FrameStatus : int {
 // used yet. `topology` and `format` are raw Vulkan enum values (VK_PRIMITIVE_TOPOLOGY_*, VK_FORMAT_*).
 struct VertexAttribute {
     uint32_t location = 0, format = 0, offset = 0;
+    uint32_t binding = 0; // 1: a constant (glVertexAttrib*): read from binding 1, which has stride 0 and is bound per draw
 };
 struct PipelineDesc {
     uint32_t stride = 0;

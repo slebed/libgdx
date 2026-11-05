@@ -1321,27 +1321,39 @@ public class VulkanGL20 extends VulkanGL20Base {
     // A constant value for a disabled attribute array. Stock sets it for attributes a mesh does not have (DefaultShader does, for bone weights "in case a
     // mesh has missing attributes"), and a Vulkan pipeline has no constant attributes: a draw that reads one gets undefined values, as the unset case does in GL ES.
     @Override public void glVertexAttrib1f (int indx, float x) {
+        programs.vertexAttrib(indx, x, 0, 0, 1);
     }
 
     @Override public void glVertexAttrib1fv (int indx, FloatBuffer values) {
+        final int p = values.position();
+        programs.vertexAttrib(indx, values.get(p), 0, 0, 1);
     }
 
     @Override public void glVertexAttrib2f (int indx, float x, float y) {
+        programs.vertexAttrib(indx, x, y, 0, 1);
     }
 
     @Override public void glVertexAttrib2fv (int indx, FloatBuffer values) {
+        final int p = values.position();
+        programs.vertexAttrib(indx, values.get(p), values.get(p + 1), 0, 1);
     }
 
     @Override public void glVertexAttrib3f (int indx, float x, float y, float z) {
+        programs.vertexAttrib(indx, x, y, z, 1);
     }
 
     @Override public void glVertexAttrib3fv (int indx, FloatBuffer values) {
+        final int p = values.position();
+        programs.vertexAttrib(indx, values.get(p), values.get(p + 1), values.get(p + 2), 1);
     }
 
     @Override public void glVertexAttrib4f (int indx, float x, float y, float z, float w) {
+        programs.vertexAttrib(indx, x, y, z, w);
     }
 
     @Override public void glVertexAttrib4fv (int indx, FloatBuffer values) {
+        final int p = values.position();
+        programs.vertexAttrib(indx, values.get(p), values.get(p + 1), values.get(p + 2), values.get(p + 3));
     }
 
     @Override public void glVertexAttribPointer (int indx, int size, int type, boolean normalized, int stride, int ptr) {

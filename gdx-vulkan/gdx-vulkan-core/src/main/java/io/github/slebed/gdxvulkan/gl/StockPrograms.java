@@ -69,6 +69,13 @@ final class StockPrograms {
     private final IntMap<Shader> shaders = new IntMap<Shader>();
     private final IntMap<Program> programs = new IntMap<Program>();
     private final Pointer[] pointers = new Pointer[MAX_ATTRIBUTES];
+    /** The constant value of each attribute (glVertexAttrib*), 4 floats each; the GL default is (0, 0, 0, 1). */
+    private final float[] generic = new float[MAX_ATTRIBUTES * 4];
+    private final int[] constantLocations = new int[MAX_ATTRIBUTES];
+
+    {
+        for (int i = 0; i < MAX_ATTRIBUTES; i++) generic[i * 4 + 3] = 1f;
+    }
     private final float[] push = new float[32];
     private final com.badlogic.gdx.utils.LongMap<Integer> pipelines = new com.badlogic.gdx.utils.LongMap<Integer>();
     private int nextName = 1;
@@ -271,6 +278,15 @@ final class StockPrograms {
 
     // ------------------------------------------------------------------------------------------------------------------ vertex attributes
 
+    void vertexAttrib (int index, float x, float y, float z, float w) {
+        if (index < 0 || index >= MAX_ATTRIBUTES) throw new GdxRuntimeException("gdx-vulkan: vertex attribute " + index + " is out of range");
+        final int b = index * 4;
+        generic[b] = x;
+        generic[b + 1] = y;
+        generic[b + 2] = z;
+        generic[b + 3] = w;
+    }
+
     void enableVertexAttrib (int index, boolean enabled) {
         pointer(index).enabled = enabled;
     }
@@ -346,12 +362,16 @@ final class StockPrograms {
             signature = mix(mix(mix(mix(signature, 1), f[0]), f[1]), mix(f[2], f[3]));
         }
         final int[] locations = program.attributeLocations();
-        int enabledReadByProgram = 0;
+        int enabledReadByProgram = 0, constants = 0;
         for (int k = 0; k < locations.length; k++) {
             final int i = locations[k];
             if (i < 0 || i >= MAX_ATTRIBUTES) continue;
             final Pointer p = pointers[i];
-            if (!p.enabled || p.size == 0) continue;
+            if (!p.enabled || p.size == 0) { // no array: the attribute's constant value (glVertexAttrib*, or the GL default 0, 0, 0, 1)
+                constantLocations[constants++] = i;
+                signature = mix(signature, 0x100 + i);
+                continue;
+            }
             if (buffer != 0 && p.buffer != buffer) { // in-memory pointers are all CLIENT: Mesh passes a FloatBuffer and a ByteBuffer, two views of the one array
                 throw new GdxRuntimeException("gdx-vulkan: the vertex attributes come from more than one buffer; interleave them in one (stock Mesh does)");
             }
@@ -384,11 +404,16 @@ final class StockPrograms {
                 variant.append('o');
             }
             variant.append('|');
+            int constant = 0;
             for (int k = 0; k < locations.length; k++) {
                 final int i = locations[k];
                 if (i < 0 || i >= MAX_ATTRIBUTES) continue;
                 final Pointer p = pointers[i];
-                if (!p.enabled || p.size == 0) continue;
+                if (!p.enabled || p.size == 0) {
+                    d.constantAttribute(i, 16 * constant++);
+                    variant.append('c').append(i).append(';');
+                    continue;
+                }
                 d.attribute(i, format(p), p.offset);
                 variant.append(i).append(':').append(p.size).append(':').append(p.type).append(p.normalized ? 'n' : 'r').append(':').append(p.offset).append(';');
             }
@@ -436,6 +461,17 @@ final class StockPrograms {
             s.bindVertex(block, offset);
         } else {
             s.bindVertexBuffer(nativeVertices, 0);
+        }
+        if (constants > 0) { // the values of the attributes without an array: one vec4 each, in the order the pipeline lists them
+            final long a = frame.presenter().allocVertex(constants * 16);
+            final int block = GdxVkPresenter.blockOf(a);
+            final long offset = GdxVkPresenter.offsetOf(a);
+            final ByteBuffer raw = frame.vertexBlock(block).duplicate().order(ByteOrder.nativeOrder());
+            raw.position((int)offset);
+            final FloatBuffer out = raw.asFloatBuffer();
+            for (int c = 0; c < constants; c++) out.put(generic, constantLocations[c] * 4, 4);
+            frame.presenter().flushVertices(block, offset, constants * 16);
+            s.bindConstants(block, offset);
         }
         if (indexed && clientIndices != null) {
             final boolean wide = indexType == GL_UNSIGNED_INT;

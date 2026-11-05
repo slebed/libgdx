@@ -1,3 +1,5 @@
+> **Note (2026-11):** this is the original plan. What was built differently, and what was added, is listed in [`PLAN.md`](PLAN.md#what-was-built-differently-from-the-plan-as-of-2026-11); the status is in [`CHECKLIST.md`](CHECKLIST.md).
+
 # libGDX Vulkan Backend Plan v5.0
 
 Nov 3, 2026 · @Stephen Lebed

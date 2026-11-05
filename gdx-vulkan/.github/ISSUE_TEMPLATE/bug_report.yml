@@ -1,0 +1,40 @@
+name: Bug report
+description: Something draws wrongly, crashes, or is slower than stock libGDX
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect
+    validations: { required: true }
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver version
+      description: "For example: NVIDIA GeForce RTX 5080, driver 610.62; or Qualcomm Adreno 650 on Android 13"
+    validations: { required: true }
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and version
+    validations: { required: true }
+  - type: dropdown
+    id: path
+    attributes:
+      label: Code path (the demo and the test log print it)
+      options: [modern (Tier A), compatibility (Tier B), do not know]
+  - type: input
+    id: version
+    attributes:
+      label: gdx-vulkan commit or version, libGDX version
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce, or the smallest code that shows it
+      description: A stock-libGDX program that draws wrongly on gdx-vulkan is ideal; say what it draws on OpenGL.
+  - type: textarea
+    id: log
+    attributes:
+      label: Output and validation messages
+      description: Run with -Dgdxvulkan.validation=true if you have the Khronos validation layer installed.
+      render: text

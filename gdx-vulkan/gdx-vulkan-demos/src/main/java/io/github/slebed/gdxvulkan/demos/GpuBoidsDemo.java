@@ -43,7 +43,8 @@ public final class GpuBoidsDemo implements Demo {
 
     @Override public String summary () {
         return count + " boids are simulated, culled and drawn on the GPU: three compute dispatches, a culling pass and one indirect draw. Exactly the scene of the OpenGL version, "
-            + "pixel for pixel, so the numbers below can be compared.";
+            + (lit ? "with " + LIGHTS + " point lights added, which OpenGL has no equivalent for: this picture is no longer like for like (L switches them off)."
+                : "pixel for pixel, so the numbers below can be compared.");
     }
 
     @Override public String[] notes () {

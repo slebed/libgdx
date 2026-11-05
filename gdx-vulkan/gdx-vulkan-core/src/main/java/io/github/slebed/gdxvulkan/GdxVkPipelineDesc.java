@@ -32,6 +32,15 @@ public final class GdxVkPipelineDesc {
         return attributes;
     }
 
+    /**
+     * A vec4 that is the same for every vertex (what {@code glVertexAttrib4f} sets), read at {@code offset} bytes into the block {@link CommandStream#bindConstants} binds. The
+     * pipeline needs at least one ordinary attribute as well.
+     */
+    public GdxVkPipelineDesc constantAttribute(int location, int offset) {
+        attributes.add(new int[] {location, 0x40000000 | FORMAT_R32G32B32A32_SFLOAT, offset});
+        return this;
+    }
+
     public GdxVkPipelineDesc attribute(int location, int vkFormat, int offset) {
         attributes.add(new int[] {location, vkFormat, offset});
         return this;

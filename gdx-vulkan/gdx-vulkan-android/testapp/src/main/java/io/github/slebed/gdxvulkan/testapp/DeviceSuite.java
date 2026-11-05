@@ -124,6 +124,7 @@ final class DeviceSuite {
         final java.util.List<String> failures = new java.util.ArrayList<String>();
         try {
             for (final Gate5Scenes.Scene scene : Gate5Scenes.all()) {
+                if (!scene.drawsWithVulkanBatch()) continue;
                 if (!tierA && !scene.runsOnTierB()) {
                     TestLog.i(TAG, scene.name() + ": needs a second texture per draw, Tier A only");
                     continue;
@@ -1110,6 +1111,29 @@ final class DeviceSuite {
         for (final Gate5Scenes.Scene scene : Gate5Scenes.all()) {
             if (!scene.hasStockReference()) continue;
             if (!tierA && !scene.runsOnTierB()) continue;
+            if (!scene.drawsWithVulkanBatch()) { // spot lights: stock ModelBatch only; the scene checks its own picture
+                try {
+                    scene.prepare(data);
+                    gfxW = gfxH = size;
+                    final float[] bgs = Gate5Scenes.BACKGROUND;
+                    beginFrame(bgs[0], bgs[1], bgs[2]);
+                    Gdx.gl.glViewport(0, 0, size, size);
+                    final Gate5Scenes.ModelApi stockOnly = scene.stockApi();
+                    scene.draw(stockOnly, size, size);
+                    stockOnly.dispose();
+                    scene.verify(frame.endAndCapture(), size, size);
+                } catch (Throwable t) {
+                    closeOpenFrame();
+                    failures.add(scene.name() + ": " + t);
+                    TestLog.i(TAG, scene.name() + " (stock ModelBatch) failed: " + t);
+                } finally {
+                    gfxW = W;
+                    gfxH = H;
+                    Gdx.gl.glViewport(0, 0, W, H);
+                    scene.dispose();
+                }
+                continue;
+            }
             try {
                 scene.prepare(data);
                 gfxW = gfxH = size;
@@ -1122,7 +1146,7 @@ final class DeviceSuite {
                 final byte[] expected = frame.endAndCapture();
                 beginFrame(bg[0], bg[1], bg[2]);
                 Gdx.gl.glViewport(0, 0, size, size);
-                api = Gate5Scenes.stock();
+                api = scene.stockApi();
                 scene.draw(api, size, size);
                 api.dispose();
                 final byte[] actual = frame.endAndCapture();

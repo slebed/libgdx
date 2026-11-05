@@ -47,6 +47,7 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
 
     // Tier A: from vertex markerVertex[i] onward the texture slot is markerSlot[i].
     private final int[] markerVertex, markerSlot;
+    private final int[] expanded; // the vertices of a flush before they are copied out in one block
     private int markerCount;
 
     public int renderCalls = 0;
@@ -82,6 +83,7 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
         vertices = new float[maxVertices * VERTEX_SIZE];
         triangles = new short[maxTriangles * 3];
         markerVertex = new int[maxVertices + 1];
+        expanded = new int[maxVertices * 6];
         markerSlot = new int[maxVertices + 1];
         projectionMatrix.setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         gl.addTextureRebindListener(this);
@@ -183,23 +185,29 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
         final long vOffset = GdxVkPresenter.offsetOf(va);
         final ByteBuffer vOut = frame.vertexBlock(vBlock);
 
+        // Written into an int array and copied in one block: a put on a ByteBuffer view costs about 80 ns on ART.
         final float[] v = vertices;
+        final int[] e = expanded;
+        final int ints = vertexBytes / 4;
         int marker = 0, slot = tierA ? markerSlot[0] : 0;
         int nextChange = (tierA && markerCount > 1) ? markerVertex[1] : Integer.MAX_VALUE;
-        int pos = (int)vOffset, src = 0;
-        for (int i = 0; i < vertexCount; i++, src += VERTEX_SIZE, pos += vertexBytes) {
+        int dst = 0, src = 0;
+        for (int i = 0; i < vertexCount; i++, src += VERTEX_SIZE, dst += ints) {
             while (i >= nextChange) {
                 marker++;
                 slot = markerSlot[marker];
                 nextChange = marker + 1 < markerCount ? markerVertex[marker + 1] : Integer.MAX_VALUE;
             }
-            vOut.putFloat(pos, v[src]);
-            vOut.putFloat(pos + 4, v[src + 1]);
-            vOut.putInt(pos + 8, Float.floatToRawIntBits(v[src + 2]));
-            vOut.putFloat(pos + 12, v[src + 3]);
-            vOut.putFloat(pos + 16, v[src + 4]);
-            if (program == null) vOut.putInt(pos + 20, slot);
+            e[dst] = Float.floatToRawIntBits(v[src]);
+            e[dst + 1] = Float.floatToRawIntBits(v[src + 1]);
+            e[dst + 2] = Float.floatToRawIntBits(v[src + 2]);
+            e[dst + 3] = Float.floatToRawIntBits(v[src + 3]);
+            e[dst + 4] = Float.floatToRawIntBits(v[src + 4]);
+            if (program == null) e[dst + 5] = slot;
         }
+        final ByteBuffer vDst = vOut.duplicate().order(java.nio.ByteOrder.nativeOrder());
+        vDst.position((int)vOffset);
+        vDst.asIntBuffer().put(e, 0, dst);
         presenter.flushVertices(vBlock, vOffset, vBytes);
 
         final long iBytes = (long)indexCount * 2;
@@ -208,7 +216,9 @@ public class VulkanPolygonSpriteBatch extends VulkanPolygonSpriteBatchDraws impl
         final long iOffset = GdxVkPresenter.offsetOf(ia);
         final ByteBuffer iOut = frame.vertexBlock(iBlock);
         final short[] t = triangles;
-        for (int i = 0, p = (int)iOffset; i < indexCount; i++, p += 2) iOut.putShort(p, t[i]);
+        final ByteBuffer iDst = iOut.duplicate().order(java.nio.ByteOrder.nativeOrder());
+        iDst.position((int)iOffset);
+        iDst.asShortBuffer().put(t, 0, indexCount);
         presenter.flushVertices(iBlock, iOffset, iBytes);
 
         final CommandStream s = frame.stream();

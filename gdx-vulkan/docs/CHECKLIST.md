@@ -19,12 +19,12 @@ the plan names.
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 12 | 1 | 0 | 13 |
 | Phase 5: 3D with stock models | 10 | 3 | 0 | 13 |
-| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 28 | 9 | 9 | 46 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 35 | 9 | 6 | 50 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
 | Demos (gdx-vulkan-demos) | 10 | 3 | 2 | 15 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **198** | **19** | **28** | **245** |
+| **All** | **205** | **19** | **25** | **249** |
 ---
 
 ## Core decisions
@@ -110,7 +110,7 @@ the plan names.
 - [x] Modules `gdx-vulkan-core` (Java + `jni/`), `gdx-vulkan-desktop`, `gdx-vulkan-android`
 - [x] Natives via plain CMake + hand-written JNI instead of gdx-jnigen: a decision, recorded in `docs/PLAN.md` and `CLAUDE.md`. The build is one CMake file per platform with no generator step, which is what lets CI build Linux arm64 and the NDK ABIs with a single command. Revisit only if a consumer needs jnigen's packaging
 - [x] Natives built: Windows x64, Linux x64 (Docker), Android arm64-v8a
-- [~] Natives: Android armeabi-v7a and x86_64 compile and link with the NDK (the library builds all three ABIs; fixed a 32-bit assumption in `VmaVirtualAllocation`); neither has been **run**: the only device is arm64 and running them needs an emulator or a second phone. Linux arm64: built and its native tests run by the `arm64-natives` CI job on GitHub's arm64 runner (the Java suite does not run there)
+- [~] Natives: Android armeabi-v7a and x86_64 compile and link with the NDK (the library builds all three ABIs; fixed a 32-bit assumption in `VmaVirtualAllocation`); armeabi-v7a has been **run** (2026-11-05: the device suite passes as a 32-bit process on the Galaxy S20 FE, which supports it); x86_64 has not (it needs an emulator). Linux arm64: built and its native tests run by the `arm64-natives` CI job on GitHub's arm64 runner (the Java suite does not run there)
 - [x] No copied audio classes; `Gdx.gl30` untouched from the first commit
 
 ### 2. Native core boot
@@ -172,7 +172,7 @@ the plan names.
 - [x] 10-minute run, RTX 5080, Tier A, strict (>=90% of target rates, >=55 fps): 36,000 frames at 60.0 fps, 50,000 buffer cycles/s, 2,000 textures/s, ~1,000 sampler changes/s, 33 M retirements, VMA flat at 176 MB from minute 1, 4 samplers, zero validation messages, clean shutdown
 - [x] 10-minute run, RTX 2080 (device index 1), Tier A, same strict criteria and the same flat result (36,001 frames, 60.0 fps)
 - [x] 10-minute run in Tier B (fence completion path), RTX 5080: 36,001 frames at 60.0 fps, 50,000 buffer cycles/s, 2,000 textures/s, 998 sampler changes/s, 33 M retirements, VMA flat at 208 MB from the first minute, 4 samplers, no validation messages (core validation only: sync validation is off in fence mode, documented)
-- [x] Android device run: Adreno 840, both tiers, `DeviceSuite` (21 checks: sprite batches, shader bundle, ETC2/ASTC, instanced sprites, framebuffers with depth, stencil and multiple float attachments, the Gate 3 scenes, Stress test 3) passes. 10-minute soaks: Tier A 36,016 frames at 60 fps with the native heap flat (24,939 -> 25,000 KB); Tier B 35,984 frames at 59 fps, native heap 26,694 -> 26,798 KB; no validation messages. The Galaxy S20 the plan names is not available (this is the REDMAGIC)
+- [x] Android device run: Adreno 840, both tiers, `DeviceSuite` (21 checks when this was run; 32 since, see the later items: sprite batches, shader bundle, ETC2/ASTC, instanced sprites, framebuffers with depth, stencil and multiple float attachments, the Gate 3 scenes, Stress test 3) passes. 10-minute soaks: Tier A 36,016 frames at 60 fps with the native heap flat (24,939 -> 25,000 KB); Tier B 35,984 frames at 59 fps, native heap 26,694 -> 26,798 KB; no validation messages. The Galaxy S20 the plan names is not available (this is the REDMAGIC)
 
 ---
 
@@ -264,7 +264,7 @@ the plan names.
 - [x] `VulkanAsyncTextureLoader` for `AssetManager`: not needed as a class. The stock `TextureLoader` already decodes on worker threads and builds the `Texture` where `update()` runs, and nothing in that path is GL-specific (`AssetManagerTest` on the desktop, texture streaming in `LifecycleActivity` on the phone)
 
 ### Gate 4 and stress test 4
-- [~] All Phase 1-3 tests on a physical device with pre-rotation active, confirmed in Android GPU Inspector: the 21-check device suite passes on the Adreno 840 in landscape with the swapchain pre-rotated 90 degrees (logical 2688x1216) in Tier A and Tier B, and screenshots at four angles show the upright picture. Not done: an Android GPU Inspector capture (AGI is not installed here; the presenter's own `rotation()` and the logs are the evidence instead)
+- [~] All Phase 1-3 tests on a physical device with pre-rotation active, confirmed in Android GPU Inspector: the 21-check device suite (32 checks now) passes on the Adreno 840 in landscape with the swapchain pre-rotated 90 degrees (logical 2688x1216) in Tier A and Tier B, and screenshots at four angles show the upright picture. Not done: an Android GPU Inspector capture (AGI is not installed here; the presenter's own `rotation()` and the logs are the evidence instead)
 - [x] ADB script: `tools/stress4.sh [cycles] [--tier-b]` runs N rotate + background/foreground cycles (default 50; the plan's 500 is available as an argument, about 45 minutes, and judged excessive) while an `AssetManager` streams textures in and out. Split-screen is not driven by it: adb cannot toggle it reliably, so it stays a manual check in `docs/RELEASE.md`
 - [x] Pass: zero crashes, zero lost textures, flat native heap, swapchain recreation under 50 ms: `tools/stress4.sh` on the Adreno 840 with pre-rotation on and textures streaming, 50 cycles in Tier A (0 failures, 2 ms average and 5 ms worst recreation, heap 26,091 -> 26,117 KB between cycle 25 and 50) and 20 in Tier B (0 failures, 2 ms / 4 ms). The plan says 500 cycles; 50 was run (500 takes about 45 minutes)
 
@@ -347,7 +347,7 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [~] The `ShaderProgram` setters: `setUniformi`/`setUniformf` with 1 to 4 values (by name; by location for one value), `setUniformf` with `Vector2`/`Vector3`/`Color`, `setUniform1fv` to `setUniform4fv`, `setUniformMatrix` with `Matrix4` and `Matrix3` (and `transpose`), `setUniformMatrix2fv`/`3fv`/`4fv`, `fetchUniformLocation`, `bind`/`begin`/`end`; uniform values are kept by the program and reach the GPU as push-constant words or one uniform block, bound again only when the data, the frame, or another Set 0 binding changed (`ShaderProgramTest`). Missing: the `FloatBuffer` and `IntBuffer` overloads and the by-location forms of the multi-value setters
 - [~] Custom shaders for the batches the way stock does it: `setShaderProgram(program)` on `VulkanSpriteBatch`, `VulkanPolygonSpriteBatch` and, through `((VulkanImmediateModeRenderer)shapeRenderer.getRenderer())`, the shape renderer; tested on the GPU against the built-in shaders (the translated stock sprite shader draws a picture identical to the built-in one, in the sprite and the polygon batch; uniforms from push constants and the uniform block; two programs and the built-in shader alternating in one frame; a second texture from texture unit 1; a shader that does not compile is refused with its log; a shape shader with a tint), on both code paths and both GPUs. The batch method is `setShaderProgram`, not stock's `setShader`: an overload would make `batch.setShader(null)` ambiguous for existing code. Not done: a constructor taking the program, a stock-named `setShader`, and programs for `ModelBatch`
 - [ ] Custom 3D shaders: `ShaderProvider` / `Shader` for `VulkanModelBatch` built on `VulkanShaderProgram`
-- [ ] `VulkanShaderPipelineBundle` (precompiled SPIR-V) stays supported as the build-time path
+- [x] `VulkanShaderPipelineBundle` (precompiled SPIR-V) stays supported as the build-time path: the sprite batches, the shape renderer and the examples use it, with tests in both tiers
 
 ### E. Stock classes with no rename
 - [x] GL shim: `glCreateShader`, `glShaderSource`, `glCompileShader`, `glCreateProgram`, `glAttachShader`, `glLinkProgram`, `glGetProgramiv`/`glGetShaderInfoLog`, `glGetActiveUniform`/`Attrib`, `glGetUniformLocation`, `glUniform*`, `glUseProgram` route to the translator (`gl/StockPrograms`), so the stock `ShaderProgram` works: a custom shader compiles and draws through a stock `SpriteBatch` (`StockClassesTest`)
@@ -360,11 +360,16 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [x] Performance gate: a stock `SpriteBatch` on the shim is within 1.5x of `VulkanSpriteBatch` (`gradlew :gdx-vulkan-desktop:stressShim`, 20,000 sprites, vsync off, order alternated, two rounds): one texture, the stock batch reaches 0.76x of the generated one on the RTX 5080 modern path, 0.72x on the compatibility path and 0.96x on the RTX 2080; eight textures, 1.23x, 0.78x and 1.28x (the stock batch flushes at each texture change, the generated one batches the textures into one draw, and on desktop GPUs that is not always the faster way). It stayed above 1/1.5 only after a fix: a CPU copy kept for every dynamic buffer cost 1.1 ms a frame, so it is kept only for buffers defined without data (the sub-range-update classes). On the phones (2026-11-04): the stock `SpriteBatch` on the shim reaches 0.88x to 0.89x of `VulkanSpriteBatch` on the Adreno 840 (both code paths) and 0.89x on the Adreno 650. First use of a translated shader: the first program of a run takes 0.6 s (Adreno 840) and 1.1 s (Adreno 650), because it starts the compiler (`warmUp()` moves that off the render thread); each further typical shader takes 10 to 25 ms, under the 50 ms target; a cached shader 0.2 to 0.8 ms (`shaderCompileTime` device check)
 - [x] README and the migration section drop the renames: the README says the stock classes run unchanged, and gives the measured cost against the generated classes, which stay as the fast path
 
+- [x] `glVertexAttrib*` constants: an attribute with no array reads its constant (GL default 0, 0, 0, 1) from a second vertex binding of stride 0, bound per draw (`BindConstants`); `ConstantAttributeTest` draws three quads in three constants, both tiers, validation clean
+- [x] Spot lights: libGDX's default shader has no spot light code, so on OpenGL they change nothing; `gate5_spot` checks that the shim's picture equals the OpenGL reference exactly (0 differing pixels); point lights are in `gate5_models` against OpenGL
+- [x] `VulkanPolygonSpriteBatch` copies its vertices and indices in one block each (it wrote them one `ByteBuffer` put at a time)
+- [x] Soaks: the RTX 2080 compatibility path ran 10 minutes (60.0 fps, flat), the last combination of GPU and tier
+
 ### F. Tests
 - [~] Translator tests with the shaders libGDX ships: done for the `SpriteBatch`/`PolygonSpriteBatch`, `ShapeRenderer` and `ImmediateModeRenderer20` shaders, `DefaultShader` (unlit variants) and `DepthShader`, and a custom shader with arrays, a bool, an int, two samplers and `#ifdef` flags, each compiled by glslang on both code paths (`GlslTranslatorTest`, no GPU needed); not yet the Gate 3 post-processing shaders
-- [ ] Every test runs on both code paths with the validation layers clean
+- [x] Every test runs on both code paths with the validation layers clean: CI runs the whole suite in both tiers with the layers on, and the tests assert that the context counted no validation message
 - [x] Android: translated shaders compile and render on the phone: both phones, the whole device suite (32 checks) passes, the stock classes on the shim draw the same picture as the Vulkan classes (SpriteBatch, PolygonSpriteBatch, ShapeRenderer, the Gate 3 effects as translated GLSL, and on the Adreno 840 the stock `ModelBatch` scenes: models, knight, fog and, in the modern path, textures and shadows: 0 pixels differ). Adreno 840 (over wireless, allowed by the owner for that run, both code paths) and Adreno 650 (USB, compatibility path; no 3D, see Gate 1a). Compile time: the first program of a run 0.6 s (Adreno 840) and 1.1 s (Adreno 650), each further shader 10 to 25 ms, a cached shader 0.2 to 0.8 ms
-- [ ] CI (lavapipe) runs the translator tests and the golden scenes
+- [x] CI (lavapipe) runs the translator tests and the golden scenes: `check` includes them, in both tiers
 
 ---
 

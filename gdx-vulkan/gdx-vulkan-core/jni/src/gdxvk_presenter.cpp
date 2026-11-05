@@ -19,6 +19,23 @@
 #include <vector>
 
 #include "gdxvk_internal.h"
+#ifdef __ANDROID__
+#include <sys/system_properties.h>
+#endif
+
+namespace {
+// A diagnostic switch: the environment variable, or on Android the system property debug.gdxvk.<name> (adb shell setprop debug.gdxvk.nocapture 1).
+bool diagFlag(const char* env, const char* prop) {
+    if (const char* v = std::getenv(env)) return v[0] == '1';
+#ifdef __ANDROID__
+    char value[PROP_VALUE_MAX] = {0};
+    return __system_property_get(prop, value) > 0 && value[0] == '1';
+#else
+    (void)prop;
+    return false;
+#endif
+}
+}  // namespace
 
 #include <cstring>
 
@@ -376,13 +393,19 @@ struct Presenter::Impl {
         stages[1].pName = "main";
         stages[1].pSpecializationInfo = &specInfo;
 
-        VkVertexInputBindingDescription binding{0, desc.stride, VK_VERTEX_INPUT_RATE_VERTEX};
+        std::vector<VkVertexInputBindingDescription> bindings;
+        bool hasConstants = false;
         std::vector<VkVertexInputAttributeDescription> attrs;
-        for (const VertexAttribute& a : desc.attributes) attrs.push_back({a.location, 0, static_cast<VkFormat>(a.format), a.offset});
+        for (const VertexAttribute& a : desc.attributes) {
+            attrs.push_back({a.location, a.binding, static_cast<VkFormat>(a.format), a.offset});
+            hasConstants = hasConstants || a.binding == 1;
+        }
+        if (desc.stride > 0) bindings.push_back({0, desc.stride, VK_VERTEX_INPUT_RATE_VERTEX});
+        if (hasConstants) bindings.push_back({1, 0, VK_VERTEX_INPUT_RATE_VERTEX}); // stride 0: every vertex reads the same values
         VkPipelineVertexInputStateCreateInfo vin{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         if (desc.stride > 0) {
-            vin.vertexBindingDescriptionCount = 1;
-            vin.pVertexBindingDescriptions = &binding;
+            vin.vertexBindingDescriptionCount = static_cast<uint32_t>(bindings.size());
+            vin.pVertexBindingDescriptions = bindings.data();
             vin.vertexAttributeDescriptionCount = static_cast<uint32_t>(attrs.size());
             vin.pVertexAttributeDescriptions = attrs.data();
         }
@@ -1275,8 +1298,9 @@ struct Presenter::Impl {
         sci.imageExtent = ext;
         sci.imageArrayLayers = 1;
         // TRANSFER_SRC lets the golden-image harness read frames back.
-        sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-        canCapture = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+        const bool wantCapture = !diagFlag("GDXVK_NOCAPTURE", "debug.gdxvk.nocapture"); // compressed framebuffers (UBWC on Adreno) can be lost to extra usage flags
+        sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | (wantCapture ? (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) : 0);
+        canCapture = wantCapture && (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
         sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
         // Identity whenever the surface allows it: the compositor rotates for us. (Taking currentTransform without rotating the
         // output in clip space, as this did before, shows a rotated image on a rotated display.)
@@ -2098,6 +2122,15 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 if (!ring.allocate(w + i, ubytes, w + i + uwords, sbytes, b)) return s.fail("command stream: Set0Data allocation failed (uniform data over 16 KB, or out of memory)");
                 i += uwords + swords;
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.h.layouts->pipelineLayout(), 0, 1, &b.set, 2, b.offsets);
+                break;
+            }
+            case cmd::BindConstants: {
+                if (!need(3)) return s.fail("command stream truncated (BindConstants)");
+                VkBuffer buf = ring.vertexBlockBuffer(static_cast<uint32_t>(w[i]));
+                const VkDeviceSize off = offset64(w[i + 1], w[i + 2]);
+                i += 3;
+                if (buf == VK_NULL_HANDLE) return s.fail("command stream: unknown vertex block (BindConstants)");
+                vkCmdBindVertexBuffers(cmd, 1, 1, &buf, &off);
                 break;
             }
             case cmd::BindVertexBuffer: {

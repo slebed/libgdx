@@ -19,6 +19,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.badlogic.gdx.graphics.g3d.environment.PointLight;
+import com.badlogic.gdx.graphics.g3d.environment.SpotLight;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.utils.Array;
@@ -73,6 +74,12 @@ public final class Gate5Scenes {
         /** False for a scene that shows a feature stock's default shader does not have (normal mapping): it has a lavapipe golden and its own check, no GL reference. */
         default boolean hasStockReference() { return true; }
 
+        /** False for a scene VulkanModelBatch cannot draw (spot lights: the default shader of stock libGDX has them, the port does not): only stock ModelBatch through the shim draws it, and {@link #verify} runs on that picture. */
+        default boolean drawsWithVulkanBatch() { return true; }
+
+        /** The stock ModelBatch this scene is drawn with (the default one, unless the scene needs a shader configuration). */
+        default ModelApi stockApi() { return Gate5Scenes.stock(); }
+
         /** An extra check on the Vulkan picture (RGBA, row 0 at the top), for scenes whose point is something a golden alone cannot say. */
         default void verify(byte[] rgba, int width, int height) {}
 
@@ -87,7 +94,7 @@ public final class Gate5Scenes {
     private Gate5Scenes() {}
 
     public static Scene[] all() {
-        Scene[] all = {new Models(), new Knight(), new FogInstances(), new Textures(), new Shadows(), new NormalMap(), new CascadedShadows()};
+        Scene[] all = {new Models(), new SpotLights(), new Knight(), new FogInstances(), new Textures(), new Shadows(), new NormalMap(), new CascadedShadows()};
         final String only = System.getenv("GDXVK_G5_ONLY"); // diagnosis: run one scene
         if (only == null) return all;
         for (Scene sc : all) if (sc.name().contains(only)) return new Scene[] {sc};
@@ -97,6 +104,13 @@ public final class Gate5Scenes {
     /** Stock ModelBatch on OpenGL. */
     public static ModelApi stock() {
         return stockApi(new ModelBatch());
+    }
+
+    /** Stock ModelBatch whose default shader takes spot lights: libGDX's DefaultShader.Config has numSpotLights = 0, so a stock batch ignores them unless it is asked. */
+    public static ModelApi stockWithSpotLights() {
+        final com.badlogic.gdx.graphics.g3d.shaders.DefaultShader.Config config = new com.badlogic.gdx.graphics.g3d.shaders.DefaultShader.Config();
+        config.numSpotLights = 2;
+        return stockApi(new ModelBatch(new com.badlogic.gdx.graphics.g3d.utils.DefaultShaderProvider(config)));
     }
 
     private static ModelApi stockApi(final ModelBatch b) {
@@ -206,6 +220,56 @@ public final class Gate5Scenes {
             instances.clear();
             if (checker != null) checker.dispose();
             checker = null;
+        }
+    }
+
+    /**
+     * A spot light and a point light over a floor, through stock ModelBatch only (VulkanModelBatch has no spot lights). libGDX's default shader declares spot lights
+     * ({@code DefaultShader.Config.numSpotLights}) but its GLSL has no code for them, so on OpenGL the spot light changes nothing and the floor is lit by the ambient
+     * and point light alone. This scene pins that: the picture through the shim must equal the stock-OpenGL reference, spot light included.
+     */
+    private static final class SpotLights implements Scene {
+        private Model floor, ball;
+        private final Array<ModelInstance> instances = new Array<ModelInstance>();
+        private Environment environment;
+
+        @Override public String name() { return "gate5_spot"; }
+
+        @Override public boolean drawsWithVulkanBatch() { return false; }
+
+        @Override public ModelApi stockApi() { return Gate5Scenes.stockWithSpotLights(); }
+
+        @Override public void prepare(FileHandle data) {
+            final int usage = Usage.Position | Usage.Normal;
+            ModelBuilder mb = new ModelBuilder();
+            floor = mb.createBox(12f, 0.2f, 12f, new Material(ColorAttribute.createDiffuse(0.8f, 0.8f, 0.78f, 1f)), usage);
+            ball = mb.createSphere(1.2f, 1.2f, 1.2f, 24, 16, new Material(ColorAttribute.createDiffuse(0.9f, 0.3f, 0.2f, 1f)), usage);
+            instances.add(new ModelInstance(floor, 0f, -1.1f, 0f));
+            instances.add(new ModelInstance(ball, 2.4f, -0.3f, -1.5f));
+            environment = new Environment();
+            environment.set(new ColorAttribute(ColorAttribute.AmbientLight, 0.1f, 0.1f, 0.12f, 1f));
+            environment.add(new SpotLight().set(1f, 0.95f, 0.8f, 0f, 3.5f, 0f, 0f, -1f, 0f, 60f, 25f, 4f));
+            environment.add(new PointLight().set(0.2f, 0.4f, 1f, -3.2f, 0.3f, 2.2f, 3f));
+        }
+
+        @Override public void draw(ModelApi api, int width, int height) {
+            Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
+            PerspectiveCamera camera = new PerspectiveCamera(60f, width, height);
+            camera.position.set(0f, 6f, 4.2f);
+            camera.lookAt(0f, -1f, 0f);
+            camera.near = 0.5f;
+            camera.far = 30f;
+            camera.update();
+            api.begin(camera);
+            api.render(instances, environment);
+            api.end();
+        }
+
+        @Override public void dispose() {
+            if (floor != null) floor.dispose();
+            if (ball != null) ball.dispose();
+            floor = ball = null;
+            instances.clear();
         }
     }
 

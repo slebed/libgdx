@@ -14,9 +14,7 @@ Legend: **[bug]** something is wrong today, **[verify]** built but not checked o
 - **[fixed 2026-11-04] Samsung Galaxy S20 FE (Adreno 650): every `VulkanModelBatch` pipeline failed.** The driver refuses a vertex shader whose buffer reads are addressed from a push constant; the model shaders now find their record from `gl_InstanceIndex` (the draw's first instance). The S20 passes the whole device suite, 3D included. Cause, measurements and rule: `docs/DRIVER_NOTES.md`; kept out of the shaders by `DriverRulesTest`.
 - **[not a bug, measure more] Adreno 840 (REDMAGIC), modern path, 128 separate textures: 37 fps** (compatibility path 10.4 fps). The benchmark gives every sprite a random one of the 128 textures, so neighbouring sprites always differ: the modern path then indexes the bindless table with a different value per quad (a divergent lookup, slow on Adreno) and the compatibility path makes 20,000 draws a frame. It is the deliberate worst case ("no atlas"). Still to do, on the REDMAGIC over USB: the same 20,000 sprites sorted by texture (what a game that does not use an atlas but draws layer by layer sends), to put a number on the case between T1 and T2.
 - **[fixed 2026-11-04] Android: the on-screen keyboard through `Gdx.input` did not work.** The stock input cast the view to a GL class; `VulkanSurfaceView` (an input connection, like the stock GL view) and `VulkanAndroidInput` (shows and hides the keyboard for it) replace that. `tools/keyboard-test.sh <serial>` passes on both phones (keyboard shown and hidden, a key arrives as `keyDown` and `keyTyped`). Not covered: a newer libGDX's `openTextInputField` overlay, which needs the stock `AndroidApplication`.
-- **[bug] The GL shim ignores `glVertexAttrib*` constants**, so a draw that reads an attribute the mesh does not have gets undefined values (OpenGL gives the
-  constant). Stock `DefaultShader` sets such constants for bone weights "in case a mesh has missing attributes". Vulkan has no constant attributes; options: a second
-  vertex binding with stride 0 (native change) or a translator rewrite of the attribute to a uniform when the draw leaves it disabled.
+- **[done 2026-11-05] The GL shim ignored `glVertexAttrib*` constants.** An attribute without an array now reads its constant (GL's default is 0, 0, 0, 1) from a second vertex binding of stride 0, bound per draw (`BindConstants`, `GdxVkPipelineDesc.constantAttribute`); `ConstantAttributeTest`.
 - **[minor] The shader bundle covers a matrix of common variants only** (57 programs per code path: vertex layouts, materials, lights, fog, spot lights, and the skinned knight with every environment); other `DefaultShader` variants are translated and
   compiled at run time on first use (cached on disk afterwards). Extend the matrix in `RecordShaderBundleMain` once real projects show which variants they use.
 - **[bug, minor] The `msvcp140.dll` crash is fixed on Windows** (runtime linked statically); nothing else is open there. Keep an eye on the Linux and Android runtimes
@@ -31,12 +29,10 @@ on the Adreno 840 and 1.1 s on the Adreno 650, each further shader 10 to 25 ms, 
 
 - **[fixed 2026-11-04] The first translated shader of a run took 0.6 to 1.1 s on the phones.** glslang now starts up on a background thread when the frame is created (`GlslCompiler.warmUp()`, off with `-Dgdxvulkan.shaderWarmUp=false`): on the Galaxy S20 the first program 2 s after start takes 40 ms instead of 0.86 to 1.09 s, the next ones 18 ms. A shader created in the very first moments (before the warm-up finishes) still waits for what is left of it.
 - **[verify] Demos on a phone**: they are desktop only (section 4).
-- **[verify] Stock `ModelBatch` with point and spot lights, textures in `DefaultShader`, skinned models** on the desktop: they draw without error (the bundle recorder runs them) but only
-  the directional-light scenes and Gate 5 are compared with a picture. Add scenes with point and spot lights against OpenGL.
+- **[done 2026-11-05] Stock `ModelBatch` with point and spot lights**: point lights are in Gate 5 (`gate5_models`, against the OpenGL reference and `VulkanModelBatch`). **Spot lights: libGDX's default shader has no code for them** (`DefaultShader.Config.numSpotLights` exists, `default.fragment.glsl` never mentions a spot light), so on OpenGL a spot light changes nothing; `gate5_spot` pins that the shim draws exactly what OpenGL draws (0 differing pixels). Textures in `DefaultShader` and skinned models are in `gate5_textures` and `gate5_knight`.
 - **[verify] Android GPU Inspector capture** of the pre-rotated swapchain (AGI is not installed; the presenter's `rotation()` and the logs are the evidence now).
-- **[verify] Android armeabi-v7a and x86_64** compile and link but have never been run (needs an emulator or a second phone). **Linux arm64:** natives are built and
-  their native tests run in CI (`arm64-natives`); the Java suite does not run there, so GPU timestamps are unchecked on that platform.
-- **[verify] The 10-minute soak on the RTX 2080, compatibility path** was never run (every other GPU/path combination was).
+- **[done 2026-11-05, partly] Android armeabi-v7a runs**: the test app built with `-Pabi=armeabi-v7a` passes the whole device suite (32 checks) as a 32-bit process on the Galaxy S20 FE (`primaryCpuAbi=armeabi-v7a`). **x86_64 has not been run** (no emulator image here). **Linux arm64:** natives are built and their native tests run in CI (`arm64-natives`); the Java suite does not run there, so GPU timestamps are unchecked on that platform.
+- **[done 2026-11-05] The 10-minute soak on the RTX 2080, compatibility path**: 600 s, 36,000 frames at 60.0 fps, 50,000 buffer cycles/s and 2,000 textures/s, nothing live at the end, no validation message.
 - **[verify] Validation message count in the demo smoke tests** is not asserted (the layers run, a message prints, but it does not fail `DemosSmokeTest`).
 - **[verify] The glslang size cost with and without the SPIRV-Tools optimizer** is not recorded (the library grew from 2.1 MB to 2.5 MB on Windows when the runtime became static).
 
@@ -60,7 +56,7 @@ on the Adreno 840 and 1.1 s on the Adreno 650, each further shader 10 to 25 ms, 
 ### 3D and rendering
 - **[build] Clustered lights together with shadows in one scene.** Clusters exist only on the GPU-driven path (one mesh, no shadows); cascaded shadows and up to 8 point lights
   work in `VulkanModelBatch`. Options: the cluster lookup in the model shader (many lights for any model), or cascade sampling in `gpu_lit`.
-- **[build] Spot lights and point-light shadows in `VulkanModelBatch`** (stock's default shader has neither; stock `ModelBatch` through the shim compiled and drew a spot light without error, unchecked against OpenGL).
+- **[decided 2026-11-05] No spot lights in `VulkanModelBatch`**: libGDX's own default shader does not implement them either (see above), so a port that adds them would draw what stock cannot. Point-light shadows remain unbuilt (clustered lights and shadows in one scene, above).
 - **[build] True reordering of offscreen framebuffer passes** recorded after a screen draw (pass scheduling today only moves the swapchain pass's start).
 
 ### Platforms
@@ -70,7 +66,7 @@ on the Adreno 840 and 1.1 s on the Adreno 650, each further shader 10 to 25 ms, 
 ## 4. Demos (`gdx-vulkan-demos`)
 
 Built: stock shadow recipe (both backends), cascaded shadows, GPU boids with an OpenGL 4.3 version. Decisions are in the checklist "Demos" section.
-- **[decide] Owner's review of the demo code and looks** (clean, copyable, visually interesting, readable text at your screen size).
+- **[decide] Owner's review of the demo code and looks** (clean, copyable, visually interesting, readable text at your screen size). Prepared 2026-11-05: `docs/DEMO_REVIEW.md` (what to run, what to look at, known weak spots, three questions) and screenshots in `docs/images/` (in the README).
 - **[done 2026-11-04] The text on screen was expensive on gdx-vulkan** (1.7 ms per frame on the REDMAGIC against 0.2 on OpenGL ES). Cause: the text uses two fonts, so a flush had two textures and the batch
   wrote its 24-byte vertices through a `ByteBuffer` (six puts per vertex, about 80 ns each on ART). Fixed in `VulkanSpriteBatch`: the expansion goes into an `int[]` and is copied in one block. Now 0.4 ms
   against 0.2. The rest is `ShapeRenderer` through the shim and the glyph vertex copy; `VulkanPolygonSpriteBatch` has the same per-vertex puts (line 196) and is not changed.
@@ -90,7 +86,7 @@ Built: stock shadow recipe (both backends), cascaded shadows, GPU boids with an 
 - **[done 2026-11-04] The demo app on Android** (`gdx-vulkan-android/demoapp`, `tools/demos-test.sh`; touch menu, three demos, Back returns). Passes on the Galaxy S20 FE (Adreno 650, Tier B); not yet run on the REDMAGIC (USB only). The owner's review of the demos' code and looks is still to do.
 - **[build] More demos:** sprite storm (100k+ sprites, stock against Vulkan), post-processing over a Scene2D UI; a scene with clustered lights and shadows once section 3 allows.
 - **[build] Demo numbers on the second GPU** (the RTX 2080 has no fair OpenGL comparison on this PC; phones and the RTX 5080 are in the README).
-- **[decide] Demo screenshots in the README** (a 1280 x 720 PNG per demo; the repository has none yet).
+- **[done 2026-11-05] Demo screenshots in the README** (`docs/images/`, 1280 x 720 on the RTX 5080, quantised to 128 colours to stay small).
 
 ## 5. Release and adoption (only when the owner says so)
 

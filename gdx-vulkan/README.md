@@ -49,10 +49,10 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Wayland | X11 only on Linux |
 | Some GLSL | cube maps and 3D samplers, structs with array or matrix members, `bool` arrays, array varyings, and (on a Vulkan 1.1 driver) more than one texture per draw are refused with a message that names the line |
 | More of OpenGL | the shim covers what libGDX's classes use: programs, uniforms, one vertex buffer (or vertex data in memory) and array or indexed draws. `Gdx.gl30` and `gl31` stay null, so instancing, several vertex buffers, vertex formats other than floats and normalised bytes, query objects and compute through GL are not available; use the Vulkan classes (`VulkanComputeShader`, `VulkanGpuInstances`) |
-| Spot lights, point-light shadows in `VulkanModelBatch` | libGDX's own default shader has neither. Stock `ModelBatch` through the shim compiled and drew a spot light without error, but no picture of it has been compared with OpenGL |
+| Spot lights, point-light shadows in `VulkanModelBatch` | libGDX's own default shader has no spot light code (on OpenGL a spot light changes nothing; `gate5_spot` checks that the shim agrees), so there is none to port. Point lights work; point-light shadows are not built |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (198 of 245 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (205 of 249 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). Both phones pass the whole device suite (32 checks, 3D included, both code paths on the REDMAGIC), and the demos run on both; what each GPU needed is in [`docs/DRIVER_NOTES.md`](docs/DRIVER_NOTES.md). Other GPUs and drivers should work but have not been tried.
@@ -308,6 +308,13 @@ Vulkan context yourself (a test, a tool), pass the frame explicitly: `new Vulkan
 | 3 Shadows, stock libGDX code | libGDX's own shadow recipe (`DirectionalShadowLight`, `DepthShaderProvider`), the same class on both backends | yes: the same code on OpenGL |
 | 4 Cascaded shadows | the same road with four cascaded shadow maps: a feature stock libGDX does not have | no |
 
+| | |
+|---|---|
+| ![Sprites from many textures](docs/images/demo-sprites.png) | ![GPU boids with 500 point lights](docs/images/demo-boids.png) |
+| ![Shadows with stock libGDX code](docs/images/demo-shadows-stock.png) | ![Cascaded shadows](docs/images/demo-shadows-cascaded.png) |
+
+(Sprites from many textures, GPU boids with the 500 point lights switched on, the stock shadow recipe, cascaded shadows; 1280 x 720 on an RTX 5080.)
+
 `gradlew :gdx-vulkan-demos:demoGl -Ddemo=sprites` (or `boids`, `shadows-stock`) runs a demo on OpenGL alone. Options: `-Ddemo.sprites=N` and `-Ddemo.mode=0|1|2` (scattered, sorted, atlas), `-Ddemo.boids=N`, `-Ddemo.vsync=true` (off by default, so the frame rate shown is what the GPU can do), `-Ddemo.hud=false` (no text: measures the scene alone), `-Ddemo.width=` and `-Ddemo.height=`, `-Ddemo.lights=true` (the boids start with the 500 point lights, which OpenGL does not have), `-Ddemo.start=2 -Ddemo.screenshot=out.png` (saves a picture and leaves). Every demo shows the same fields on both backends: the API and its version, the device, the driver and the code path, then the frame time, the CPU time per frame (all threads of the process, the graphics driver's own included), the render thread's CPU time per frame, and the GPU time per frame. gdx-vulkan reads the GPU time from timestamp queries (`GdxVkPresenter.gpuFrameNanos()`); the OpenGL main uses a timer query (not available for OpenGL ES on the phones). The OpenGL driver's device name carries a `/PCIe/SSE2` suffix (the bus the card is on and the CPU instruction set the driver's software paths use); the Vulkan device name has none, so the OpenGL one is cut there to read the same. The results, with the cases where gdx-vulkan is not ahead, are under [Demo measurements](#demo-measurements); `docs/CHECKLIST.md` has the item list.
 
 ### Moving an existing game over
@@ -401,11 +408,11 @@ Stock classes run unchanged because the same shim also serves what they use to d
 ## Known limitations
 - libGDX GLSL is translated at run time (measured on the phones: glslang's start-up takes 0.6 s on the Adreno 840 and 1.1 s on the Adreno 650; the library does it on a background thread when the frame is created, so a shader created a second or two later takes 40 ms for the first and 10 to 25 ms for each further one, and a cached one 0.2 to 0.8 ms. `VulkanShaderProgram.prepareAsync` builds the shaders of a level on a worker thread). A hand-written SPIR-V shader that rotates its own output must call `gdx_vk_clip()` like the bundled ones, for Android pre-rotation.
 - `VulkanModelBatch` draws with the port of libGDX's default shader (plus normal maps) and does not accept custom 3D `Shader` or `ShaderProvider` classes. Stock `ModelBatch` through the shim accepts them (any stock `Shader`, `BaseShader`, `ShaderProvider`), at the cost of the shim's CPU time.
-- The GL shim draws from one vertex buffer per draw (or from vertex data in memory), with float and normalised-byte attributes; `glVertexAttrib*` constants for attributes a mesh lacks are ignored (a draw that reads such an attribute gets undefined values).
+- The GL shim draws from one vertex buffer per draw (or from vertex data in memory), with float and normalised-byte attributes; `glVertexAttrib*` constants for attributes a mesh lacks are honoured (a second vertex binding of stride 0).
 - On the first run, a shader outside the set compiled with the library (everything but libGDX's own sprite, shape and default and depth model shaders for common materials and lights) is translated and compiled at run time.
 - A few features need a driver with Vulkan 1.3: shadow maps and specular, emissive and normal-map textures. On a Vulkan 1.1 driver they are skipped.
 - On Android, `Gdx.input.setOnscreenKeyboardVisible` (what Scene2D's `TextField` uses) and `Gdx.input.getTextInput` work; a newer libGDX's `openTextInputField` overlay needs the stock `AndroidApplication` and is not covered.
-- Natives are built for Windows x64, Linux x64 and Android arm64. Android armeabi-v7a and x86_64 compile but have never been run.
+- Natives are built for Windows x64, Linux x64 and Android arm64. Android armeabi-v7a runs (the device suite passes as a 32-bit process on a phone that has it); x86_64 compiles but has never been run.
 - Offscreen framebuffer passes recorded after a draw to the screen keep their order: a framebuffer pass in the middle of a frame interrupts the main pass.
 - Clustered lights and shadows are not combined in one scene: lights are sorted into clusters on the GPU-driven path (one mesh, no shadows), cascaded shadows work with `VulkanModelBatch` (up to 8 point lights).
 

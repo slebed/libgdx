@@ -74,7 +74,7 @@ the commit that added them, they only differ in two defines), `model_default.fra
 (a shared 1x1 white one when there is none). Do not destroy anything the recorded stream names before the frame is submitted (the white texture is per context for that reason). Gate 5: `Gate5Scenes` + `Gate5GoldenTest`
 (`GDXVK_G5_ONLY=knight` runs one scene); goldens come from the Docker lavapipe run (`UPDATE_GOLDENS=1`, then copy only the new files after checking the others are byte-identical).
 
-Open items: Adreno Tier A throughput (see below); Wayland/macOS; running armeabi-v7a/x86_64 (they compile); Linux arm64 natives (CI job `arm64-natives`); Phase 6 (tabled: no Mac).
+Open items: Adreno Tier A throughput (see below); Wayland/macOS; x86_64 (compiles, never run; armeabi-v7a runs on the S20 with `-Pabi=armeabi-v7a`); Linux arm64 natives (CI job `arm64-natives`); Phase 6 (tabled: no Mac).
 Phase 5 finish: cascaded shadows (`g3d/VulkanCascadedShadowLight`; header grew to 55 vec4s, cascade matrices 41..52, splits 53, slots 54, spec constant 18 = cascade count, the cascade is picked in the fragment shader from `1/gl_FragCoord.w`);
 `VK_KHR_swapchain_maintenance1` present fences (`Impl::fencesOn()`, parked swapchains, a device wait is kept when a slot has no pending fence; a device wait does NOT retire a present fence, wait on the fences before destroying them);
 Swappy (`gdxvk_swappy.cpp`, only with `-DGDXVK_SWAPPY=ON` from the Android Gradle build; needs the shared STL; `GdxVkContext.setFramePacingActivity` before the context exists; present fences are off on a Swappy swapchain);
@@ -102,7 +102,7 @@ Driver rules (`docs/DRIVER_NOTES.md`): never address a buffer read in a vertex s
 - Windows RTX 5080 and RTX 2080, both tiers: `gradlew check -Dgdxvulkan.requireDriver=true [-Dgdxvulkan.forceTierB=true] [-Dgdxvulkan.device=1]`
   passes with validation + sync validation clean, goldens within tolerance. Soak (15 s): ~50,000 buffer cycles/s, 2,000 textures/s,
   60.0 fps, flat memory, 4 samplers, on both GPUs and both tiers. A 60 s run on the 5080 Tier A was flat after warm-up.
-  The 10-minute soak: RTX 5080 Tier A and Tier B, RTX 2080 Tier A, Adreno 840 Tier A and Tier B, all flat; not run: RTX 2080 Tier B.
+  The 10-minute soak: RTX 5080 Tier A and Tier B, RTX 2080 Tier A, Adreno 840 Tier A and Tier B, RTX 2080 Tier B (2026-11-05: 600 s, 60.0 fps, flat), all flat.
 - Linux: `ci/run-checks.sh` in the Docker image passes on lavapipe, Mesa 25.2.8-0ubuntu0.24.04.4, both tiers, exact goldens. Soak rates are
   scaled down 10x on software devices (it checks hazards and leaks there, not throughput).
 - Android (REDMAGIC NX809J, Adreno 840, Android 16, Vulkan 1.4; **not** the Galaxy S20 in the plan): Phase 1a SelfTest passed in both tiers

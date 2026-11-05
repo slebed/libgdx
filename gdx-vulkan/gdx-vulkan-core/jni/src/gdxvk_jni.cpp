@@ -649,6 +649,10 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateP
         gdxvk::VertexAttribute attr;
         attr.location = static_cast<uint32_t>(d[10 + a * 3]);
         attr.format = static_cast<uint32_t>(d[11 + a * 3]);
+        if (attr.format & 0x40000000u) { // a constant attribute (GdxVkPipelineDesc.constantAttribute)
+            attr.binding = 1;
+            attr.format &= ~0x40000000u;
+        }
         attr.offset = static_cast<uint32_t>(d[12 + a * 3]);
         pd.attributes.push_back(attr);
     }

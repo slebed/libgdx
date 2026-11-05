@@ -3,6 +3,9 @@ plugins {
     id 'com.android.application'
 }
 
+// -Pabi=armeabi-v7a (or x86_64) builds the test app for that ABI only: for running the other ABIs the library compiles for (a 32-bit-capable phone, an emulator).
+def appAbi = project.findProperty('abi') ?: 'arm64-v8a'
+
 android {
     namespace 'io.github.slebed.gdxvulkan.testapp'
     compileSdk 36
@@ -13,7 +16,7 @@ android {
         targetSdk 36
         versionCode 1
         versionName '0.1'
-        ndk { abiFilters 'arm64-v8a' } // the test app and the gdx natives it copies are arm64 only; the library itself builds all three
+        ndk { abiFilters appAbi } // the test app and the gdx natives it copies are arm64 only; the library itself builds all three
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
@@ -25,13 +28,13 @@ configurations { natives }
 
 dependencies {
     implementation project(':library')
-    natives "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-arm64-v8a" // libgdx.so: Pixmap's gdx2d, for the device suite
+    natives "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-${appAbi}" // libgdx.so: Pixmap's gdx2d, for the device suite
 }
 
 def nativesDir = layout.buildDirectory.dir('generated/jniLibs')
 def copyNatives = tasks.register('copyGdxNatives', Copy) {
     from({ configurations.natives.collect { zipTree(it) } }) { include '*.so' }
-    into nativesDir.map { it.dir('arm64-v8a') }
+    into nativesDir.map { it.dir(appAbi) }
 }
 android.sourceSets.main.jniLibs.srcDir nativesDir
 tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn copyNatives }

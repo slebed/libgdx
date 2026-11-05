@@ -31,6 +31,7 @@ enum Op : int32_t {
     PushRange = 18,     // first word, count, then count words: changes part of the push-constant block (pushed in full before the next draw)
     DrawIndexedIndirect = 22,  // resource buffer id, offset lo, offset hi, draw count, stride: VkDrawIndexedIndirectCommand records written by the GPU (firstInstance must be 0)
     DrawIndexedInstanced = 21, // index count, first index, vertex offset, instance count, first instance: instance i reads gl_InstanceIndex = first instance + i
+    BindConstants = 24, // ring block, offset lo, offset hi: the values of constant vertex attributes (binding 1, stride 0), 16 bytes each at the offsets the pipeline names
     DrawInstanced = 23, // vertex count, first vertex, instance count, first instance
     Set0Data = 20,      // uniform bytes, storage bytes, then the uniform words and the storage words (each rounded up to whole words): copied into the frame ring and bound as Set 0
     BindVertexBuffer = 19, // resource buffer id, offset lo, offset hi: vertex data that lives in a persistent buffer (stock Mesh), not the frame ring

@@ -57,7 +57,7 @@ public final class SpritesDemo implements Demo {
     }
 
     @Override public void create () {
-        batch = Backend.vulkan ? new VulkanSpriteBatch() : new SpriteBatch();
+        batch = Backend.vulkan && !Boolean.getBoolean("demo.stockBatch") ? new VulkanSpriteBatch() : new SpriteBatch(); // -Ddemo.stockBatch=true: stock SpriteBatch through the shim on gdx-vulkan
         textures = new Texture[TEXTURES];
         final int rows = (TEXTURES + ATLAS_COLUMNS - 1) / ATLAS_COLUMNS;
         final Pixmap atlasPixmap = new Pixmap(ATLAS_COLUMNS * TILE, rows * TILE, Pixmap.Format.RGBA8888);

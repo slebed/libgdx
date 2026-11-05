@@ -40,6 +40,7 @@ adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log    
 - [ ] Pre-rotation: rotate the phone in all four orientations by hand and look at it (`adb exec-out screencap -p`), or run the lifecycle run with `--ez preRotate false` and compare
 
 ## 5. Publish
+- [ ] `python tools/release-notes.py <previous tag>` for the draft of the notes; `.github/workflows/release-build.yml` (run by hand, a draft that has not been run yet) builds the natives of each platform and the Android library as workflow artifacts; nothing is published by it
 - [ ] Tag `vX.Y.Z` on the commit; release notes: what changed, what was run where, known gaps (copy from `README.md`)
 - [ ] `NOTICE` still lists everything vendored and generated
 

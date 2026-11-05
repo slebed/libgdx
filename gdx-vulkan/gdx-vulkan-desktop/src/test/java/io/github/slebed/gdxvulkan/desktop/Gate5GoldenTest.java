@@ -79,6 +79,22 @@ class Gate5GoldenTest {
         float[] bg = Gate5Scenes.BACKGROUND;
         try {
             scene.prepare(data);
+            if (!scene.drawsWithVulkanBatch()) { // spot lights: stock ModelBatch on the shim only, checked by the scene and against the stock-OpenGL reference
+                GLFW.glfwPollEvents();
+                assertTrue(frame.begin(bg[0], bg[1], bg[2], bg[3]));
+                final Gate5Scenes.ModelApi stockOnly = scene.stockApi();
+                try {
+                    com.badlogic.gdx.Gdx.gl.glViewport(0, 0, w, h);
+                    scene.draw(stockOnly, w, h);
+                } finally {
+                    stockOnly.dispose();
+                }
+                final byte[] shim = frame.endAndCapture();
+                scene.verify(shim, w, h);
+                final boolean compared = OracleImages.compare(scene.name(), shim, w, h);
+                if (!compared && Boolean.getBoolean("gdxvulkan.requireGl")) throw new AssertionError("No stock-GL reference image for " + scene.name());
+                return;
+            }
             GLFW.glfwPollEvents();
             assertTrue(frame.begin(bg[0], bg[1], bg[2], bg[3]));
             final Gate5Scenes.ModelApi api = scene.name().equals("gate5_fog") ? Gate5Scenes.vulkanInstancing(frame) : Gate5Scenes.vulkan(frame);
@@ -121,7 +137,7 @@ class Gate5GoldenTest {
             if (scene.hasStockReference()) {
                 GLFW.glfwPollEvents();
                 assertTrue(frame.begin(bg[0], bg[1], bg[2], bg[3]));
-                final Gate5Scenes.ModelApi stockApi = Gate5Scenes.stock();
+                final Gate5Scenes.ModelApi stockApi = scene.stockApi();
                 try {
                     com.badlogic.gdx.Gdx.gl.glViewport(0, 0, w, h);
                     scene.draw(stockApi, w, h);
