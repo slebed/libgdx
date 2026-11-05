@@ -21,13 +21,13 @@ public final class DemoMenu implements ApplicationListener {
         () -> new GpuBoidsDemo()};
 
     private final Demo[] listed = new Demo[DEMOS.length];
-    private final OpenGlLauncher launcher;
+    private final Launcher launcher;
     private Demo running;
     private Hud hud;
     private int width, height;
 
     /** @param launcher starts the OpenGL counterparts; null leaves the C key out */
-    public DemoMenu (OpenGlLauncher launcher) {
+    public DemoMenu (Launcher launcher) {
         this.launcher = launcher;
     }
 
@@ -44,7 +44,7 @@ public final class DemoMenu implements ApplicationListener {
 
     @Override public void render () {
         if (running != null) {
-            if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+            if (Controls.justPressed(Input.Keys.ESCAPE)) {
                 stop();
                 return; // this Esc has been used: it must not also leave the app
             } else {
@@ -53,7 +53,7 @@ public final class DemoMenu implements ApplicationListener {
                 return;
             }
         }
-        if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
+        if (Controls.justPressed(Input.Keys.ESCAPE)) {
             Gdx.app.exit();
             return;
         }
@@ -61,6 +61,10 @@ public final class DemoMenu implements ApplicationListener {
             if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_1 + i)) start(i);
         }
         drawMenu();
+        if (Controls.touch() && Gdx.input.justTouched()) {
+            final int hit = hud.buttonAt(Gdx.input.getX(), Gdx.input.getY());
+            if (hit >= 0) start(hit);
+        }
     }
 
     /** Starts the demo with this index (0 is the first in the menu). */
@@ -81,6 +85,13 @@ public final class DemoMenu implements ApplicationListener {
         final String[] lines = new String[DEMOS.length + 1];
         for (int i = 0; i < DEMOS.length; i++) lines[i] = (i + 1) + "   " + listed[i].title();
         lines[DEMOS.length] = "Esc leaves.";
+        if (Controls.touch()) {
+            final String[] labels = new String[DEMOS.length];
+            for (int i = 0; i < DEMOS.length; i++) labels[i] = listed[i].title();
+            hud.draw("gdx-vulkan demos", "Tap a demo. In a demo, the Back button comes back here (from the menu it leaves).", new String[0]);
+            hud.drawButtons(labels);
+            return;
+        }
         hud.draw("gdx-vulkan demos", "Press the number of a demo. In a demo, Esc comes back here and C starts the stock OpenGL version beside it.", lines);
     }
 

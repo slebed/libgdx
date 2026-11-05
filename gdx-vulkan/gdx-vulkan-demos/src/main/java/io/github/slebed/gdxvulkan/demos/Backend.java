@@ -15,6 +15,20 @@ public final class Backend {
     /** The GPU time of a recent frame in nanoseconds, 0 when it is not known. gdx-vulkan reads timestamps from the device; the OpenGL main uses a timer query. */
     public static volatile LongSupplier gpuNanos = () -> 0L;
 
+    /** Set by the Android activity when the system Back button was pressed and the view did not take it; the demos read it as Esc. */
+    public static volatile boolean back;
+
+    /** CPU time of the whole process in nanoseconds, 0 when the platform cannot say. The desktop mains use the JVM's beans, the Android app {@code android.os.Process}. */
+    public static volatile LongSupplier processCpuNanos = () -> 0L;
+
+    /** CPU time of the calling thread in nanoseconds, 0 when the platform cannot say. */
+    public static volatile LongSupplier threadCpuNanos = () -> 0L;
+
+    /** The numbers the running demo shows at the bottom of the screen (frame, CPU, render thread, GPU), as of the last half second. */
+    public static String[] latestStats () {
+        return FrameStats.latest;
+    }
+
     /** "1.4.309" for a packed Vulkan version. */
     public static String vulkanVersion (int packed) {
         return (packed >>> 22) + "." + ((packed >>> 12) & 0x3ff) + "." + (packed & 0xfff);

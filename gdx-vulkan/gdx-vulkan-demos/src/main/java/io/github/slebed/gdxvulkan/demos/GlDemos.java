@@ -42,6 +42,7 @@ public final class GlDemos {
                 Backend.lines = new String[] {"OpenGL " + Gdx.gl.glGetString(GL20.GL_VERSION) + ", stock libGDX", renderer.split("/")[0],
                     "driver " + Gdx.gl.glGetString(GL20.GL_VENDOR) + ", GLSL " + Gdx.gl.glGetString(GL20.GL_SHADING_LANGUAGE_VERSION),
                     "core profile through libGDX's GL31 interface"};
+                DesktopClocks.install();
                 timer = new GlTimer();
                 Backend.gpuNanos = timer::nanos;
                 demo.create();

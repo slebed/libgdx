@@ -71,7 +71,7 @@ on the Adreno 840 and 1.1 s on the Adreno 650, each further shader 10 to 25 ms, 
 
 Built: stock shadow recipe (both backends), cascaded shadows, GPU boids with an OpenGL 4.3 version. Decisions are in the checklist "Demos" section.
 - **[decide] Owner's review of the demo code and looks** (clean, copyable, visually interesting, readable text at your screen size).
-- **[build] The demo app on Android** (menu and the three demos; the OpenGL counterparts stay desktop).
+- **[done 2026-11-04] The demo app on Android** (`gdx-vulkan-android/demoapp`, `tools/demos-test.sh`; touch menu, three demos, Back returns). Passes on the Galaxy S20 FE (Adreno 650, Tier B); not yet run on the REDMAGIC (USB only). The owner's review of the demos' code and looks is still to do.
 - **[build] More demos:** sprite storm (100k+ sprites, stock against Vulkan), post-processing over a Scene2D UI; a scene with clustered lights and shadows once section 3 allows.
 - **[build] Demo numbers on a phone and on the second GPU** (the table in the README is the RTX 5080 only).
 - **[decide] Demo screenshots in the README** (a 1280 x 720 PNG per demo; the repository has none yet).

@@ -46,7 +46,7 @@ public final class GpuBoidsDemo implements Demo {
     }
 
     @Override public String[] notes () {
-        return new String[] {"libGDX has no class for this. On OpenGL you write it yourself: press C for a version with the same simulation, culling and indirect draw.",
+        return new String[] {"libGDX has no class for this. On OpenGL you write it yourself" + (Controls.touch() ? "." : ": press C for a version with the same simulation, culling and indirect draw."),
             "What it adds is the 500 clustered lights, and the CPU time the work takes.", "L switches the point lights on and off, Space pauses."};
     }
 
@@ -113,8 +113,8 @@ public final class GpuBoidsDemo implements Demo {
     }
 
     @Override public void render () {
-        if (Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) paused = !paused;
-        if (Gdx.input.isKeyJustPressed(Input.Keys.L)) {
+        if (Controls.justPressed(Input.Keys.SPACE)) paused = !paused;
+        if (Controls.justPressed(Input.Keys.L)) {
             lit = !lit;
             swarm.setLights(lights, lit ? LIGHTS : 0);
         }

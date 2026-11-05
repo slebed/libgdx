@@ -32,6 +32,9 @@ public final class Hud implements Disposable {
     private final FrameStats frameStats = new FrameStats();
     private BitmapFont bodyFont, titleFont;
     private int fontsForHeight = -1;
+    private boolean touchHint = true;
+    private float buttonLeft, buttonTop, buttonWidth, buttonHeight, buttonGap;
+    private int buttonCount;
 
     /** The size of the body text for a window of this height: about 1/36 of it, and never below 14 pixels. */
     static int bodySize (int windowHeight) {
@@ -58,6 +61,12 @@ public final class Hud implements Disposable {
      */
     public void draw (String title, String summary, String[] notes, String... demoStats) {
         frameStats.frame();
+        if (Controls.touch()) { // no keyboard: the notes about C go, the touch controls come
+            final java.util.ArrayList<String> kept = new java.util.ArrayList<String>();
+            for (String note : notes) if (!note.startsWith("Press C")) kept.add(note);
+            if (touchHint) kept.add("Touch: a tap on the left half of the screen is Space, on the right half L. The Back button returns to the menu.");
+            notes = kept.toArray(new String[0]);
+        }
         final String[] stats = new String[Backend.lines.length + frameStats.lines().length + demoStats.length];
         System.arraycopy(Backend.lines, 0, stats, 0, Backend.lines.length);
         System.arraycopy(frameStats.lines(), 0, stats, Backend.lines.length, frameStats.lines().length);
@@ -115,6 +124,49 @@ public final class Hud implements Disposable {
         }
         batch.end();
         Gdx.gl.glDisable(GL20.GL_BLEND);
+    }
+
+    /**
+     * Draws a column of large buttons at the right of the screen, for the menu of a phone (call it after {@link #draw}), and remembers where they are for
+     * {@link #buttonAt}.
+     */
+    public void drawButtons (String[] labels) {
+        makeFonts(Gdx.graphics.getHeight());
+        final int w = Gdx.graphics.getWidth(), h = Gdx.graphics.getHeight();
+        buttonCount = labels.length;
+        buttonHeight = bodyFont.getLineHeight() * 3f;
+        buttonGap = bodyFont.getLineHeight();
+        buttonWidth = Math.min(w * 0.45f, bodyFont.getLineHeight() * 18f);
+        buttonLeft = w - buttonWidth - bodyFont.getLineHeight();
+        buttonTop = h * 0.5f + (buttonHeight * labels.length + buttonGap * (labels.length - 1)) / 2f; // y up, the top of the first button
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+        shapes.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
+        shapes.begin(ShapeRenderer.ShapeType.Filled);
+        shapes.setColor(0.12f, 0.22f, 0.4f, 0.95f);
+        for (int i = 0; i < labels.length; i++) shapes.rect(buttonLeft, buttonTop - (i + 1) * buttonHeight - i * buttonGap, buttonWidth, buttonHeight);
+        shapes.end();
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, w, h);
+        batch.begin();
+        bodyFont.setColor(BODY);
+        for (int i = 0; i < labels.length; i++) {
+            layout.setText(bodyFont, labels[i], BODY, buttonWidth - bodyFont.getLineHeight(), Align.center, true);
+            final float top = buttonTop - i * (buttonHeight + buttonGap);
+            bodyFont.draw(batch, layout, buttonLeft + bodyFont.getLineHeight() * 0.5f, top - (buttonHeight - layout.height) / 2f);
+        }
+        batch.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+        touchHint = false; // this is the menu: its text says what a tap does
+    }
+
+    /** The index of the button under a touch at these window coordinates (y down), or -1. */
+    public int buttonAt (int x, int y) {
+        final float up = Gdx.graphics.getHeight() - y;
+        for (int i = 0; i < buttonCount; i++) {
+            final float top = buttonTop - i * (buttonHeight + buttonGap);
+            if (x >= buttonLeft && x <= buttonLeft + buttonWidth && up <= top && up >= top - buttonHeight) return i;
+        }
+        return -1;
     }
 
     @Override public void dispose () {

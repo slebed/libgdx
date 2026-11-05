@@ -1,0 +1,58 @@
+// The demo app (gdx-vulkan-demos) on a phone: the same Demo classes the desktop app runs, compiled from their source, behind a VulkanAndroidApplication.
+// The desktop-only parts (the LWJGL mains, the OpenGL launcher and the OpenGL counterpart demos) stay out.
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.slebed.gdxvulkan.demoapp'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'io.github.slebed.gdxvulkan.demos'
+        minSdk 29
+        targetSdk 36
+        versionCode 1
+        versionName '0.1'
+        ndk { abiFilters 'arm64-v8a' } // the gdx natives copied below are arm64 only; the library itself builds all three
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+configurations { natives }
+
+dependencies {
+    implementation project(':library')
+    implementation "com.badlogicgames.gdx:gdx-backend-android:${gdxVersion}"
+    implementation "com.badlogicgames.gdx:gdx-freetype:${gdxVersion}" // the on-screen text
+    natives "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-arm64-v8a"
+    natives "com.badlogicgames.gdx:gdx-freetype-platform:${gdxVersion}:natives-arm64-v8a"
+}
+
+def nativesDir = layout.buildDirectory.dir('generated/jniLibs')
+def copyNatives = tasks.register('copyGdxNatives', Copy) {
+    from({ configurations.natives.collect { zipTree(it) } }) { include '*.so' }
+    into nativesDir.map { it.dir('arm64-v8a') }
+}
+android.sourceSets.main.jniLibs.srcDir nativesDir
+
+def sharedJava = layout.buildDirectory.dir('generated/demos-java')
+def copyDemos = tasks.register('copyDemoSources', Copy) {
+    from('../../gdx-vulkan-demos/src/main/java/io/github/slebed/gdxvulkan/demos') {
+        exclude 'VulkanDemos.java', 'GlDemos.java', 'GpuBoidsOpenGlDemo.java', 'OpenGlLauncher.java', 'GlTimer.java', 'DesktopClocks.java'
+        into 'io/github/slebed/gdxvulkan/demos'
+    }
+    into sharedJava
+}
+// The font the on-screen text uses: a classpath resource, as on the desktop.
+def sharedResources = layout.buildDirectory.dir('generated/demos-resources')
+def copyFont = tasks.register('copyDemoFont', Copy) {
+    from('../../test-assets/data') { include 'lsans.ttf'; into 'data' }
+    into sharedResources
+}
+android.sourceSets.main.java.srcDir sharedJava
+android.sourceSets.main.resources.srcDir sharedResources
+tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn copyNatives, copyDemos, copyFont }

@@ -29,9 +29,9 @@ final class BoidSwarm {
     static final int GRID = 32;
     static final float MAX_SPEED = 14f, COHESION = 0.6f, ALIGNMENT = 1.2f, SEPARATION = 0.8f, SWIRL = 40f;
 
-    /** How many boids: 250,000 unless {@code -Ddemo.boids=N}. */
+    /** How many boids: 250,000 on a desktop, 10,000 on a phone, unless {@code -Ddemo.boids=N}. */
     static int count () {
-        return Integer.getInteger("demo.boids", 250_000);
+        return Integer.getInteger("demo.boids", Controls.touch() ? 10_000 : 250_000);
     }
 
     /** The starting state of {@code count} boids: spread through a sphere, heading in random directions. */

@@ -44,6 +44,7 @@ public final class VulkanDemos {
                     "driver " + (caps.driverInfo == null || caps.driverInfo.isEmpty() ? "(not reported)" : caps.driverInfo),
                     caps.tier == VulkanCaps.Tier.A ? "modern code path: bindless textures, dynamic rendering" : "compatibility code path: " + caps.tierReason};
                 Backend.gpuNanos = () -> GdxVkFrame.current().presenter().gpuFrameNanos();
+                DesktopClocks.install();
                 menu.create();
                 final int start = Integer.getInteger("demo.start", 0); // -Ddemo.start=2 opens the second demo at once
                 if (start > 0) menu.start(start - 1);

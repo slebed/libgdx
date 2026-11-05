@@ -66,7 +66,7 @@ public final class CascadedShadowsDemo implements Demo {
     }
 
     @Override public void render () {
-        if (Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) paused = !paused;
+        if (Controls.justPressed(Input.Keys.SPACE)) paused = !paused;
         world.update(paused ? 0f : Gdx.graphics.getDeltaTime(), 0f);
         shadowLight.direction.set(world.sunDirection(sun));
 

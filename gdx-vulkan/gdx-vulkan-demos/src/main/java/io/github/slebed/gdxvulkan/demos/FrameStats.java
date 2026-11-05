@@ -1,8 +1,5 @@
 package io.github.slebed.gdxvulkan.demos;
 
-import java.lang.management.ManagementFactory;
-import java.lang.management.ThreadMXBean;
-
 /**
  * The same four measurements for every demo on either backend, averaged over half a second so the numbers can be read:
  * <ul>
@@ -16,8 +13,6 @@ import java.lang.management.ThreadMXBean;
 final class FrameStats {
     private static final long WINDOW_NS = 500_000_000L;
 
-    private final com.sun.management.OperatingSystemMXBean os = (com.sun.management.OperatingSystemMXBean)ManagementFactory.getOperatingSystemMXBean();
-    private final ThreadMXBean threads = ManagementFactory.getThreadMXBean();
     private long windowStart, processCpuStart, threadCpuStart, gpuSum;
     private int frames, gpuSamples;
     private String[] lines = {"measuring...", "", "", ""};
@@ -40,21 +35,23 @@ final class FrameStats {
         final long wall = now - windowStart;
         if (wall < WINDOW_NS) return;
         final double frameMs = wall / 1e6 / frames;
-        final double processMs = (os.getProcessCpuTime() - processCpuStart) / 1e6 / frames;
-        final double threadMs = (threads.getCurrentThreadCpuTime() - threadCpuStart) / 1e6 / frames;
-        final double cores = (os.getProcessCpuTime() - processCpuStart) / (double)wall;
+        final long processCpu = Backend.processCpuNanos.getAsLong() - processCpuStart;
+        final double processMs = processCpu / 1e6 / frames;
+        final double threadMs = (Backend.threadCpuNanos.getAsLong() - threadCpuStart) / 1e6 / frames;
+        final double cores = processCpu / (double)wall;
         final String gpuLine = gpuSamples == 0 ? "GPU: not measured" : String.format("GPU: %.2f ms per frame (%.0f%% of the frame)", gpuSum / 1e6 / gpuSamples,
             100.0 * gpuSum / gpuSamples / (wall / (double)frames));
         lines = new String[] {String.format("frame: %.2f ms (%.0f fps)", frameMs, 1000.0 / frameMs),
             String.format("CPU: %.2f ms per frame, %.1f cores busy (all threads)", processMs, cores), String.format("render thread: %.2f ms per frame", threadMs), gpuLine};
+        if (processCpuStart == 0 && Backend.processCpuNanos.getAsLong() == 0) lines[1] = lines[2] = "CPU: not measured";
         latest = lines;
         reset(now);
     }
 
     private void reset (long now) {
         windowStart = now;
-        processCpuStart = os.getProcessCpuTime();
-        threadCpuStart = threads.getCurrentThreadCpuTime();
+        processCpuStart = Backend.processCpuNanos.getAsLong();
+        threadCpuStart = Backend.threadCpuNanos.getAsLong();
         frames = 0;
         gpuSum = 0;
         gpuSamples = 0;

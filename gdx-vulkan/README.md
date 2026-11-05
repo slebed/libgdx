@@ -37,7 +37,7 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | Wayland | X11 only on Linux |
 | Some GLSL | cube maps and 3D samplers, structs with array or matrix members, `bool` arrays, array varyings, and (on a Vulkan 1.1 driver) more than one texture per draw are refused with a message that names the line |
 | More of OpenGL | the shim covers what libGDX's classes use: programs, uniforms, one vertex buffer (or vertex data in memory) and array or indexed draws. `Gdx.gl30` and `gl31` stay null, so instancing, several vertex buffers, vertex formats other than floats and normalised bytes, query objects and compute through GL are not available; use the Vulkan classes (`VulkanComputeShader`, `VulkanGpuInstances`) |
-| Demos on Android | the demo app runs on the desktop only |
+| Demos on Android | `gdx-vulkan-android/demoapp`: the same three demos behind a touch menu (the OpenGL counterparts stay desktop only); run on the Galaxy S20 FE |
 | Spot lights, point-light shadows in `VulkanModelBatch` | libGDX's own default shader has neither. Stock `ModelBatch` through the shim compiled and drew a spot light without error, but no picture of it has been compared with OpenGL |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
@@ -248,6 +248,8 @@ Vulkan context yourself (a test, a tool), pass the frame explicitly: `new Vulkan
 ### Demos
 
 `gradlew :gdx-vulkan-demos:demos` opens the demo app, a menu of demos on gdx-vulkan (keys 1 to 3 start one, Esc comes back). In a demo, **C starts the stock OpenGL version in a window beside it**, same size, so the two can be watched together. Each demo is a short class you can copy; the text on screen says what it is about and is sized from the window height.
+
+**On a phone:** `gradlew :demoapp:assembleDebug` in `gdx-vulkan-android` builds `demoapp-debug.apk` (package `io.github.slebed.gdxvulkan.demos`), the same demo classes compiled from the desktop module's source. A tap on a button starts a demo; in a demo a tap on the left half of the screen is Space and on the right half is L, and Back returns to the menu. The boid demo defaults to 10,000 boids on a phone (`--ei boids N`). `tools/demos-test.sh <serial>` runs each demo for a while, prints the numbers it shows and saves screenshots (`--ei start N --ei logSeconds S` write them to `files/gdxvk-demos.log`). CPU time on the phone comes from `android.os.Process` (millisecond resolution; read over half a second).
 
 | Demo | What it shows | Stock libGDX equivalent |
 |---|---|---|
