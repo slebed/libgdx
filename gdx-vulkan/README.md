@@ -139,46 +139,52 @@ the 2D and 3D scenes differ in at most 0.2% of pixels, at the ends of lines and 
 
 The demos run the **same scene on both backends** and show the same numbers on screen (frame time, CPU per frame over all threads, CPU of the render thread, GPU time). The
 scenes match pixel for pixel where a comparison is claimed (the boids' shaders do the same arithmetic on both; the sprite demo is the same `Batch` code with one line changed).
-Reproduce them with `tools/compare-demos.sh <sprites|boids|shadows>` (desktop) and `tools/compare-phone.sh <serial> <sprites|boids|shadows>` (phone, over USB).
+Reproduce them with `tools/compare-demos.sh <sprites|boids|shadows>` (desktop) and `tools/compare-phone.sh <serial> <sprites|boids|shadows>` (phone). Frames per second, vsync off;
+`HUD=false` in the environment (`-Ddemo.hud=false`) leaves the text off, so that the table measures the scene.
 
-**Sprites** (`Batch` code identical, stock `SpriteBatch` against `VulkanSpriteBatch`; each sprite from one of 128 textures):
+**The scene alone** (no text on screen), stock libGDX on OpenGL / OpenGL ES against gdx-vulkan:
 
-| Machine | Mode | Stock libGDX, OpenGL | gdx-vulkan | Ratio |
-|---|---|---|---|---|
-| RTX 5080, 20,000 sprites | scattered textures | 20 fps, 61 to 72 ms CPU | 400 fps, 2.4 ms CPU | **20x** |
-| | sorted by texture | 865 fps, 1.8 ms CPU | 606 fps, 1.75 ms CPU | 0.70x |
-| | one atlas | 1,096 fps, 1.4 ms CPU | 1,028 fps, 1.0 ms CPU | 0.94x |
-| Galaxy S20 FE (Adreno 650), 10,000 sprites | scattered textures | 1.1 fps | 22 fps | **20x** |
-| | sorted by texture | 306 fps, 3.3 ms CPU | 350 fps, 2.3 ms CPU | 1.14x |
-| | one atlas | 394 fps, 1.8 ms CPU | 508 fps, 1.5 ms CPU | 1.29x |
+| Scene | RTX 5080 | Galaxy S20 FE (Adreno 650, Tier B) | REDMAGIC (Adreno 840, Tier A) |
+|---|---|---|---|
+| Sprites, 128 textures, scattered | 21 / **369** | 1.1 / **22** | 3 / **62** |
+| Sprites, sorted by texture | 793 / 599 | 289 / 384 | 388 / 71 to 116 |
+| Sprites, one atlas | 1,171 / 1,253 | 415 / 506 | 1,190 / 980 |
+| Boids (250,000 on the desktop, 10,000 on the phones) | 489 / **983** | 152 / 552 (see below) | 1,590 / **2,000** |
+| Boids, 60,000 on the phones | | 26 / 116 (see below) | 355 / **1,590** |
+| Stock shadow demo through the shim | 1,832 / 1,308 | 481 / 447 | 866 / 545 |
 
-**GPU-driven boids** (compute simulation, GPU culling, one indirect draw; one directional light on both; no lights is the like-for-like setting, the 500 point lights are an extra the
-OpenGL version does not have):
+(20,000 sprites on the desktop, 10,000 on the phones.)
 
-| Machine | Boids | Stock libGDX, OpenGL | gdx-vulkan | Ratio |
-|---|---|---|---|---|
-| RTX 5080 | 250,000 | 413 fps, 2.8 ms CPU, GPU 2.16 ms | 726 fps, 0.77 ms CPU, GPU 1.28 ms | **1.75x** |
-| RTX 5080 | 10,000 | 1,653 fps, 0.89 ms CPU | 1,871 fps, 0.57 ms CPU | 1.13x |
-| RTX 5080, vsync, 60 fps | 250,000 | 4.0 ms CPU, GPU 2.25 ms | 1.5 ms CPU, GPU 1.81 ms | |
-| Galaxy S20 FE | 10,000 | 463 fps | 432 fps | 0.93x |
-| Galaxy S20 FE | 60,000 | about 138 fps | 112 fps | 0.81x |
+**As the demo app runs it, with the text on screen:**
 
-**Stock libGDX code through the shim** (the shadow demo, no Vulkan classes): RTX 5080 1,648 fps and 0.74 ms CPU on OpenGL, 1,092 fps and 0.89 ms CPU on gdx-vulkan (0.66x).
+| Scene | RTX 5080 | Galaxy S20 FE | REDMAGIC |
+|---|---|---|---|
+| Sprites, scattered | 20 / **400** | 1.1 / **22** | 3 / **54** |
+| Sprites, sorted | 865 / 606 | 306 / 350 | 320 / 62 to 76 |
+| Sprites, one atlas | 1,096 / 1,028 | 394 / 508 | 798 / 345 |
+| Boids | 413 / **726** (250,000) | 463 / 432 (10,000); 138 / 112 (60,000) | 1,645 / 454 (10,000); 337 to 425 / 396 to 443 (60,000) |
+| Stock shadow demo through the shim | 1,648 / 1,092 | | 644 / 282 |
+
+CPU per frame, where it was measured: 250,000 boids on the RTX 5080 take 2.2 ms (OpenGL, all threads) against 0.48 ms; the many-texture sprites take 61 ms against 2.4 ms; at a fixed
+60 fps the 250,000 boids take 4.0 ms against 1.5 ms of CPU and 2.25 against 1.81 ms of GPU.
 
 What the numbers say:
 
-- **Many textures is the case where gdx-vulkan wins big**: 20x on both the desktop card and the phone, and the Vulkan batch needs no change to the drawing code. With a texture atlas the two are
-  close on the desktop and gdx-vulkan is 1.3x ahead on the phone. Sorting sprites by texture, which a careful developer does to help stock libGDX, closes much of the gap on the desktop and
-  not on the phone.
-- **GPU-driven work** (compute, culling, indirect draws): the CPU cost is a fifth to a third of OpenGL's at the same GPU work, and with a large workload the desktop card finishes it faster
-  (1.75x at 250,000 boids). On the phone the same boid demo is **slower** than OpenGL ES by 7 to 19%, GPU bound on both; that gap is open (see `TODO.md`).
-- **Stock code through the shim is not faster**: it costs as much CPU as OpenGL and renders a little slower. The shim is for porting without changing code; the gains come with the
-  `Vulkan...` classes.
-- **Energy is not measured.** A phone cannot be measured over USB (it charges), and on the desktop card the power at the same frame rate was the same within noise (about 34 to 35 W at 60 fps).
-  What the demos do show is the CPU and GPU time per frame; at equal frame rate, less busy time is the only energy claim that these measurements support, and it holds for the many-texture and GPU-driven
-  cases on the desktop and for the sorted and many-texture sprites on the phone, not for the atlas case on the phone at a fixed 118 Hz (3.2 ms CPU on OpenGL, 3.8 to 4.1 ms on gdx-vulkan).
-- The GL phone numbers carry no GPU time (the Android SDK has no binding for the timer query). The boid demo's per-frame GPU time on the two backends is measured in different ways (timestamps, a timer
-  query); the frame time is the comparison to trust.
+- **Many textures is the case where gdx-vulkan wins big**: 17 to 20x on all three machines, with no change to the drawing code. This is the one result that does not depend on anything else.
+- **GPU-driven work** (compute simulation, GPU culling, one indirect draw) is where it wins next: 2x for 250,000 boids on the desktop card at a fifth of the CPU, 1.26x to 4.5x on the REDMAGIC.
+- **Sorted sprites and atlases are not a win, and on the REDMAGIC they are a loss**: with an atlas the desktop is about equal and the REDMAGIC 0.82x without text; sorted by texture, the desktop is
+  0.76x and the REDMAGIC 0.2 to 0.3x. A texture index that differs between the sprites of one draw reaches the shader through a varying, which is the case the Adreno 840's compiler handles badly
+  (`docs/DRIVER_NOTES.md`); the same cost appears in the 128-texture row of the sprite results. This is the open "Adreno Tier A throughput" item.
+- **The text on screen costs gdx-vulkan more than it costs OpenGL**: 0.2 ms against 0.07 ms per frame on the desktop and about 1.7 ms against 0.2 ms on the REDMAGIC, enough to turn the REDMAGIC's boids
+  from 2.0x ahead (without text) to 0.28x (with it, 454 against 1,645 fps). The text is plain stock libGDX code (`ShapeRenderer`, FreeType glyphs), so this is a real cost of stock classes through the shim
+  and of the font batch, and it is open (`TODO.md`).
+- **The Galaxy S20's OpenGL numbers depend on the text**: with the text the boids run at 463 fps, without it at 152 (a tile-based driver doing something different when a frame has no overlay). Do not
+  read the S20's no-text boid rows as a gdx-vulkan win; with the text it is 0.93x (10,000) and 0.81x (60,000).
+- **Stock code through the shim is slower than OpenGL** (0.63 to 0.71x on the desktop and the REDMAGIC, equal on the S20) and uses about the same CPU. The shim is for porting without changing code; the gains come
+  with the `Vulkan...` classes.
+- **Energy is not measured.** A phone cannot be measured over USB (it charges), and on the desktop card the power at the same frame rate was the same within noise (about 34 to 35 W at 60 fps). Less busy
+  time at the same frame rate is the only energy claim these measurements support.
+- The OpenGL ES numbers on the phones carry no GPU time (the Android SDK has no binding for the timer query).
 
 ### Adding a device
 

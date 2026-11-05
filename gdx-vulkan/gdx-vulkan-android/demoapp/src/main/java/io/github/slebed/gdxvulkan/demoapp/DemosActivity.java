@@ -39,6 +39,7 @@ public class DemosActivity extends VulkanAndroidApplication {
         final int logSeconds = getIntent().getIntExtra("logSeconds", 0);
         if (getIntent().hasExtra("boids")) System.setProperty("demo.boids", String.valueOf(getIntent().getIntExtra("boids", 0)));
         if (getIntent().hasExtra("sprites")) System.setProperty("demo.sprites", String.valueOf(getIntent().getIntExtra("sprites", 0)));
+        if (getIntent().hasExtra("hud")) System.setProperty("demo.hud", String.valueOf(getIntent().getBooleanExtra("hud", true)));
         if (getIntent().hasExtra("mode")) System.setProperty("demo.mode", String.valueOf(getIntent().getIntExtra("mode", 0)));
         final PhoneStats stats = new PhoneStats(getFilesDir(), logSeconds);
         final GdxVkConfig vkConfig = new GdxVkConfig();

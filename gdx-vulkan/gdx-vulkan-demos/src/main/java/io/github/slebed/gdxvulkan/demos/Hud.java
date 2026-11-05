@@ -26,6 +26,7 @@ public final class Hud implements Disposable {
     private static final Color BODY = new Color(0.95f, 0.96f, 1f, 1f);
     private static final Color STATS = new Color(0.55f, 0.95f, 0.7f, 1f);
 
+    private static final boolean HIDDEN = !Boolean.parseBoolean(System.getProperty("demo.hud", "true"));
     private final Batch batch = Backend.vulkan ? new io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch() : new SpriteBatch(); // the batch of the backend the demo runs on
     private final ShapeRenderer shapes = new ShapeRenderer();
     private final FreeTypeFontGenerator generator = new FreeTypeFontGenerator(Gdx.files.classpath("data/lsans.ttf"));
@@ -62,6 +63,7 @@ public final class Hud implements Disposable {
      */
     public void draw (String title, String summary, String[] notes, String... demoStats) {
         frameStats.frame();
+        if (HIDDEN) return; // -Ddemo.hud=false: the scene alone, to see what the text costs
         if (Controls.touch()) { // no keyboard: the notes about C go, the touch controls come
             final java.util.ArrayList<String> kept = new java.util.ArrayList<String>();
             for (String note : notes) if (!note.startsWith("Press C")) kept.add(note);

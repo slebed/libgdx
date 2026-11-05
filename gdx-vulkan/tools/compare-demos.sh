@@ -29,7 +29,7 @@ run() { # run <name> <gradle task and arguments...>
   rm -f "$watts"
   power "$watts" & local sampler=$!
   sleep 1
-  ./gradlew -q "$@" -Ddemo.boids="$BOIDS" -Ddemo.vsync="$VSYNC" -Ddemo.width=1280 -Ddemo.height=720 -Ddemo.frames="$FRAMES" -Ddemo.screenshot="$OUT/$name.png" > "$log" 2>&1
+  ./gradlew -q "$@" -Ddemo.boids="$BOIDS" -Ddemo.vsync="$VSYNC" -Ddemo.hud="${HUD:-true}" -Ddemo.width=1280 -Ddemo.height=720 -Ddemo.frames="$FRAMES" -Ddemo.screenshot="$OUT/$name.png" > "$log" 2>&1
   kill "$sampler" 2>/dev/null; wait "$sampler" 2>/dev/null
   # drop the first third of the power samples: start-up and JIT warm-up
   [ -f "$watts" ] && tail -n +"$(( $(wc -l < "$watts") / 3 + 1 ))" "$watts" > "$watts.steady"

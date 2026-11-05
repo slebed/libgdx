@@ -71,8 +71,14 @@ on the Adreno 840 and 1.1 s on the Adreno 650, each further shader 10 to 25 ms, 
 
 Built: stock shadow recipe (both backends), cascaded shadows, GPU boids with an OpenGL 4.3 version. Decisions are in the checklist "Demos" section.
 - **[decide] Owner's review of the demo code and looks** (clean, copyable, visually interesting, readable text at your screen size).
-- **[bug/perf] Boids on the phone are slower than OpenGL ES** (Adreno 650, Tier B): 112 fps against about 138 at 60,000 boids, 432 against 463 at 10,000, GPU bound on both with the same compute and
-  draw work. Candidates: the barriers between dispatches, the 32-bit depth image, the indirect draw, Tier B's render pass. Find it with timestamps around each stage.
+- **[perf] The text on screen (`Hud`) is expensive on gdx-vulkan**: about 0.2 ms per frame against 0.07 on the desktop and about 1.7 ms against 0.2 on the REDMAGIC (a stock `ShapeRenderer`
+  through the shim, plus a few hundred FreeType glyphs through `VulkanSpriteBatch`). It turns the REDMAGIC's boids from 2.0x ahead to 0.28x in the demo as shipped. Profile it (`-Ddemo.hud=false`
+  isolates it), then fix what is slow (shim ShapeRenderer path? per-glyph cost? state changes) or draw the panel with `VulkanShapeRenderer`.
+- **[perf] Sprites with several textures per draw on the Adreno 840** (Tier A): sorted by texture 0.2 to 0.3x of OpenGL ES, one atlas 0.82x, 10,000 sprites on the REDMAGIC; the desktop is 0.76x and 1.07x.
+  The slot index reaches the fragment shader through a varying, which the Adreno compiler cannot prove uniform (`docs/DRIVER_NOTES.md`). Idea: break the batch per texture run and take the slot from the push
+  constants (the single-texture path already does), or sort the vertices by texture inside the batch.
+- **[verify] The Galaxy S20's OpenGL ES boids run 3x slower without the text on screen** (152 against 463 fps). Not gdx-vulkan's problem, but it makes the no-text boid rows unusable as a claim there;
+  check whether it is the driver's tiling or a stall in the OpenGL demo (`glMapBufferRange` of the visible count every 30 frames).
 - **[verify] Energy.** Nothing measures it yet. Over USB the phone charges; a run unplugged (wireless adb) with `dumpsys batterystats` or the battery's current would settle it. On the desktop the card's
   power at 60 fps was the same on both backends.
 - **[build] GPU time for OpenGL ES on the phone** (`GL_EXT_disjoint_timer_query` needs a small JNI binding; the Android SDK has none).

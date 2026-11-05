@@ -30,6 +30,7 @@ public class GlDemosActivity extends AndroidApplication {
         final String id = getIntent().hasExtra("demo") ? getIntent().getStringExtra("demo") : "boids";
         if (getIntent().hasExtra("boids")) System.setProperty("demo.boids", String.valueOf(getIntent().getIntExtra("boids", 0)));
         if (getIntent().hasExtra("sprites")) System.setProperty("demo.sprites", String.valueOf(getIntent().getIntExtra("sprites", 0)));
+        if (getIntent().hasExtra("hud")) System.setProperty("demo.hud", String.valueOf(getIntent().getBooleanExtra("hud", true)));
         if (getIntent().hasExtra("mode")) System.setProperty("demo.mode", String.valueOf(getIntent().getIntExtra("mode", 0)));
         final PhoneStats stats = new PhoneStats(getFilesDir(), getIntent().getIntExtra("logSeconds", 0));
         final AndroidApplicationConfiguration config = new AndroidApplicationConfiguration();
