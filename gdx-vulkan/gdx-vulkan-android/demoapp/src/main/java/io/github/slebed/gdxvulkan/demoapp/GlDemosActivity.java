@@ -27,6 +27,7 @@ import io.github.slebed.gdxvulkan.demos.StockShadowsDemo;
 public class GlDemosActivity extends AndroidApplication {
     @Override protected void onCreate (Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); // a measurement must not run on a screen that has gone to sleep
         final String id = getIntent().hasExtra("demo") ? getIntent().getStringExtra("demo") : "boids";
         if (getIntent().hasExtra("boids")) System.setProperty("demo.boids", String.valueOf(getIntent().getIntExtra("boids", 0)));
         if (getIntent().hasExtra("sprites")) System.setProperty("demo.sprites", String.valueOf(getIntent().getIntExtra("sprites", 0)));

@@ -180,8 +180,10 @@ public final class GlslTranslator {
 
         // Varyings: the vertex shader decides the locations; the fragment shader must use a subset with the same types.
         final Map<String, Varying> varyings = new LinkedHashMap<String, Varying>();
+        int nextLocation = 0;
         for (Varying out : v.varyings) {
-            out.location = varyings.size();
+            out.location = nextLocation;
+            nextLocation += locationsOf(out.type); // a mat3 takes three locations, a mat4 four
             varyings.put(out.name, out);
         }
         for (Varying in : f.varyings) {

@@ -70,6 +70,18 @@ class GlslTranslatorTest {
         assertEquals(64, tex.sampler("u_sampler0").slotOffset);
     }
 
+    @Test void aMatrixVaryingTakesAsManyLocationsAsItHasColumns () throws Exception {
+        // out mat3 is three locations: the next varying must not land on the second (a real terrain shader of a game did, and glslang refused it).
+        final String vert = "#version 330 core\nin vec3 a_position;\nuniform mat4 u_proj;\nout mat3 v_tbn;\nout vec4 v_pos;\nout vec2 v_uv;\n"
+            + "void main() {\n    v_tbn = mat3(1.0);\n    v_pos = vec4(a_position, 1.0);\n    v_uv = a_position.xy;\n    gl_Position = u_proj * v_pos;\n}\n";
+        final String frag = "#version 330 core\nin mat3 v_tbn;\nin vec4 v_pos;\nin vec2 v_uv;\nout vec4 fragColor;\n"
+            + "void main() {\n    fragColor = vec4(v_tbn * v_pos.xyz, v_uv.x);\n}\n";
+        final Translation t = GlslTranslator.translate("matrixvarying", vert, frag, null, null, true);
+        assertTrue(t.vertex.contains("layout(location = 0) out mat3 v_tbn") && t.vertex.contains("layout(location = 3) out vec4 v_pos")
+            && t.vertex.contains("layout(location = 4) out vec2 v_uv"), t.vertex);
+        assertCompiles(t, "matrixvarying/modern");
+    }
+
     @Test void aCustomShaderWithArraysBoolsAndTwoSamplers () throws Exception {
         final String masked = "#define MASKED\n";
         final Translation t = GlslTranslator.translate("custom", resource("custom.vert"), resource("custom.frag"), null, masked, true);

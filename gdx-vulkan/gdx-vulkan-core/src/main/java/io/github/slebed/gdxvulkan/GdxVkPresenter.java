@@ -106,6 +106,17 @@ public final class GdxVkPresenter implements AutoCloseable {
         GdxVkNative.nativeFlushVertices(handle, block, offset, bytes);
     }
 
+    /**
+     * glReadPixels: replays nothing itself (call {@link #submit} first), submits what the frame has recorded, waits for the GPU and copies a region of a render-target
+     * texture (RGBA8; {@code texture} is the native texture id) or, with -1, of the screen, into {@code out}: {@code w * h * 4} bytes, GL's rows from {@code y} upward.
+     * The GPU idles meanwhile, so use it for picking and screenshots, not every frame of a fast loop.
+     */
+    public void readPixels(int texture, int x, int y, int w, int h, java.nio.ByteBuffer out) {
+        check();
+        if (!frameOpen) throw new IllegalStateException("readPixels called outside beginFrame/endFrame");
+        translate(GdxVkNative.nativeReadPixels(handle, texture, x, y, w, h, out));
+    }
+
     /** Replays the stream into the open frame and empties it. May be called several times per frame. */
     public void submit(CommandStream stream) {
         check();

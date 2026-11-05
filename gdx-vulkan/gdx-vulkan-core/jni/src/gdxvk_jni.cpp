@@ -273,6 +273,15 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeBeginFr
     return static_cast<jint>(reinterpret_cast<gdxvk::Presenter*>(handle)->beginFrame(rgba));
 }
 
+JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeReadPixels(JNIEnv* env, jclass, jlong handle, jint texture, jint x, jint y, jint w, jint h,
+                                                                                 jobject out) {
+    if (handle == 0 || out == nullptr || x < 0 || y < 0 || w < 0 || h < 0) return 3;
+    auto* dst = static_cast<uint8_t*>(env->GetDirectBufferAddress(out));
+    if (dst == nullptr || env->GetDirectBufferCapacity(out) < static_cast<jlong>(w) * h * 4) return 3;
+    return static_cast<jint>(reinterpret_cast<gdxvk::Presenter*>(handle)->readPixels(texture, static_cast<uint32_t>(x), static_cast<uint32_t>(y), static_cast<uint32_t>(w),
+                                                                                        static_cast<uint32_t>(h), dst));
+}
+
 JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeEndFrame(JNIEnv*, jclass, jlong handle, jboolean capture) {
     return static_cast<jint>(reinterpret_cast<gdxvk::Presenter*>(handle)->endFrame(capture == JNI_TRUE));
 }

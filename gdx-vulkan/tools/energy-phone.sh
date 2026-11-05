@@ -35,7 +35,7 @@ one() { # one <gl|vulkan> -> mean battery power in mW
     activity=DemosActivity
     extra="--ei start $(case $DEMO in sprites) echo 1;; boids) echo 2;; *) echo 3;; esac)"
   fi
-  adb_ shell am start -n "$PKG/io.github.slebed.gdxvulkan.demoapp.$activity" $extra --ei boids "$COUNT" --ei sprites "$COUNT" --ei mode "${MODE:-0}" --es hud "${HUD:-true}" --ez vsync true --ei logSeconds 2 >/dev/null
+  adb_ shell am start -n "$PKG/io.github.slebed.gdxvulkan.demoapp.$activity" $extra --ei boids "$COUNT" --ei sprites "$COUNT" --ei mode "${MODE:-0}" --es hud "${HUD:-true}" --ez vsync true --ez pacing "${PACING:-true}" --ei logSeconds 2 >/dev/null
   sleep 15 # warm-up: the JIT, the GPU clock
   local n=$((SECS * 2))
   adb_ shell "i=0; while [ \$i -lt $n ]; do echo \$(cat /sys/class/power_supply/battery/current_now) \$(cat /sys/class/power_supply/battery/voltage_now); sleep 0.5; i=\$((i+1)); done" |

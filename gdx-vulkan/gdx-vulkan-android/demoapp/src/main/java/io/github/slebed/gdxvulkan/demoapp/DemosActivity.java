@@ -31,6 +31,7 @@ public class DemosActivity extends VulkanAndroidApplication {
 
     @Override protected void onCreate (Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); // a measurement must not run on a screen that has gone to sleep
         // Android 13 and later with a target of 36 no longer call onBackPressed: the app registers for the back gesture and button instead.
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, () -> Backend.back = true);
@@ -44,6 +45,7 @@ public class DemosActivity extends VulkanAndroidApplication {
         final PhoneStats stats = new PhoneStats(getFilesDir(), logSeconds);
         final GdxVkConfig vkConfig = new GdxVkConfig();
         vkConfig.forceTierB = getIntent().getBooleanExtra("forceTierB", false);
+        vkConfig.framePacing = getIntent().getBooleanExtra("pacing", true); // --ez pacing false: no Swappy (for measuring what it costs)
         final AndroidApplicationConfiguration config = new AndroidApplicationConfiguration();
         config.useAccelerometer = false;
         config.useCompass = false;

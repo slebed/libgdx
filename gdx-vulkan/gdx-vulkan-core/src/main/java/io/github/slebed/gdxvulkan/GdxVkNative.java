@@ -70,6 +70,8 @@ final class GdxVkNative {
 
     static native int nativeEndFrame(long handle, boolean capture);
 
+    static native int nativeReadPixels(long handle, int texture, int x, int y, int w, int h, java.nio.ByteBuffer out);
+
     /** @return pipeline id, or -1 (see nativeLastError) */
     static native int nativeCreatePipeline(long handle, String name, byte[] vertSpv, byte[] fragSpv);
 

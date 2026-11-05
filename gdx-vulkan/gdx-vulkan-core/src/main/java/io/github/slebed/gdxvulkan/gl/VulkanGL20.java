@@ -95,6 +95,9 @@ public class VulkanGL20 extends VulkanGL20Base {
         if ("GL_ARB_framebuffer_object".equals(extension) || "GL_OES_framebuffer_object".equals(extension)) return true; // MipMapGenerator
         if ("GL_OES_packed_depth_stencil".equals(extension) || "GL_EXT_packed_depth_stencil".equals(extension)) return true; // FrameBuffer
         if ("GL_EXT_texture_filter_anisotropic".equals(extension)) return context.caps().maxSamplerAnisotropy > 1f;
+        // Floating-point colour attachments (the stock FrameBuffer builder asks for "OES_texture_float" without the GL_ prefix, as it does on GLES 2.0).
+        if ("OES_texture_float".equals(extension) || "GL_OES_texture_float".equals(extension) || "GL_OES_texture_half_float".equals(extension)
+            || "GL_OES_texture_float_linear".equals(extension) || "GL_EXT_color_buffer_float".equals(extension)) return true;
         return false;
     }
 
@@ -104,7 +107,7 @@ public class VulkanGL20 extends VulkanGL20Base {
         case GL_VENDOR: return "gdx-vulkan";
         case GL_RENDERER: return context.caps().deviceName;
         case GL_SHADING_LANGUAGE_VERSION: return "OpenGL ES GLSL ES 1.00";
-        case GL_EXTENSIONS: return "GL_OES_framebuffer_object GL_OES_packed_depth_stencil"
+        case GL_EXTENSIONS: return "GL_OES_framebuffer_object GL_OES_packed_depth_stencil GL_OES_texture_float GL_OES_texture_half_float GL_EXT_color_buffer_float"
             + (context.caps().maxSamplerAnisotropy > 1f ? " GL_EXT_texture_filter_anisotropic" : "");
         default: return reportUnknown(name) ? null : null;
         }
@@ -953,10 +956,20 @@ public class VulkanGL20 extends VulkanGL20Base {
         for (int i = 0; i < n; i++) out.put(glGenBuffer());
     }
 
+    private static final boolean TRACE_BIND = Boolean.getBoolean("gdxvulkan.traceBind"); // diagnosis
+
     @Override public void glBindBuffer (int target, int buffer) {
         if (target == GL_ARRAY_BUFFER) boundArrayBuffer = buffer;
-        else if (target == GL_ELEMENT_ARRAY_BUFFER) boundElementBuffer = buffer;
-        else throw unsupported("glBindBuffer(target 0x" + Integer.toHexString(target) + ")");
+        else if (target == GL_ELEMENT_ARRAY_BUFFER) {
+            boundElementBuffer = buffer;
+            if (TRACE_BIND) {
+                final Throwable t = new Throwable("[trace] element buffer bound to " + buffer);
+                for (StackTraceElement e : t.getStackTrace()) if (e.getClassName().contains("srlgames") && !e.getMethodName().equals("dispose")) {
+                    t.printStackTrace();
+                    break;
+                }
+            }
+        } else throw unsupported("glBindBuffer(target 0x" + Integer.toHexString(target) + ")");
         if (buffer != 0 && buffers.get(buffer) == null) buffers.put(buffer, new GlBuffer(buffer)); // GL lets a name be bound before it was generated
     }
 
@@ -1354,6 +1367,44 @@ public class VulkanGL20 extends VulkanGL20Base {
     @Override public void glVertexAttrib4fv (int indx, FloatBuffer values) {
         final int p = values.position();
         programs.vertexAttrib(indx, values.get(p), values.get(p + 1), values.get(p + 2), values.get(p + 3));
+    }
+
+    /**
+     * Reads pixels of the bound framebuffer (a render-target texture, or the screen when none is bound), RGBA and unsigned bytes only. It submits everything recorded so
+     * far and waits for the GPU, then the frame goes on: the GPU idles meanwhile, so it suits picking and screenshots, not a call every frame of a fast loop.
+     */
+    @Override public void glReadPixels (int x, int y, int width, int height, int format, int type, Buffer pixels) {
+        if (format != GL_RGBA || type != GL_UNSIGNED_BYTE) {
+            throw unsupported("glReadPixels(format 0x" + Integer.toHexString(format) + ", type 0x" + Integer.toHexString(type) + "): RGBA and unsigned byte only");
+        }
+        if (!(pixels instanceof ByteBuffer)) throw unsupported("glReadPixels into a " + pixels.getClass().getSimpleName() + ": a ByteBuffer only");
+        final GdxVkFrame frame = attachedFrame;
+        if (frame == null) throw new GdxRuntimeException("gdx-vulkan: glReadPixels needs a frame");
+        int texture = -1; // the screen
+        if (boundFramebuffer != 0) {
+            final GlFramebuffer fb = framebuffers.get(boundFramebuffer);
+            if (fb == null || fb.colorTextures[0] == 0) throw new GdxRuntimeException("gdx-vulkan: glReadPixels from a framebuffer with no colour texture");
+            texture = nativeTexture(fb.colorTextures[0]);
+            if (texture < 0) throw new GdxRuntimeException("gdx-vulkan: glReadPixels from a texture that has no storage");
+        }
+        final int bytes = width * height * 4;
+        final ByteBuffer target = (ByteBuffer)pixels;
+        if (target.remaining() < bytes) throw new GdxRuntimeException("gdx-vulkan: glReadPixels needs " + bytes + " bytes, the buffer has " + target.remaining());
+        frame.flush(); // the draws recorded so far
+        if (target.isDirect()) {
+            frame.presenter().readPixels(texture, x, y, width, height, target.slice());
+        } else {
+            final ByteBuffer temp = ByteBuffer.allocateDirect(bytes);
+            frame.presenter().readPixels(texture, x, y, width, height, temp);
+            target.put(copyOut(temp), 0, bytes);
+            target.position(target.position() - bytes); // GL does not move the position
+        }
+    }
+
+    private static byte[] copyOut (ByteBuffer direct) {
+        final byte[] out = new byte[direct.remaining()];
+        direct.duplicate().get(out);
+        return out;
     }
 
     @Override public void glVertexAttribPointer (int indx, int size, int type, boolean normalized, int stride, int ptr) {

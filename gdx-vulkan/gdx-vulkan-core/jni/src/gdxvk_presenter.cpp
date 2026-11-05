@@ -267,6 +267,18 @@ struct Presenter::Impl {
     Frame frames[kFramesInFlight];
     std::unique_ptr<FrameRing> rings[kFramesInFlight]; // Set 0 dynamic buffers, one per frame in flight
     bool stagingRecorded = false;
+    bool acquiredWaited = false; // the frame's first submit waits for the acquired image; a readback submits earlier in the frame
+    // What the command stream has bound that outlives a draw, so that the command buffer a readback starts in the middle of the frame can bind it again.
+    struct Bound {
+        VkDescriptorSet set0 = VK_NULL_HANDLE, set1 = VK_NULL_HANDLE;
+        uint32_t set0Offsets[2] = {0, 0};
+        VkBuffer vertex0 = VK_NULL_HANDLE, vertex1 = VK_NULL_HANDLE, index = VK_NULL_HANDLE;
+        VkDeviceSize vertex0Offset = 0, vertex1Offset = 0, indexOffset = 0;
+        VkIndexType indexType = VK_INDEX_TYPE_UINT16;
+    } bound;
+    VkBuffer readbackBuf = VK_NULL_HANDLE;
+    VmaAllocation readbackAlloc = nullptr;
+    VkDeviceSize readbackSize = 0;
     uint32_t frameIndex = 0;
     uint32_t imageIndex = 0;
     bool frameOpen = false;
@@ -1115,6 +1127,7 @@ struct Presenter::Impl {
         computePipelines.clear();
         computeQueue.clear();
         if (captureBuf != VK_NULL_HANDLE) vmaDestroyBuffer(h.allocator, captureBuf, captureAlloc);
+        if (readbackBuf != VK_NULL_HANDLE) vmaDestroyBuffer(h.allocator, readbackBuf, readbackAlloc);
         captureBuf = VK_NULL_HANDLE;
         if (renderPass != VK_NULL_HANDLE) vkDestroyRenderPass(h.device, renderPass, nullptr);
         renderPass = VK_NULL_HANDLE;
@@ -1167,6 +1180,51 @@ struct Presenter::Impl {
             VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
             if (vkCreateSemaphore(h.device, &si, nullptr, &f.acquired) != VK_SUCCESS) return false;
         }
+        return true;
+    }
+
+    // Records what was staged, mirrored and dispatched so far into the frame's upload command buffer. True when it has something in it.
+    bool recordUploads(Frame& f, bool timestamps) {
+        VkCommandBufferBeginInfo ubi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        ubi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(f.uploadCmd, &ubi);
+        if (timestamps && f.timestamps != VK_NULL_HANDLE) { // the frame's GPU time starts with the first command of the submit
+            vkCmdResetQueryPool(f.uploadCmd, f.timestamps, 0, 2);
+            vkCmdWriteTimestamp(f.uploadCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, f.timestamps, 0);
+        }
+        beginLabel(h, f.uploadCmd, "gdx: staged uploads", 0.5f, 0.8f, 0.4f);
+        stagingRecorded = h.staging->recordPending(f.uploadCmd);
+        endLabel(h, f.uploadCmd);
+        const bool mirrored = rings[frameIndex]->recordVertexCopies(f.uploadCmd);
+        const bool computed = recordCompute(f.uploadCmd);
+        vkEndCommandBuffer(f.uploadCmd);
+        return stagingRecorded || computed || mirrored || (timestamps && f.timestamps != VK_NULL_HANDLE);
+    }
+
+    // Binds again what the stream had bound, in a command buffer started in the middle of the frame.
+    void restoreBound(VkCommandBuffer cmd) {
+        if (bound.set0 != VK_NULL_HANDLE) vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, h.layouts->pipelineLayout(), 0, 1, &bound.set0, 2, bound.set0Offsets);
+        if (bound.set1 != VK_NULL_HANDLE) vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, h.layouts->pipelineLayout(), 1, 1, &bound.set1, 0, nullptr);
+        if (bound.vertex0 != VK_NULL_HANDLE) vkCmdBindVertexBuffers(cmd, 0, 1, &bound.vertex0, &bound.vertex0Offset);
+        if (bound.vertex1 != VK_NULL_HANDLE) vkCmdBindVertexBuffers(cmd, 1, 1, &bound.vertex1, &bound.vertex1Offset);
+        if (bound.index != VK_NULL_HANDLE) vkCmdBindIndexBuffer(cmd, bound.index, bound.indexOffset, bound.indexType);
+    }
+
+    bool ensureReadbackBuffer(VkDeviceSize need) {
+        if (readbackBuf != VK_NULL_HANDLE && readbackSize >= need) return true;
+        if (readbackBuf != VK_NULL_HANDLE) vmaDestroyBuffer(h.allocator, readbackBuf, readbackAlloc); // every readback waits for its copy: nothing uses it now
+        readbackBuf = VK_NULL_HANDLE;
+        VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bi.size = need;
+        bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        VmaAllocationCreateInfo ai{};
+        ai.usage = VMA_MEMORY_USAGE_AUTO;
+        ai.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+        if (vmaCreateBuffer(h.allocator, &bi, &ai, &readbackBuf, &readbackAlloc, nullptr) != VK_SUCCESS) {
+            readbackBuf = VK_NULL_HANDLE;
+            return false;
+        }
+        readbackSize = need;
         return true;
     }
 
@@ -1566,6 +1624,8 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
     s.pushDirty = false; // a new command buffer: the stream pushes the whole block again before its first draw
     std::memset(s.pushShadow, 0, sizeof(s.pushShadow));
     s.applyDepthStencil(f.cmd);
+    s.bound = Impl::Bound();
+    s.acquiredWaited = false;
     s.frameOpen = true;
     s.profLap(3);
     return FrameStatus::Ok;
@@ -1635,27 +1695,14 @@ FrameStatus Presenter::endFrame(bool capture) {
 
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    si.waitSemaphoreCount = 1;
+    si.waitSemaphoreCount = s.acquiredWaited ? 0 : 1; // a readback earlier in the frame has already waited for the image
     si.pWaitSemaphores = &f.acquired;
     si.pWaitDstStageMask = &waitStage;
     // Everything staged up to now, by any thread, goes into its own command buffer that runs ahead of the frame's draws in the same
     // submit. Recording it here, not at beginFrame, means a texture created or changed mid-frame is already uploaded when the frame's
     // draws run; a renamed image keeps its old contents for the draws that were recorded before the change.
-    VkCommandBufferBeginInfo ubi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    ubi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(f.uploadCmd, &ubi);
-    if (f.timestamps != VK_NULL_HANDLE) { // the frame's GPU time starts with the first command of the submit
-        vkCmdResetQueryPool(f.uploadCmd, f.timestamps, 0, 2);
-        vkCmdWriteTimestamp(f.uploadCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, f.timestamps, 0);
-    }
-    beginLabel(h, f.uploadCmd, "gdx: staged uploads", 0.5f, 0.8f, 0.4f);
-    s.stagingRecorded = h.staging->recordPending(f.uploadCmd);
-    endLabel(h, f.uploadCmd);
-    const bool mirrored = s.rings[s.frameIndex]->recordVertexCopies(f.uploadCmd);
-    const bool computed = s.recordCompute(f.uploadCmd);
-    vkEndCommandBuffer(f.uploadCmd);
+    const bool preCmd = s.recordUploads(f, true); // the upload command buffer has something in it
     s.profLap(5);
-    const bool preCmd = s.stagingRecorded || computed || mirrored || f.timestamps != VK_NULL_HANDLE; // the upload command buffer has something in it
     VkCommandBuffer cmds[2] = {f.uploadCmd, f.cmd};
     si.commandBufferCount = preCmd ? 2 : 1;
     si.pCommandBuffers = preCmd ? cmds : &f.cmd;
@@ -1718,6 +1765,136 @@ FrameStatus Presenter::endFrame(bool capture) {
         s.readCapture();
     }
     return result;
+}
+
+// glReadPixels: everything recorded so far is submitted and waited for, the pixels are copied out, and a new command buffer carries on with the frame.
+// `texture` is a render-target texture (RGBA8), or -1 for the swapchain (logical orientation, GL's y from the bottom). `out` takes w * h * 4 bytes, rows from y upward.
+FrameStatus Presenter::readPixels(int texture, uint32_t x, uint32_t y, uint32_t w, uint32_t hgt, uint8_t* out) {
+    Impl& s = *impl_;
+    const ContextHandles& h = s.h;
+    if (!s.frameOpen) return s.fail("readPixels called outside beginFrame/endFrame");
+    if (w == 0 || hgt == 0) return FrameStatus::Ok;
+    Frame& f = s.frames[s.frameIndex];
+    VkImage image = VK_NULL_HANDLE;
+    uint32_t iw = 0, ih = 0;
+    VkImageLayout layout;
+    VkPipelineStageFlags stage;
+    VkAccessFlags access;
+    VkBuffer dst;
+    if (texture < 0) {
+        if (!s.canCapture) return s.fail("Swapchain images do not support TRANSFER_SRC; cannot read pixels");
+        if (!s.ensureCaptureBuffer()) return s.fail("Allocating the capture buffer failed");
+        image = s.images[s.imageIndex];
+        iw = s.extent.width;
+        ih = s.extent.height;
+        layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dst = s.captureBuf;
+        s.endPass(f.cmd);
+        if (!s.swapStarted) { // nothing was drawn to the swapchain yet: it shows the frame's clear colour
+            const int bound = s.curOff;
+            s.curOff = -1;
+            if (!s.beginPass(f.cmd, nullptr)) return s.fail(s.error);
+            s.endPass(f.cmd);
+            s.curOff = bound;
+        }
+    } else {
+        VkImageView view;
+        VkFormat fmt;
+        if (!h.resources->renderTargetInfo(texture, &image, &view, &fmt, &iw, &ih)) return s.fail("readPixels: the texture is not a render target");
+        if (fmt != VK_FORMAT_R8G8B8A8_UNORM && fmt != VK_FORMAT_R8G8B8A8_SRGB) return s.fail("readPixels: only RGBA8 render targets can be read back");
+        if (x >= iw || y >= ih) return FrameStatus::Ok;
+        w = std::min(w, iw - x);
+        hgt = std::min(hgt, ih - y);
+        if (!s.ensureReadbackBuffer(static_cast<VkDeviceSize>(w) * hgt * 4)) return s.fail("Allocating the readback buffer failed");
+        layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+        access = VK_ACCESS_SHADER_READ_BIT;
+        dst = s.readbackBuf;
+        s.endPass(f.cmd); // an image that was the target goes back to SHADER_READ_ONLY_OPTIMAL
+    }
+    imageBarrier(f.cmd, image, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, stage, access, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    if (texture < 0) {
+        region.imageExtent = {iw, ih, 1};
+    } else {
+        region.imageOffset = {static_cast<int32_t>(x), static_cast<int32_t>(y), 0};
+        region.imageExtent = {w, hgt, 1};
+    }
+    vkCmdCopyImageToBuffer(f.cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, 1, &region);
+    imageBarrier(f.cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, layout, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, stage,
+                 access == VK_ACCESS_SHADER_READ_BIT ? VK_ACCESS_SHADER_READ_BIT : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+    VkBufferMemoryBarrier toHost{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+    toHost.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toHost.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    toHost.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toHost.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toHost.buffer = dst;
+    toHost.size = VK_WHOLE_SIZE;
+    vkCmdPipelineBarrier(f.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &toHost, 0, nullptr);
+    vkEndCommandBuffer(f.cmd);
+
+    const bool preCmd = s.recordUploads(f, false);
+    s.computeQueue.clear(); // recorded into the upload command buffer just now
+    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.waitSemaphoreCount = s.acquiredWaited ? 0 : 1;
+    si.pWaitSemaphores = &f.acquired;
+    si.pWaitDstStageMask = &waitStage;
+    VkCommandBuffer cmds[2] = {f.uploadCmd, f.cmd};
+    si.commandBufferCount = preCmd ? 2 : 1;
+    si.pCommandBuffers = preCmd ? cmds : &f.cmd;
+    VkResult r = h.timeline->submit(si, &f.serial);
+    if (r == VK_SUCCESS && s.stagingRecorded) h.staging->markSubmitted(f.serial);
+    s.stagingRecorded = false;
+    if (r != VK_SUCCESS) return mapResult(r) == FrameStatus::Error ? s.fail("vkQueueSubmit failed (VkResult " + std::to_string(r) + ")") : mapResult(r);
+    s.acquiredWaited = true;
+    r = h.timeline->waitSerial(f.serial);
+    if (r != VK_SUCCESS) return mapResult(r);
+
+    if (texture < 0) {
+        vmaInvalidateAllocation(h.allocator, s.captureAlloc, 0, VK_WHOLE_SIZE);
+        s.readCapture(); // RGBA8, logical orientation, row 0 at the top
+        const uint32_t lw = s.logicalW(), lh = s.logicalH();
+        for (uint32_t row = 0; row < hgt; ++row) {
+            const int64_t gl = static_cast<int64_t>(y) + row; // GL row from the bottom
+            uint8_t* dstRow = out + static_cast<size_t>(row) * w * 4;
+            if (gl < 0 || gl >= lh) {
+                std::memset(dstRow, 0, static_cast<size_t>(w) * 4);
+                continue;
+            }
+            const size_t srcRow = lh - 1 - static_cast<size_t>(gl);
+            for (uint32_t col = 0; col < w; ++col) {
+                if (x + col < lw) std::memcpy(dstRow + static_cast<size_t>(col) * 4, &s.captured[(srcRow * lw + x + col) * 4], 4);
+                else std::memset(dstRow + static_cast<size_t>(col) * 4, 0, 4);
+            }
+        }
+    } else {
+        vmaInvalidateAllocation(h.allocator, s.readbackAlloc, 0, VK_WHOLE_SIZE);
+        void* mapped = nullptr;
+        if (vmaMapMemory(h.allocator, s.readbackAlloc, &mapped) != VK_SUCCESS) return s.fail("Mapping the readback buffer failed");
+        std::memcpy(out, mapped, static_cast<size_t>(w) * hgt * 4);
+        vmaUnmapMemory(h.allocator, s.readbackAlloc);
+    }
+
+    // Carry on: a new command buffer, in the state the stream had left.
+    vkResetCommandPool(h.device, f.pool, 0);
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(f.cmd, &bi);
+    if (h.tierA) {
+        VkDescriptorSet table = h.layouts->globalTextureSet();
+        vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, h.layouts->pipelineLayout(), 1, 1, &table, 0, nullptr);
+    }
+    s.curPipeline = -1;
+    s.pushDirty = true; // the block (kept in pushShadow) is pushed again before the next draw
+    s.applyViewport(f.cmd);
+    s.applyScissor(f.cmd);
+    s.applyDepthStencil(f.cmd);
+    s.restoreBound(f.cmd);
+    return FrameStatus::Ok;
 }
 
 int Presenter::createPipeline(const char* name, const uint32_t* vertSpv, size_t vertWords, const uint32_t* fragSpv, size_t fragWords) {
@@ -2110,6 +2287,8 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 i += 3;
                 if (buf == VK_NULL_HANDLE) return s.fail("command stream: unknown vertex block");
                 vkCmdBindVertexBuffers(cmd, 0, 1, &buf, &off);
+                s.bound.vertex0 = buf;
+                s.bound.vertex0Offset = off;
                 break;
             }
             case cmd::Set0Data: {
@@ -2122,6 +2301,9 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 if (!ring.allocate(w + i, ubytes, w + i + uwords, sbytes, b)) return s.fail("command stream: Set0Data allocation failed (uniform data over 16 KB, or out of memory)");
                 i += uwords + swords;
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.h.layouts->pipelineLayout(), 0, 1, &b.set, 2, b.offsets);
+                s.bound.set0 = b.set;
+                s.bound.set0Offsets[0] = b.offsets[0];
+                s.bound.set0Offsets[1] = b.offsets[1];
                 break;
             }
             case cmd::BindConstants: {
@@ -2131,6 +2313,8 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 i += 3;
                 if (buf == VK_NULL_HANDLE) return s.fail("command stream: unknown vertex block (BindConstants)");
                 vkCmdBindVertexBuffers(cmd, 1, 1, &buf, &off);
+                s.bound.vertex1 = buf;
+                s.bound.vertex1Offset = off;
                 break;
             }
             case cmd::BindVertexBuffer: {
@@ -2141,6 +2325,8 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 const VkDeviceSize off = base + offset64(w[i + 1], w[i + 2]);
                 i += 3;
                 vkCmdBindVertexBuffers(cmd, 0, 1, &buf, &off);
+                s.bound.vertex0 = buf;
+                s.bound.vertex0Offset = off;
                 break;
             }
             case cmd::BindIndexBuffer: {
@@ -2149,6 +2335,9 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 uint64_t base, size;
                 if (!s.h.resources->bufferInfo(w[i], buf, base, size)) return s.fail("command stream: unknown index buffer");
                 vkCmdBindIndexBuffer(cmd, buf, base + offset64(w[i + 1], w[i + 2]), w[i + 3] == 0 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+                s.bound.index = buf;
+                s.bound.indexOffset = base + offset64(w[i + 1], w[i + 2]);
+                s.bound.indexType = w[i + 3] == 0 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
                 i += 4;
                 break;
             }
@@ -2157,6 +2346,9 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 VkBuffer buf = ring.vertexBlockBuffer(static_cast<uint32_t>(w[i]));
                 if (buf == VK_NULL_HANDLE) return s.fail("command stream: unknown index block");
                 vkCmdBindIndexBuffer(cmd, buf, offset64(w[i + 1], w[i + 2]), w[i + 3] == 0 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+                s.bound.index = buf;
+                s.bound.indexOffset = offset64(w[i + 1], w[i + 2]);
+                s.bound.indexType = w[i + 3] == 0 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
                 i += 4;
                 break;
             }
@@ -2168,6 +2360,7 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                     VkDescriptorSet set;
                     if (!s.h.resources->textureBinding(tex, &slot, &set)) return s.fail("command stream: unknown texture");
                     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.h.layouts->pipelineLayout(), 1, 1, &set, 0, nullptr);
+                    s.bound.set1 = set;
                 }
                 break;
             }
@@ -2215,6 +2408,9 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 if (!ring.externalStorageSet(buf, base, size, set)) return s.fail("command stream: out of descriptor sets");
                 const uint32_t offsets[2] = {0, 0};
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.h.layouts->pipelineLayout(), 0, 1, &set, 2, offsets);
+                s.bound.set0 = set;
+                s.bound.set0Offsets[0] = offsets[0];
+                s.bound.set0Offsets[1] = offsets[1];
                 break;
             }
             case cmd::Draw:

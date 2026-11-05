@@ -63,9 +63,15 @@ jobs:
         with: { distribution: temurin, java-version: '17' }
       - name: Install glslc
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends glslc
+      - name: Install the NDK and CMake the library asks for
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358" "cmake;3.22.1"
       - name: Build the Android library and the apps
         working-directory: gdx-vulkan-android
-        run: ./gradlew :library:assembleRelease :testapp:assembleDebug :demoapp:assembleDebug
+        run: |
+          chmod +x gradlew
+          ./gradlew :library:assembleRelease :testapp:assembleDebug :demoapp:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
           name: android

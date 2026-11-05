@@ -75,6 +75,9 @@ public:
     // Ends the pass, submits and presents. With `capture`, the frame is also copied back to the CPU (needs a swapchain
     // that supports TRANSFER_SRC) and waits for the GPU; read it with capturedPixels().
     FrameStatus endFrame(bool capture = false);
+    // glReadPixels: submits what has been recorded, waits for the GPU and copies a region of a render-target texture (RGBA8) or, with texture -1, of the swapchain
+    // (GL's y from the bottom) into `out` (w * h * 4 bytes), then carries on with the frame in a new command buffer. The GPU idles meanwhile: use it sparingly.
+    FrameStatus readPixels(int texture, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t* out);
 
     // Builds a graphics pipeline for the swapchain's format from SPIR-V (no vertex inputs; vertices come from
     // gl_VertexIndex). Triangle list, back-face culling with CCW front faces, no blending, no depth. Phase 1a only:
