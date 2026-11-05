@@ -17,9 +17,10 @@ public final class GlDemos {
     private GlDemos () {}
 
     static Demo create (String id) {
+        if (id.equals("sprites")) return new SpritesDemo();
         if (id.equals("shadows-stock")) return new StockShadowsDemo();
         if (id.equals("boids")) return new GpuBoidsOpenGlDemo();
-        throw new IllegalArgumentException("unknown demo '" + id + "': shadows-stock or boids");
+        throw new IllegalArgumentException("unknown demo '" + id + "': sprites, shadows-stock or boids");
     }
 
     public static void main (String[] args) {
@@ -43,6 +44,7 @@ public final class GlDemos {
                     "driver " + Gdx.gl.glGetString(GL20.GL_VENDOR) + ", GLSL " + Gdx.gl.glGetString(GL20.GL_SHADING_LANGUAGE_VERSION),
                     "core profile through libGDX's GL31 interface"};
                 DesktopClocks.install();
+                Compute.CURRENT[0] = new Gl31Compute();
                 timer = new GlTimer();
                 Backend.gpuNanos = timer::nanos;
                 demo.create();

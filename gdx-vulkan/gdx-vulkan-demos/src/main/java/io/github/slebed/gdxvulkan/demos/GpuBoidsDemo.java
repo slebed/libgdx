@@ -31,7 +31,7 @@ public final class GpuBoidsDemo implements Demo {
     private final float[] clearPush = VulkanComputeShader.newPush(), accumulatePush = VulkanComputeShader.newPush(), updatePush = VulkanComputeShader.newPush();
     private int clearGroups, boidGroups, visible;
     private float[] lights;
-    private boolean lit = Boolean.parseBoolean(System.getProperty("demo.lights", "true")), paused; // -Ddemo.lights=false starts with the lights off
+    private boolean lit = Boolean.parseBoolean(System.getProperty("demo.lights", "false")), paused; // -Ddemo.lights=true starts with the lights on
     private float time;
     private int frames;
     private PerspectiveCamera camera;
@@ -42,12 +42,13 @@ public final class GpuBoidsDemo implements Demo {
     }
 
     @Override public String summary () {
-        return count + " boids are simulated, culled and drawn on the GPU, lit by " + LIGHTS + " coloured point lights sorted into clusters. The CPU records a few dispatches and one draw call.";
+        return count + " boids are simulated, culled and drawn on the GPU: three compute dispatches, a culling pass and one indirect draw. Exactly the scene of the OpenGL version, "
+            + "pixel for pixel, so the numbers below can be compared.";
     }
 
     @Override public String[] notes () {
-        return new String[] {"libGDX has no class for this. On OpenGL you write it yourself" + (Controls.touch() ? "." : ": press C for a version with the same simulation, culling and indirect draw."),
-            "What it adds is the 500 clustered lights, and the CPU time the work takes.", "L switches the point lights on and off, Space pauses."};
+        return new String[] {"libGDX has no class for this; the OpenGL version is raw Gdx.gl31 code doing the same work." + (Controls.touch() ? "" : " Press C to start it beside this window."),
+            "Compare the frame, CPU and GPU lines at the bottom.", "L adds " + LIGHTS + " coloured point lights sorted into clusters: OpenGL has no equivalent here, so it is the one thing that is not like for like. Space pauses."};
     }
 
     @Override public String openGlCounterpart () {
@@ -141,7 +142,7 @@ public final class GpuBoidsDemo implements Demo {
 
         if (frames++ % 30 == 0) visible = swarm.readVisibleCount(); // the one read back, twice a second, for the number on screen
         hud.draw(title(), summary(), notes(), "boids: " + count + ", drawn after GPU culling: " + visible,
-            lit ? "lights: " + LIGHTS + " clustered point lights" : "lights: none (L turns them on)");
+            lit ? "lights: 1 directional + " + LIGHTS + " clustered point lights (not in the OpenGL version)" : "lights: 1 directional (as in the OpenGL version; L adds point lights)");
     }
 
     @Override public void pause () {}

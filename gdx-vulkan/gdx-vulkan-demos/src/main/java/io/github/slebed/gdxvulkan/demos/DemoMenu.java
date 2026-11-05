@@ -16,9 +16,10 @@ public final class DemoMenu implements ApplicationListener {
     }
 
     private static final Factory[] DEMOS = {
+        () -> new SpritesDemo(),
+        () -> new GpuBoidsDemo(),
         () -> new StockShadowsDemo(),
-        () -> new CascadedShadowsDemo(),
-        () -> new GpuBoidsDemo()};
+        () -> new CascadedShadowsDemo()};
 
     private final Demo[] listed = new Demo[DEMOS.length];
     private final Launcher launcher;

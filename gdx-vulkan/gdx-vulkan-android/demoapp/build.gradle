@@ -42,7 +42,7 @@ android.sourceSets.main.jniLibs.srcDir nativesDir
 def sharedJava = layout.buildDirectory.dir('generated/demos-java')
 def copyDemos = tasks.register('copyDemoSources', Copy) {
     from('../../gdx-vulkan-demos/src/main/java/io/github/slebed/gdxvulkan/demos') {
-        exclude 'VulkanDemos.java', 'GlDemos.java', 'GpuBoidsOpenGlDemo.java', 'OpenGlLauncher.java', 'GlTimer.java', 'DesktopClocks.java'
+        exclude 'VulkanDemos.java', 'GlDemos.java', 'OpenGlLauncher.java', 'GlTimer.java', 'DesktopClocks.java'
         into 'io/github/slebed/gdxvulkan/demos'
     }
     into sharedJava
@@ -51,6 +51,7 @@ def copyDemos = tasks.register('copyDemoSources', Copy) {
 def sharedResources = layout.buildDirectory.dir('generated/demos-resources')
 def copyFont = tasks.register('copyDemoFont', Copy) {
     from('../../test-assets/data') { include 'lsans.ttf'; into 'data' }
+    from('../../gdx-vulkan-demos/src/main/resources/demos') { into 'demos' } // the OpenGL boids' shaders
     into sharedResources
 }
 android.sourceSets.main.java.srcDir sharedJava

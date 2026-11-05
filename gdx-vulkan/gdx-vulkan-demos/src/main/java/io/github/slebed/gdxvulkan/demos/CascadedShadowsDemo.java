@@ -35,16 +35,16 @@ public final class CascadedShadowsDemo implements Demo {
     }
 
     @Override public String summary () {
-        return "The same road as the stock demo, with " + CASCADES + " cascaded shadow maps. stock libGDX has one map; here every distance gets the resolution it needs.";
+        return "The road of the stock shadow demo, with " + CASCADES + " cascaded shadow maps, which stock libGDX does not have: a feature demo, not a comparison. Every distance gets the resolution it needs.";
     }
 
     @Override public String[] notes () {
         return new String[] {"Every column to the end of the road has a shadow.", "Shadows next to the camera are sharp.",
-            "Press C to start the stock OpenGL version beside this window.", "Space pauses the sun and the camera."};
+            "For the like-for-like comparison with OpenGL, use the stock shadows demo.", "Space pauses the sun and the camera."};
     }
 
     @Override public String openGlCounterpart () {
-        return "shadows-stock"; // the closest stock libGDX can get: one shadow map
+        return null; // stock libGDX has no cascaded shadows: nothing to put beside it
     }
 
     @Override public void create () {

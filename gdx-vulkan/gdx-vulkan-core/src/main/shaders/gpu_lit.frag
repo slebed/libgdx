@@ -11,6 +11,7 @@
 // VulkanGpuInstances: texture * a per-instance tint, a constant directional light and ambient term, plus the point lights of the fragment's cluster
 // (light_cull.comp). The cluster is found from the pixel (the screen's top row first, as the swapchain is drawn) and the exponential depth slice.
 layout(constant_id = 1) const bool C_TEXTURE = false;
+layout(constant_id = 2) const bool C_LIGHTS = true; // false when there are no point lights: the cluster lists are not read
 
 layout(location = 0) in vec3 v_world;
 layout(location = 1) in vec3 v_normal;
@@ -38,6 +39,10 @@ void main() {
     const vec3 n = normalize(v_normal);
     vec3 light = vec3(0.12) + vec3(0.55, 0.52, 0.48) * max(dot(n, normalize(vec3(0.4, 0.8, 0.3))), 0.0);
 
+    if (!C_LIGHTS) {
+        outColor = vec4(albedo * light, 1.0);
+        return;
+    }
     const uint cx = w[H_CLUSTER], cy = w[H_CLUSTER + 1u], cz = w[H_CLUSTER + 2u], maxPer = w[H_CLUSTER + 3u];
     const float near = f(H_CAMERA + 3u), far = f(H_PROJ);
     const uint tx = min(uint(gl_FragCoord.x / float(w[H_COUNTS + 2u]) * float(cx)), cx - 1u);

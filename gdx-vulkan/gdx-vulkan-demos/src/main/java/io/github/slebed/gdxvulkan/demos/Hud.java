@@ -5,6 +5,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
+import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator;
 import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator.FreeTypeFontParameter;
@@ -25,7 +26,7 @@ public final class Hud implements Disposable {
     private static final Color BODY = new Color(0.95f, 0.96f, 1f, 1f);
     private static final Color STATS = new Color(0.55f, 0.95f, 0.7f, 1f);
 
-    private final SpriteBatch batch = new SpriteBatch();
+    private final Batch batch = Backend.vulkan ? new io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch() : new SpriteBatch(); // the batch of the backend the demo runs on
     private final ShapeRenderer shapes = new ShapeRenderer();
     private final FreeTypeFontGenerator generator = new FreeTypeFontGenerator(Gdx.files.classpath("data/lsans.ttf"));
     private final GlyphLayout layout = new GlyphLayout();
@@ -64,7 +65,7 @@ public final class Hud implements Disposable {
         if (Controls.touch()) { // no keyboard: the notes about C go, the touch controls come
             final java.util.ArrayList<String> kept = new java.util.ArrayList<String>();
             for (String note : notes) if (!note.startsWith("Press C")) kept.add(note);
-            if (touchHint) kept.add("Touch: a tap on the left half of the screen is Space, on the right half L. The Back button returns to the menu.");
+            if (touchHint) kept.add("Touch: a tap on the left half of the screen is Space, on the right half L." + (Backend.menu ? " The Back button returns to the menu." : ""));
             notes = kept.toArray(new String[0]);
         }
         final String[] stats = new String[Backend.lines.length + frameStats.lines().length + demoStats.length];

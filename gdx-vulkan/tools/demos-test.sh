@@ -28,7 +28,7 @@ adb_ install -r "$APK" | tail -1
 adb_ shell input keyevent KEYCODE_WAKEUP
 adb_ shell wm dismiss-keyguard
 status=0
-for n in 1 2 3; do
+for n in 1 2 3 4; do
   adb_ shell am force-stop "$PKG"
   adb_ shell am start -n "$PKG/io.github.slebed.gdxvulkan.demoapp.DemosActivity" --ei start "$n" --ei logSeconds 2 --ez vsync false "$@" >/dev/null
   sleep "$SECONDS_EACH"

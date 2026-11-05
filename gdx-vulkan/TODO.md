@@ -71,6 +71,13 @@ on the Adreno 840 and 1.1 s on the Adreno 650, each further shader 10 to 25 ms, 
 
 Built: stock shadow recipe (both backends), cascaded shadows, GPU boids with an OpenGL 4.3 version. Decisions are in the checklist "Demos" section.
 - **[decide] Owner's review of the demo code and looks** (clean, copyable, visually interesting, readable text at your screen size).
+- **[bug/perf] Boids on the phone are slower than OpenGL ES** (Adreno 650, Tier B): 112 fps against about 138 at 60,000 boids, 432 against 463 at 10,000, GPU bound on both with the same compute and
+  draw work. Candidates: the barriers between dispatches, the 32-bit depth image, the indirect draw, Tier B's render pass. Find it with timestamps around each stage.
+- **[verify] Energy.** Nothing measures it yet. Over USB the phone charges; a run unplugged (wireless adb) with `dumpsys batterystats` or the battery's current would settle it. On the desktop the card's
+  power at 60 fps was the same on both backends.
+- **[build] GPU time for OpenGL ES on the phone** (`GL_EXT_disjoint_timer_query` needs a small JNI binding; the Android SDK has none).
+- **[done 2026-11-04] The comparison demos**: sprites, boids and shadows run the same scene on both backends (`tools/compare-demos.sh`, `tools/compare-phone.sh`, `GlDemosActivity`); the cascaded shadows demo is
+  labelled a feature demo with no OpenGL counterpart. Results are in the README ("Demo measurements"), including the cases gdx-vulkan does not win.
 - **[done 2026-11-04] The demo app on Android** (`gdx-vulkan-android/demoapp`, `tools/demos-test.sh`; touch menu, three demos, Back returns). Passes on the Galaxy S20 FE (Adreno 650, Tier B); not yet run on the REDMAGIC (USB only). The owner's review of the demos' code and looks is still to do.
 - **[build] More demos:** sprite storm (100k+ sprites, stock against Vulkan), post-processing over a Scene2D UI; a scene with clustered lights and shadows once section 3 allows.
 - **[build] Demo numbers on a phone and on the second GPU** (the table in the README is the RTX 5080 only).

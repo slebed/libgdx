@@ -12,7 +12,7 @@ final class Controls {
     private Controls () {}
 
     static boolean touch () {
-        return Gdx.app.getType() == Application.ApplicationType.Android;
+        return Gdx.app != null && Gdx.app.getType() == Application.ApplicationType.Android;
     }
 
     static boolean justPressed (int key) {

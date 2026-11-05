@@ -1,12 +1,6 @@
 package io.github.slebed.gdxvulkan.demoapp;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-
 import android.os.Bundle;
-import android.os.Debug;
-import android.os.Process;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -44,8 +38,9 @@ public class DemosActivity extends VulkanAndroidApplication {
         final int start = getIntent().getIntExtra("start", 0);
         final int logSeconds = getIntent().getIntExtra("logSeconds", 0);
         if (getIntent().hasExtra("boids")) System.setProperty("demo.boids", String.valueOf(getIntent().getIntExtra("boids", 0)));
-        final File log = new File(getFilesDir(), "gdxvk-demos.log");
-        if (logSeconds > 0) log.delete();
+        if (getIntent().hasExtra("sprites")) System.setProperty("demo.sprites", String.valueOf(getIntent().getIntExtra("sprites", 0)));
+        if (getIntent().hasExtra("mode")) System.setProperty("demo.mode", String.valueOf(getIntent().getIntExtra("mode", 0)));
+        final PhoneStats stats = new PhoneStats(getFilesDir(), logSeconds);
         final GdxVkConfig vkConfig = new GdxVkConfig();
         vkConfig.forceTierB = getIntent().getBooleanExtra("forceTierB", false);
         final AndroidApplicationConfiguration config = new AndroidApplicationConfiguration();
@@ -55,16 +50,13 @@ public class DemosActivity extends VulkanAndroidApplication {
         config.useImmersiveMode = true;
         final DemoMenu menu = new DemoMenu(null);
         initialize(new ApplicationAdapter() {
-            private long lastLog;
-
             @Override public void create () {
                 final VulkanCaps caps = GdxVkFrame.current().context().caps();
                 Backend.lines = new String[] {"Vulkan " + Backend.vulkanVersion(caps.deviceApiVersion) + ", gdx-vulkan", caps.deviceName,
                     "driver " + (caps.driverInfo == null || caps.driverInfo.isEmpty() ? "(not reported)" : caps.driverInfo),
                     caps.tier == VulkanCaps.Tier.A ? "modern code path: bindless textures, dynamic rendering" : "compatibility code path (Tier B)"};
+                Backend.vulkan = true;
                 Backend.gpuNanos = () -> GdxVkFrame.current().presenter().gpuFrameNanos();
-                Backend.processCpuNanos = () -> Process.getElapsedCpuTime() * 1_000_000L; // milliseconds: coarse, but a window is half a second
-                Backend.threadCpuNanos = Debug::threadCpuTimeNanos;
                 Gdx.input.setCatchKey(Input.Keys.BACK, true);
                 Gdx.input.setInputProcessor(new com.badlogic.gdx.InputAdapter() {
                     @Override public boolean keyDown (int keycode) {
@@ -83,14 +75,7 @@ public class DemosActivity extends VulkanAndroidApplication {
 
             @Override public void render () {
                 menu.render();
-                final long now = System.nanoTime();
-                if (logSeconds > 0 && now - lastLog > logSeconds * 1_000_000_000L) {
-                    lastLog = now;
-                    try (FileWriter w = new FileWriter(log, true)) {
-                        w.write("[demo] " + Backend.lines[0] + " | " + Backend.lines[3] + " | " + String.join(" | ", Backend.latestStats()) + "\n");
-                    } catch (IOException ignored) {
-                    }
-                }
+                stats.frame();
             }
 
             @Override public void pause () {

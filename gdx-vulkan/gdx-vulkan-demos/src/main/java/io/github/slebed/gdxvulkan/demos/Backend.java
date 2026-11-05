@@ -15,6 +15,12 @@ public final class Backend {
     /** The GPU time of a recent frame in nanoseconds, 0 when it is not known. gdx-vulkan reads timestamps from the device; the OpenGL main uses a timer query. */
     public static volatile LongSupplier gpuNanos = () -> 0L;
 
+    /** True in the gdx-vulkan apps: the demos that name a batch use the Vulkan one (a rename of the stock class) instead of stock. */
+    public static volatile boolean vulkan;
+
+    /** False when the app has no demo menu (the OpenGL activity on a phone runs one demo): the on-screen text then leaves out the menu hints. */
+    public static volatile boolean menu = true;
+
     /** Set by the Android activity when the system Back button was pressed and the view did not take it; the demos read it as Esc. */
     public static volatile boolean back;
 

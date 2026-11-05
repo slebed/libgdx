@@ -137,21 +137,48 @@ the 2D and 3D scenes differ in at most 0.2% of pixels, at the ends of lines and 
 
 ### Demo measurements
 
-The demo app (below) shows these numbers on screen for both backends. RTX 5080 (PC-5080), window 1280 x 720, vsync off, 4,000 frames, as shown on screen:
+The demos run the **same scene on both backends** and show the same numbers on screen (frame time, CPU per frame over all threads, CPU of the render thread, GPU time). The
+scenes match pixel for pixel where a comparison is claimed (the boids' shaders do the same arithmetic on both; the sprite demo is the same `Batch` code with one line changed).
+Reproduce them with `tools/compare-demos.sh <sprites|boids|shadows>` (desktop) and `tools/compare-phone.sh <serial> <sprites|boids|shadows>` (phone, over USB).
 
-| Demo | Backend | Frame | CPU per frame (all threads) | Render thread | GPU per frame |
-|---|---|---|---|---|---|
-| Shadows, stock libGDX code | gdx-vulkan (shim) | 0.86 ms | 0.96 ms (1.1 cores) | 0.83 ms | 0.06 ms |
-| Shadows, stock libGDX code | OpenGL | 0.55 ms | 0.97 ms (1.7 cores) | 0.33 ms | 0.04 ms |
-| Cascaded shadows | gdx-vulkan | 1.11 ms | 1.35 ms (1.2 cores) | 1.10 ms | 0.10 ms |
-| 250,000 GPU boids, 500 lights | gdx-vulkan | 1.51 ms | 0.52 ms (0.3 cores) | 0.52 ms | 1.39 ms |
-| 250,000 GPU boids, no lights | gdx-vulkan | 1.40 ms | 0.52 ms (0.4 cores) | 0.48 ms | 1.27 ms |
-| 250,000 GPU boids, one light | OpenGL (compute, culling, indirect draw) | 2.03 ms | 2.53 ms (1.2 cores) | 0.57 ms | 1.73 ms |
+**Sprites** (`Batch` code identical, stock `SpriteBatch` against `VulkanSpriteBatch`; each sprite from one of 128 textures):
 
-Reading them: with the same GPU work (the boids) gdx-vulkan spends about a fifth of the CPU, the render thread costs the same and the difference is the OpenGL driver's own
-threads, which partly wait. Stock libGDX code through the shim does **not** use less CPU than on OpenGL (the same 0.96 ms in total, more of it on the render thread); the saving
-is for the `Vulkan...` classes and the GPU-driven path. The GPU time of the boids differs (1.27 against 1.73 ms), but the two versions run different shader code, so it says
-nothing about the API; the shadow demos are CPU-bound and the GPU is idle 90% of each frame.
+| Machine | Mode | Stock libGDX, OpenGL | gdx-vulkan | Ratio |
+|---|---|---|---|---|
+| RTX 5080, 20,000 sprites | scattered textures | 20 fps, 61 to 72 ms CPU | 400 fps, 2.4 ms CPU | **20x** |
+| | sorted by texture | 865 fps, 1.8 ms CPU | 606 fps, 1.75 ms CPU | 0.70x |
+| | one atlas | 1,096 fps, 1.4 ms CPU | 1,028 fps, 1.0 ms CPU | 0.94x |
+| Galaxy S20 FE (Adreno 650), 10,000 sprites | scattered textures | 1.1 fps | 22 fps | **20x** |
+| | sorted by texture | 306 fps, 3.3 ms CPU | 350 fps, 2.3 ms CPU | 1.14x |
+| | one atlas | 394 fps, 1.8 ms CPU | 508 fps, 1.5 ms CPU | 1.29x |
+
+**GPU-driven boids** (compute simulation, GPU culling, one indirect draw; one directional light on both; no lights is the like-for-like setting, the 500 point lights are an extra the
+OpenGL version does not have):
+
+| Machine | Boids | Stock libGDX, OpenGL | gdx-vulkan | Ratio |
+|---|---|---|---|---|
+| RTX 5080 | 250,000 | 413 fps, 2.8 ms CPU, GPU 2.16 ms | 726 fps, 0.77 ms CPU, GPU 1.28 ms | **1.75x** |
+| RTX 5080 | 10,000 | 1,653 fps, 0.89 ms CPU | 1,871 fps, 0.57 ms CPU | 1.13x |
+| RTX 5080, vsync, 60 fps | 250,000 | 4.0 ms CPU, GPU 2.25 ms | 1.5 ms CPU, GPU 1.81 ms | |
+| Galaxy S20 FE | 10,000 | 463 fps | 432 fps | 0.93x |
+| Galaxy S20 FE | 60,000 | about 138 fps | 112 fps | 0.81x |
+
+**Stock libGDX code through the shim** (the shadow demo, no Vulkan classes): RTX 5080 1,648 fps and 0.74 ms CPU on OpenGL, 1,092 fps and 0.89 ms CPU on gdx-vulkan (0.66x).
+
+What the numbers say:
+
+- **Many textures is the case where gdx-vulkan wins big**: 20x on both the desktop card and the phone, and the Vulkan batch needs no change to the drawing code. With a texture atlas the two are
+  close on the desktop and gdx-vulkan is 1.3x ahead on the phone. Sorting sprites by texture, which a careful developer does to help stock libGDX, closes much of the gap on the desktop and
+  not on the phone.
+- **GPU-driven work** (compute, culling, indirect draws): the CPU cost is a fifth to a third of OpenGL's at the same GPU work, and with a large workload the desktop card finishes it faster
+  (1.75x at 250,000 boids). On the phone the same boid demo is **slower** than OpenGL ES by 7 to 19%, GPU bound on both; that gap is open (see `TODO.md`).
+- **Stock code through the shim is not faster**: it costs as much CPU as OpenGL and renders a little slower. The shim is for porting without changing code; the gains come with the
+  `Vulkan...` classes.
+- **Energy is not measured.** A phone cannot be measured over USB (it charges), and on the desktop card the power at the same frame rate was the same within noise (about 34 to 35 W at 60 fps).
+  What the demos do show is the CPU and GPU time per frame; at equal frame rate, less busy time is the only energy claim that these measurements support, and it holds for the many-texture and GPU-driven
+  cases on the desktop and for the sorted and many-texture sprites on the phone, not for the atlas case on the phone at a fixed 118 Hz (3.2 ms CPU on OpenGL, 3.8 to 4.1 ms on gdx-vulkan).
+- The GL phone numbers carry no GPU time (the Android SDK has no binding for the timer query). The boid demo's per-frame GPU time on the two backends is measured in different ways (timestamps, a timer
+  query); the frame time is the comparison to trust.
 
 ### Adding a device
 
@@ -247,15 +274,16 @@ Vulkan context yourself (a test, a tool), pass the frame explicitly: `new Vulkan
 
 ### Demos
 
-`gradlew :gdx-vulkan-demos:demos` opens the demo app, a menu of demos on gdx-vulkan (keys 1 to 3 start one, Esc comes back). In a demo, **C starts the stock OpenGL version in a window beside it**, same size, so the two can be watched together. Each demo is a short class you can copy; the text on screen says what it is about and is sized from the window height.
+`gradlew :gdx-vulkan-demos:demos` opens the demo app, a menu of demos on gdx-vulkan (keys 1 to 4 start one, Esc comes back). In a demo, **C starts the stock OpenGL version in a window beside it**, same size, so the two can be watched together. Each demo is a short class you can copy; the text on screen says what it is about and is sized from the window height.
 
-**On a phone:** `gradlew :demoapp:assembleDebug` in `gdx-vulkan-android` builds `demoapp-debug.apk` (package `io.github.slebed.gdxvulkan.demos`), the same demo classes compiled from the desktop module's source. A tap on a button starts a demo; in a demo a tap on the left half of the screen is Space and on the right half is L, and Back returns to the menu. The boid demo defaults to 10,000 boids on a phone (`--ei boids N`). `tools/demos-test.sh <serial>` runs each demo for a while, prints the numbers it shows and saves screenshots (`--ei start N --ei logSeconds S` write them to `files/gdxvk-demos.log`). CPU time on the phone comes from `android.os.Process` (millisecond resolution; read over half a second).
+**On a phone:** `gradlew :demoapp:assembleDebug` in `gdx-vulkan-android` builds `demoapp-debug.apk` (package `io.github.slebed.gdxvulkan.demos`), the same demo classes compiled from the desktop module's source. A tap on a button starts a demo; in a demo a tap on the left half of the screen is Space and on the right half is L, and Back returns to the menu. The boid demo defaults to 10,000 boids on a phone (`--ei boids N`). The same app has `GlDemosActivity`, which runs the sprite, boid and shadow demos on **stock libGDX and OpenGL ES** (libGDX's own `AndroidApplication`), for measuring against gdx-vulkan on the same phone: `tools/compare-phone.sh <serial> sprites|boids|shadows`. `tools/demos-test.sh <serial>` runs each demo for a while, prints the numbers it shows and saves screenshots (`--ei start N --ei logSeconds S` write them to `files/gdxvk-demos.log`). CPU time on the phone comes from `android.os.Process` (millisecond resolution; read over half a second).
 
 | Demo | What it shows | Stock libGDX equivalent |
 |---|---|---|
-| 1 Shadows, stock libGDX code | libGDX's own shadow recipe (`DirectionalShadowLight`, `DepthShaderProvider`), the same class on both backends | yes: the same code on OpenGL |
-| 2 Cascaded shadows | the same road with four cascaded shadow maps: sharp shadows near the camera and shadows to the end of the road | no: one shadow map (demo 1) |
-| 3 GPU boids | 250,000 boids simulated, culled and drawn on the GPU, lit by 500 clustered point lights | libGDX has no class for it, but OpenGL 4.3 can do the simulation, the culling and an indirect draw: `demoGl -Ddemo=boids` does, with `Gdx.gl31` compute shaders, and has one directional light instead of the 500 clustered ones |
+| 1 Sprites from many textures | thousands of moving sprites from 128 textures, with a mode that sorts them or packs one atlas (key L) | yes: the same `Batch` code on OpenGL, `new SpriteBatch()` instead of `new VulkanSpriteBatch()` |
+| 2 GPU boids | boids simulated, culled and drawn on the GPU, pixel for pixel the OpenGL version's scene; key L adds 500 clustered point lights | yes: `demoGl -Ddemo=boids` does the same work with compute shaders (not lights) |
+| 3 Shadows, stock libGDX code | libGDX's own shadow recipe (`DirectionalShadowLight`, `DepthShaderProvider`), the same class on both backends | yes: the same code on OpenGL |
+| 4 Cascaded shadows | the same road with four cascaded shadow maps: a feature stock libGDX does not have | no |
 
 `gradlew :gdx-vulkan-demos:demoGl -Ddemo=shadows-stock` (or `boids`) runs a demo on OpenGL alone. Options: `-Ddemo.boids=N`, `-Ddemo.vsync=true` (off by default, so the frame rate shown is what the GPU can do), `-Ddemo.width=` and `-Ddemo.height=`, `-Ddemo.lights=false`, `-Ddemo.start=2 -Ddemo.screenshot=out.png` (saves a picture and leaves). Every demo shows the same fields on both backends: the API and its version, the device, the driver and the code path, then the frame time, the CPU time per frame (all threads of the process, the graphics driver's own included), the render thread's CPU time per frame, and the GPU time per frame. gdx-vulkan reads the GPU time from timestamp queries (`GdxVkPresenter.gpuFrameNanos()`); the OpenGL main uses a timer query. The OpenGL driver's device name carries a `/PCIe/SSE2` suffix (the bus the card is on and the CPU instruction set the driver's software paths use); the Vulkan device name has none, so the OpenGL one is cut there to read the same. On the RTX 5080 at 1280 x 720 with vsync off, the boids take 0.5 ms of CPU a frame on gdx-vulkan and 2.5 ms on OpenGL for the same work (simulation, culling, indirect draw), and the stock shadow code through the shim takes about the same CPU in total as on OpenGL (1.0 ms) but more of it on the render thread; `docs/CHECKLIST.md` has the table and what the numbers do and do not show.
 

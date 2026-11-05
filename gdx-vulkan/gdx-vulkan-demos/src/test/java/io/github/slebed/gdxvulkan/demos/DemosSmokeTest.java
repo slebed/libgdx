@@ -63,20 +63,25 @@ class DemosSmokeTest {
         return Boolean.getBoolean("gdxvulkan.forceTierB");
     }
 
-    @Test void theStockShadowsDemoDraws () throws IOException {
+    @Test void theSpritesDemoDraws () throws IOException {
         needDisplay();
         assertDrawn(run(1));
+    }
+
+    @Test void theStockShadowsDemoDraws () throws IOException {
+        needDisplay();
+        assertDrawn(run(3));
     }
 
     @Test void theCascadedShadowsDemoDraws () throws IOException {
         needDisplay();
         assumeFalse(tierB(), "cascaded shadow maps need the modern code path (Vulkan 1.3)");
-        assertDrawn(run(2));
+        assertDrawn(run(4));
     }
 
     @Test void theGpuBoidsDemoDraws () throws IOException {
         needDisplay();
         assumeFalse(tierB(), "GPU-driven instancing needs the modern code path (Vulkan 1.3)");
-        assertDrawn(run(3));
+        assertDrawn(run(2));
     }
 }

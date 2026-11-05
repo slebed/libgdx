@@ -15,6 +15,7 @@ uniform mat4 u_projView;
 
 out vec3 v_normal;
 out vec2 v_texCoords;
+flat out uint v_instance;
 
 float f(uint i) {
     return uintBitsToFloat(b[i]);
@@ -25,7 +26,8 @@ vec3 rotate(vec4 q, vec3 v) {
 }
 
 void main() {
-    const uint base = index[gl_InstanceID] * 12u;
+    v_instance = index[gl_InstanceID];
+    const uint base = v_instance * 12u;
     const vec3 position = vec3(f(base), f(base + 1u), f(base + 2u));
     const float scale = f(base + 3u);
     const vec4 rotation = vec4(f(base + 4u), f(base + 5u), f(base + 6u), f(base + 7u));

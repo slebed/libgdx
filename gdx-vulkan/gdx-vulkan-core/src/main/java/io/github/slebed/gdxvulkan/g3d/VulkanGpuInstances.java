@@ -64,7 +64,7 @@ public class VulkanGpuInstances implements Disposable {
     private final float[] pushReset = VulkanComputeShader.ints(VulkanComputeShader.newPush(), 0, 0, 0, 0);
     private final float[] pushCull = VulkanComputeShader.ints(VulkanComputeShader.newPush(), 1, 0, 0, 0);
     private final float[] pushLights = VulkanComputeShader.newPush();
-    private int pipelineId = -1;
+    private int pipelineId = -1, pipelineIdUnlit = -1;
     private Object pipelineOwner;
 
     /**
@@ -158,7 +158,7 @@ public class VulkanGpuInstances implements Disposable {
 
         cull.dispatch(1, pushReset, buffer); // mode 0: reset the indirect command
         cull.dispatch(VulkanComputeShader.groups(Math.max(instanceCount, 1), 256), pushCull, buffer);
-        lightCull.dispatch(VulkanComputeShader.groups(CLUSTERS_X * CLUSTERS_Y * CLUSTERS_Z, 64), pushLights, buffer);
+        if (lightCount > 0) lightCull.dispatch(VulkanComputeShader.groups(CLUSTERS_X * CLUSTERS_Y * CLUSTERS_Z, 64), pushLights, buffer); // no lights: no cluster work at all
 
         final CommandStream s = frame.stream();
         gl.glEnable(GL20.GL_DEPTH_TEST);
@@ -166,7 +166,7 @@ public class VulkanGpuInstances implements Disposable {
         gl.glDepthMask(true);
         gl.glEnable(GL20.GL_CULL_FACE);
         gl.glCullFace(GL20.GL_BACK);
-        s.bindPipeline(pipeline());
+        s.bindPipeline(pipeline(lightCount > 0));
         s.bindStorage(buffer);
         int slot = 0;
         if (texture != null && hasTexCoords()) {
@@ -208,16 +208,18 @@ public class VulkanGpuInstances implements Disposable {
     }
 
     /** The draw pipeline on the frame's current presenter; built again only when the presenter was replaced (no allocation per frame). */
-    private int pipeline () {
+    private int pipeline (boolean lit) {
         final Object presenter = frame.presenter();
         if (presenter != pipelineOwner) {
-            pipelineId = createPipeline();
+            pipelineId = createPipeline(true);
+            pipelineIdUnlit = createPipeline(false);
             pipelineOwner = presenter;
         }
-        return pipelineId;
+        return lit ? pipelineId : pipelineIdUnlit;
     }
 
-    private int createPipeline () {
+    /** @param lit whether the fragment shader looks up the point lights of its cluster; without lights it does not read the cluster lists at all */
+    private int createPipeline (boolean lit) {
         final VertexAttributes va = mesh.getVertexAttributes();
         final GdxVkPipelineDesc d = new GdxVkPipelineDesc();
         d.stride = va.vertexSize;
@@ -233,8 +235,8 @@ public class VulkanGpuInstances implements Disposable {
         if (!hasNormal) throw new GdxRuntimeException("gdx-vulkan: VulkanGpuInstances needs a mesh with normals");
         d.cullMode = GdxVkPipelineDesc.CULL_BACK;
         final boolean tex = texture != null && hasTexCoords();
-        d.specConstants = new int[] {tex ? 1 : 0};
-        return frame.pipeline("gpuinst|" + va.vertexSize + "|" + (tex ? "t" : "-") + "|" + va.getMask(), "gpuinstances", "gpu_lit_v" + (hasTexCoords() ? 1 : 0) + ".vert", "gpu_lit.frag", d);
+        d.specConstants = new int[] {tex ? 1 : 0, lit ? 1 : 0};
+        return frame.pipeline("gpuinst|" + va.vertexSize + "|" + (tex ? "t" : "-") + (lit ? "l" : "-") + "|" + va.getMask(), "gpuinstances", "gpu_lit_v" + (hasTexCoords() ? 1 : 0) + ".vert", "gpu_lit.frag", d);
     }
 
     private static final java.util.Map<GdxVkContext, Integer> WHITE = new java.util.WeakHashMap<GdxVkContext, Integer>();
