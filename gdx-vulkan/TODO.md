@@ -72,8 +72,12 @@ Built: stock shadow recipe (both backends), cascaded shadows, GPU boids with an 
   against 0.2. The rest is `ShapeRenderer` through the shim and the glyph vertex copy; `VulkanPolygonSpriteBatch` has the same per-vertex puts (line 196) and is not changed.
 - **[done 2026-11-04] Sprites sorted by texture on the Adreno 840 were 0.2 to 0.3x of OpenGL ES.** A flush whose texture runs average 16 sprites or more now goes out as one draw per run with the slot in the
   push constants (`docs/DRIVER_NOTES.md`): 952 fps against 470 without text, up from 71 to 116. Scattered textures went from 62 to 180 fps on the same phone (the faster expansion).
-- **[perf] One texture atlas on the Adreno 840 is 0.81x of OpenGL ES** (985 against 1,217 fps, 10,000 sprites, no text): 0.80 ms of GPU time against 0.47. Not the texture index (a single texture already takes
-  its slot from the push constants). Candidates: the bindless table read, the vertex fetch format, the blend state, the render pass. Use GPU timestamps around the flush.
+- **[perf] One texture atlas on the Adreno 840 is 0.81x of OpenGL ES** (985 against 1,217 fps, 10,000 sprites, no text). At that frame rate (about 1 ms) the render thread is the limit on gdx-vulkan (0.92 ms of CPU
+  against 0.73 ms), so the gap looks like a fixed cost per frame (present, acquire, submit: 0.2 to 0.3 ms) rather than the GPU; its "GPU time" (0.80 against 0.47 ms) spans the whole frame while the OpenGL timer
+  covers the work only. It disappears at the display's rate. **Not investigated on the phone yet** (the REDMAGIC was not connected for this round): record per-stage CPU time with `GDXVK_PROFILE=1` there.
+- **[perf] Total CPU per frame at the display's rate is higher on gdx-vulkan on the Galaxy S20** (10,000 boids, 118 fps, vsync): per-thread ticks over 8 s were 256 for the render thread against 221 for OpenGL ES's
+  `GLThread`, and about 90 more in other threads (a second thread named `gdxvk-render`, which is a native thread the render thread started, an unnamed Java `Thread-5`, three binder threads), 350 against 250 in all.
+  This is the likely source of the +6% battery power measured on the REDMAGIC. Find the unnamed thread and the binder traffic (a `simpleperf` run on a profileable build; `adb shell run-as` cannot reach it).
 - **[perf] Scattered textures on the Adreno 650** (Tier B, 10,000 sprites): 22 fps, 38 ms of GPU time: Tier B binds a descriptor set per texture change; a bindless table needs the 1.3 features the driver lacks.
 - **[verify] The Galaxy S20's OpenGL ES boids are 3.7x slower when no 2D draw follows the scene** (142 against 529 fps): any draw after the scene (even two filled rectangles) fixes it, the layout work alone does
   not, and `glMapBufferRange` is not the cause. A tile-based driver behaviour (binning mode?); the README reads the rows with the text on screen. Nothing is wrong in gdx-vulkan.
