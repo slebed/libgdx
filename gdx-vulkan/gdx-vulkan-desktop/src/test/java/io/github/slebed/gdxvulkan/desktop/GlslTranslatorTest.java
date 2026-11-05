@@ -70,6 +70,16 @@ class GlslTranslatorTest {
         assertEquals(64, tex.sampler("u_sampler0").slotOffset);
     }
 
+    @Test void aFragmentThatWritesNoColourOutputsZeroAndFragCoordIsTheOpenGlOne () throws Exception {
+        final String vert = "attribute vec3 a_position;\nuniform mat4 u_proj;\nvoid main() {\n    gl_Position = u_proj * vec4(a_position, 1.0);\n}\n";
+        final String frag = "uniform vec2 u_resolution;\nvoid main() {\n    vec2 uv = gl_FragCoord.xy / u_resolution;\n    if (uv.x > 0.5) gl_FragColor = vec4(1.0);\n}\n";
+        final Translation t = GlslTranslator.translate("nocolour", vert, frag, null, null, true);
+        assertCompiles(t, "nocolour");
+        assertTrue(t.fragment.contains("gdx_FragColor = vec4(0.0);"), "the output starts at zero, as it does in practice on OpenGL:\n" + t.fragment);
+        assertTrue(t.fragment.contains("gdx_FragCoordGL(gdx_fragTarget)"), "gl_FragCoord goes through the OpenGL-origin function:\n" + t.fragment);
+        assertFalse(t.fragment.matches("(?s).*[^_]gl_FragCoord\\.xy.*"), "no direct read is left");
+    }
+
     @Test void aMatrixVaryingTakesAsManyLocationsAsItHasColumns () throws Exception {
         // out mat3 is three locations: the next varying must not land on the second (a real terrain shader of a game did, and glslang refused it).
         final String vert = "#version 330 core\nin vec3 a_position;\nuniform mat4 u_proj;\nout mat3 v_tbn;\nout vec4 v_pos;\nout vec2 v_uv;\n"
@@ -144,9 +154,9 @@ class GlslTranslatorTest {
     @Test void errorsKeepTheLineNumbersOfTheOriginalSource () {
         final String vertex = "attribute vec4 a_position;\nuniform mat4 u_projTrans;\nvoid main() {\n    gl_Position = u_projTrans * a_position;\n}\n";
         final String fragment = "uniform sampler2D u_texture;\nvarying vec2 v_uv;\nvoid main() {\n    gl_FragColor = texture2D(u_texture, v_uv) * oops;\n}\n";
-        // v_uv is not in the vertex shader: the translator reports it.
-        GlslTranslationException e = assertThrows(GlslTranslationException.class, () -> GlslTranslator.translate("bad", vertex, fragment, null, null, true));
-        assertTrue(e.getMessage().contains("bad.frag:2") && e.getMessage().contains("v_uv"), e.getMessage());
+        // v_uv is not in the vertex shader: OpenGL links that and reads zero, so the translation does too (with a note on stderr); the error in the code stays an error.
+        final Translation lenient = GlslTranslator.translate("bad", vertex, fragment, null, null, true);
+        assertTrue(lenient.fragment.contains("vec2 v_uv"), "v_uv is a zero global");
 
         // A genuine error in the code: the compiler's message names line 4 of the fragment source, after the translation moved and rewrote declarations.
         final String vertex2 = "attribute vec4 a_position;\nvarying vec2 v_uv;\nvoid main() {\n    v_uv = a_position.xy;\n    gl_Position = a_position;\n}\n";

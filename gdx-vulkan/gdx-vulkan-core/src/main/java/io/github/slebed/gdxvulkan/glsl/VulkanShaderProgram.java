@@ -735,6 +735,22 @@ public class VulkanShaderProgram implements Disposable {
         return t;
     }
 
+    private int fragTargetLocation = -2;
+    private final float[] fragTarget = new float[3];
+
+    /**
+     * For a program that reads {@code gl_FragCoord}: the size of the screen and whether the draw goes to it (an offscreen target keeps OpenGL's layout and needs no
+     * correction). The translated shader turns Vulkan's top-left origin into OpenGL's bottom-left one with this.
+     */
+    public void setFragTarget (boolean screen, int width, int height) {
+        if (fragTargetLocation == -2) fragTargetLocation = uniformLocation("gdx_fragTarget");
+        if (fragTargetLocation < 0) return;
+        fragTarget[0] = width;
+        fragTarget[1] = height;
+        fragTarget[2] = screen ? 1f : 0f;
+        setFloats(fragTargetLocation, 3, 1, fragTarget, 0);
+    }
+
     /** Whether this is the dedicated shape shader, which takes a sub-pixel nudge for lines and points in the push word at byte 96 (see {@code shape.vert}). */
     public boolean hasThinLineNudge () {
         return thinLineNudge;

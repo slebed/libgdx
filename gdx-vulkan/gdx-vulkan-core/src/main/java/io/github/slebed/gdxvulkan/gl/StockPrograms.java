@@ -165,6 +165,8 @@ final class StockPrograms {
         p.program = built;
         p.linked = built.isCompiled();
         p.log = built.getLog();
+        // OpenGL keeps the log for glGetProgramInfoLog; a game that never asks (the stock DepthShader, for one) would only see a later "no program" failure
+        if (!p.linked) System.err.println("[gdx-vulkan] a shader program did not link:\n" + p.log);
     }
 
     void getProgramiv (int program, int pname, IntBuffer params) {
@@ -456,6 +458,7 @@ final class StockPrograms {
             program.setPushFloat(96, thin ? -2f / 256f / Math.max(1, frame.height()) : 0f);
         }
         s.bindPipeline(pipeline);
+        program.setFragTarget(gl.framebufferName() == 0, frame.width(), frame.height());
         s.pushConstantWords(program.prepareDrawWords(s, gl.boundTexture(0)));
         if (client != null) {
             final int bytes = Math.min((maxVertex + 1) * stride, clientBytes);

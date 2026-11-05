@@ -19,8 +19,13 @@ never depends on the translator.
    - drop `#version`, `precision` and the `GL_ES` conventions; the translated text is `#version 450`;
    - `attribute T name;` becomes `layout(location = N) in T name;`, N in declaration order;
    - `varying T name;` becomes `out` in the vertex shader and `in` in the fragment shader, with the **same location** for the same name in both stages (a varying
-     that the fragment shader uses and the vertex shader does not write is an error with both names in it);
-   - `gl_FragColor` becomes a declared `layout(location = 0) out vec4`; `gl_FragData[n]` becomes outputs 0..n;
+     that the fragment shader declares and the vertex shader does not write is a zero global, as OpenGL drivers read it; when the fragment shader reads it, a note
+     goes to stderr);
+   - `gl_FragColor` becomes a declared `layout(location = 0) out vec4`; `gl_FragData[n]` becomes outputs 0..n; each output is set to zero at the start of `main`, so
+     a fragment that writes nothing on some path leaves (0, 0, 0, 0), as OpenGL does in practice, not whatever the register held;
+   - `gl_FragCoord` becomes `gdx_FragCoordGL(gdx_fragTarget)`: OpenGL counts from the bottom left, the swapchain pass of Vulkan from the top left. The implicit uniform
+     `gdx_fragTarget` (screen width, height, 1 on the swapchain; 0 offscreen, where the layout already is OpenGL's) is set by the shim at every draw; it takes the
+     pre-rotation into account;
    - `texture2D`, `texture2DProj`, `texture2DLod`, `textureCube` become `texture`, `textureProj`, `textureLod`;
    - `gl_Position = x;` becomes `gl_Position = gdx_vk_clip(x);` (depth range and the Android pre-rotation, the one line every built-in vertex shader also has);
    - loose `uniform` declarations are removed and re-declared as described next.

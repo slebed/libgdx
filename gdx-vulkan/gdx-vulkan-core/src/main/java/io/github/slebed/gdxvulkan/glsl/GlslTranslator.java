@@ -174,10 +174,14 @@ public final class GlslTranslator {
         final Translation t = new Translation();
         t.bindless = bindless;
         final Stage v = new Stage(GlslCompiler.Stage.VERTEX, name + ".vert", join(prependVertex, vertexSource));
-        final String fragmentText = join(prependFragment, fragmentSource);
+        String fragmentText = join(prependFragment, fragmentSource);
+        // gl_FragCoord counts from the bottom left in OpenGL and from the top left in Vulkan: a program that reads it gets the OpenGL one, from the size of the screen
+        // that the draw sets in an implicit uniform (a uniform of the translation, not of the source, so the lines stay where they are).
+        if (java.util.regex.Pattern.compile("\\bgl_FragCoord\\b").matcher(fragmentText).find()) fragmentText = fragmentText.replaceAll("\\bgl_FragCoord\\b", "gdx_FragCoordGL(gdx_fragTarget)");
         final Stage f = new Stage(GlslCompiler.Stage.FRAGMENT, name + ".frag", fragmentText);
         v.scan(t);
         f.scan(t);
+        if (f.text.contains("gdx_FragCoordGL(gdx_fragTarget)") && t.uniform("gdx_fragTarget") == null) t.uniforms.add(new Uniform("gdx_fragTarget", "vec3", 0));
 
         // Varyings: the vertex shader decides the locations; the fragment shader must use a subset with the same types.
         final Map<String, Varying> varyings = new LinkedHashMap<String, Varying>();
@@ -189,13 +193,13 @@ public final class GlslTranslator {
         }
         for (Varying in : f.varyings) {
             final Varying out = varyings.get(in.name);
-            // An input the vertex shader does not write: OpenGL links it as long as the fragment shader never reads it (a shader shared between variants declares
-            // the inputs of all of them), so it becomes a global that is zero. One that is read is an error, as it is in OpenGL.
+            // An input the vertex shader does not write: OpenGL links it (a shader shared between variants declares the inputs of all of them, and the drivers
+            // that matter read an unwritten one as zero), so it becomes a global that is zero. One that is read gets a note, it is probably a mistake in the shaders.
             if (out == null) {
                 final java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\b" + java.util.regex.Pattern.quote(in.name) + "\\b").matcher(fragmentText);
                 int mentions = 0;
                 while (m.find()) mentions++;
-                if (mentions > 1) throw new GlslTranslationException(f.name + ":" + in.line + ": the varying '" + in.name + "' is read by the fragment shader but the vertex shader does not declare it");
+                if (mentions > 1) System.err.println("[gdx-vulkan] " + f.name + ":" + in.line + ": the varying '" + in.name + "' is read by the fragment shader but the vertex shader does not write it; it reads zero");
                 continue;
             }
             if (!out.type.equals(in.type)) throw new GlslTranslationException(f.name + ":" + in.line + ": the varying '" + in.name + "' is " + in.type + " here and " + out.type + " in the vertex shader");
@@ -525,6 +529,18 @@ public final class GlslTranslator {
                 if (Pattern.compile("\\bgl_FragColor\\b").matcher(code).find()) {
                     code = code.replaceAll("\\bgl_FragColor\\b", "gdx_FragColor");
                     fragmentPrelude += "layout(location = 0) out vec4 gdx_FragColor; ";
+                }
+                // A fragment that writes no colour leaves it undefined in OpenGL, and in practice it is (0, 0, 0, 0); in Vulkan it would be whatever was in the register.
+                if (code.contains("gdx_FragColor") || usesData) {
+                    final StringBuilder zero = new StringBuilder();
+                    if (code.contains("gdx_FragColor")) zero.append(" gdx_FragColor = vec4(0.0);");
+                    if (usesData) for (int i = 0; i < t.colorOutputs; i++) zero.append(" gdx_FragData").append(i).append(" = vec4(0.0);");
+                    code = Pattern.compile("(void\\s+main\\s*\\(\\s*(?:void)?\\s*\\)\\s*\\{)").matcher(code).replaceFirst("$1" + zero.toString().replace("$", "\\$"));
+                }
+                if (code.contains("gdx_FragCoordGL")) {
+                    fragmentPrelude += "layout(constant_id = 0) const int GDX_FC_ROT = 0; vec4 gdx_FragCoordGL(vec3 t) { vec4 c = gl_FragCoord; if (t.z < 0.5) return c; "
+                        + "vec2 l = c.xy; if (GDX_FC_ROT == 1) l = vec2(c.y, t.y - c.x); else if (GDX_FC_ROT == 2) l = vec2(t.x - c.x, t.y - c.y); "
+                        + "else if (GDX_FC_ROT == 3) l = vec2(t.x - c.y, c.x); return vec4(l.x, t.y - l.y, c.z, c.w); } ";
                 }
             }
 

@@ -1433,6 +1433,11 @@ public class VulkanGL20 extends VulkanGL20Base {
         programs.drawElementsClient(mode, count, type, indices);
     }
 
+    /** The GL name of the bound framebuffer, 0 for the screen. */
+    int framebufferName () {
+        return boundFramebuffer;
+    }
+
     /** The GL buffer names bound to the array and element targets, for the draw that follows. */
     int boundArrayBufferName () {
         return boundArrayBuffer;
