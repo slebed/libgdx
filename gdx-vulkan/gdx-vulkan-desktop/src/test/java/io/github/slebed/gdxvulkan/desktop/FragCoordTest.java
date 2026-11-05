@@ -32,7 +32,9 @@ class FragCoordTest {
         @Override public void create () {
             program = new ShaderProgram("attribute vec4 a_position;\nvoid main() {\n    gl_Position = a_position;\n}\n",
                 "#ifdef GL_ES\nprecision mediump float;\n#endif\nuniform vec2 u_resolution;\nvoid main() {\n    vec2 p = gl_FragCoord.xy / u_resolution;\n"
-                    + "    if (p.x < 0.5) gl_FragColor = vec4(p.x * 2.0, p.y, 0.0, 1.0);\n}\n");
+                    + "    float up = dFdy(gl_FragCoord.y) * 0.5, right = dFdx(gl_FragCoord.x) * 0.5;\n"
+                    + "    if (p.x < 0.5) gl_FragColor = vec4(p.x * 2.0, p.y, 0.0, 1.0);\n"
+                    + "    else if (p.y < 0.25) gl_FragColor = vec4(right, up, 0.0, 1.0);\n}\n");
             if (!program.isCompiled()) throw new IllegalStateException(program.getLog());
             mesh = new Mesh(true, 6, 0, new VertexAttribute(1, 4, "a_position"));
             mesh.setVertices(new float[] {-1, -1, 0, 1, 1, -1, 0, 1, 1, 1, 0, 1, -1, -1, 0, 1, 1, 1, 0, 1, -1, 1, 0, 1});
@@ -84,7 +86,10 @@ class FragCoordTest {
         assertTrue(top > 230 && bottom < 25, "green grows upwards: top " + top + ", bottom " + bottom);
         assertTrue(red(probe.picture, 20, 48) < 60 && red(probe.picture, 80, 48) > 180, "red grows to the right");
         // The half that writes nothing is black.
-        for (int y : new int[] {5, 48, 90}) for (int x : new int[] {110, 150, 185}) {
+        // Where the derivatives are written: dFdy of the position counts upwards, dFdx to the right, one pixel each (0.5 after the factor).
+        assertTrue(Math.abs(green(probe.picture, 150, 90) - 128) <= 3 && Math.abs(red(probe.picture, 150, 90) - 128) <= 3,
+            "derivatives: " + red(probe.picture, 150, 90) + "," + green(probe.picture, 150, 90));
+        for (int y : new int[] {5, 48}) for (int x : new int[] {110, 150, 185}) {
             final int o = (y * W + x) * 4;
             assertTrue((probe.picture[o] & 255) + (probe.picture[o + 1] & 255) + (probe.picture[o + 2] & 255) == 0, "pixel (" + x + "," + y + ") is black");
         }

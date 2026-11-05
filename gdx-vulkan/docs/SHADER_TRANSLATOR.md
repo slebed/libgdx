@@ -26,6 +26,9 @@ never depends on the translator.
    - `gl_FragCoord` becomes `gdx_FragCoordGL(gdx_fragTarget)`: OpenGL counts from the bottom left, the swapchain pass of Vulkan from the top left. The implicit uniform
      `gdx_fragTarget` (screen width, height, 1 on the swapchain; 0 offscreen, where the layout already is OpenGL's) is set by the shim at every draw; it takes the
      pre-rotation into account;
+   - `dFdx(v)` and `dFdy(v)` become `gdx_dFdx(gdx_fragTarget, v)` and `gdx_dFdy(...)`: the hardware takes them along the framebuffer's axes, which on the swapchain
+     run y downwards (and turn with the pre-rotation), so every shader that builds a tangent frame from derivatives (normal mapping without tangents) would show its
+     relief inverted. They are returned along OpenGL's axes, x to the right and y upwards;
    - `texture2D`, `texture2DProj`, `texture2DLod`, `textureCube` become `texture`, `textureProj`, `textureLod`;
    - `gl_Position = x;` becomes `gl_Position = gdx_vk_clip(x);` (depth range and the Android pre-rotation, the one line every built-in vertex shader also has);
    - loose `uniform` declarations are removed and re-declared as described next.

@@ -178,10 +178,12 @@ public final class GlslTranslator {
         // gl_FragCoord counts from the bottom left in OpenGL and from the top left in Vulkan: a program that reads it gets the OpenGL one, from the size of the screen
         // that the draw sets in an implicit uniform (a uniform of the translation, not of the source, so the lines stay where they are).
         if (java.util.regex.Pattern.compile("\\bgl_FragCoord\\b").matcher(fragmentText).find()) fragmentText = fragmentText.replaceAll("\\bgl_FragCoord\\b", "gdx_FragCoordGL(gdx_fragTarget)");
+        // The same for the derivatives: dFdy is taken along the framebuffer's y axis, which runs downwards on the swapchain (and turns with the pre-rotation).
+        fragmentText = fragmentText.replaceAll("\\bdFd([xy])\\s*\\(", "gdx_dFd$1(gdx_fragTarget, ");
         final Stage f = new Stage(GlslCompiler.Stage.FRAGMENT, name + ".frag", fragmentText);
         v.scan(t);
         f.scan(t);
-        if (f.text.contains("gdx_FragCoordGL(gdx_fragTarget)") && t.uniform("gdx_fragTarget") == null) t.uniforms.add(new Uniform("gdx_fragTarget", "vec3", 0));
+        if ((f.text.contains("gdx_FragCoordGL(gdx_fragTarget)") || f.text.contains("(gdx_fragTarget, ")) && t.uniform("gdx_fragTarget") == null) t.uniforms.add(new Uniform("gdx_fragTarget", "vec3", 0));
 
         // Varyings: the vertex shader decides the locations; the fragment shader must use a subset with the same types.
         final Map<String, Varying> varyings = new LinkedHashMap<String, Varying>();
@@ -537,8 +539,20 @@ public final class GlslTranslator {
                     if (usesData) for (int i = 0; i < t.colorOutputs; i++) zero.append(" gdx_FragData").append(i).append(" = vec4(0.0);");
                     code = Pattern.compile("(void\\s+main\\s*\\(\\s*(?:void)?\\s*\\)\\s*\\{)").matcher(code).replaceFirst("$1" + zero.toString().replace("$", "\\$"));
                 }
+                if (code.contains("gdx_FragCoordGL") || code.contains("gdx_dFdx(") || code.contains("gdx_dFdy(")) {
+                    fragmentPrelude += "layout(constant_id = 0) const int GDX_FC_ROT = 0; ";
+                }
+                for (String type : new String[] {"float", "vec2", "vec3", "vec4"}) {
+                    if (code.contains("gdx_dFdx(") || code.contains("gdx_dFdy(")) {
+                        // GL's x is to the right and y upwards. Framebuffer axes: rotation 0 is (x, -y), 1 is (y, x), 2 is (-x, y), 3 is (-y, -x).
+                        fragmentPrelude += type + " gdx_dFdx(vec3 t, " + type + " v) { " + type + " a = dFdx(v), b = dFdy(v); if (t.z < 0.5 || GDX_FC_ROT == 0) return a; "
+                            + "if (GDX_FC_ROT == 1) return b; if (GDX_FC_ROT == 2) return -a; return -b; } "
+                            + type + " gdx_dFdy(vec3 t, " + type + " v) { " + type + " a = dFdx(v), b = dFdy(v); if (t.z < 0.5) return b; if (GDX_FC_ROT == 0) return -b; "
+                            + "if (GDX_FC_ROT == 1) return a; if (GDX_FC_ROT == 2) return b; return -a; } ";
+                    }
+                }
                 if (code.contains("gdx_FragCoordGL")) {
-                    fragmentPrelude += "layout(constant_id = 0) const int GDX_FC_ROT = 0; vec4 gdx_FragCoordGL(vec3 t) { vec4 c = gl_FragCoord; if (t.z < 0.5) return c; "
+                    fragmentPrelude += "vec4 gdx_FragCoordGL(vec3 t) { vec4 c = gl_FragCoord; if (t.z < 0.5) return c; "
                         + "vec2 l = c.xy; if (GDX_FC_ROT == 1) l = vec2(c.y, t.y - c.x); else if (GDX_FC_ROT == 2) l = vec2(t.x - c.x, t.y - c.y); "
                         + "else if (GDX_FC_ROT == 3) l = vec2(t.x - c.y, c.x); return vec4(l.x, t.y - l.y, c.z, c.w); } ";
                 }

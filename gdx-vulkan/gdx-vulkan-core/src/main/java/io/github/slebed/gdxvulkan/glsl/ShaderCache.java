@@ -25,7 +25,7 @@ import io.github.slebed.gdxvulkan.glsl.GlslTranslator.Uniform;
 final class ShaderCache {
     /** Changes whenever the translator's output or the file layout changes, so older files are never read. */
     private static final int FORMAT = 1;
-    private static final String VERSIONS = "translator-5;glslang-16.6.0;spirv-1.3";
+    private static final String VERSIONS = "translator-6;glslang-16.6.0;spirv-1.3";
     private static final int MAGIC = 0x47564B53; // "GVKS"
 
     private ShaderCache () {}
