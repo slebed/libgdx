@@ -467,7 +467,7 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateT
     // format 0..2 are the TexFormat values; 4 = an RGBA8 render target (a colour attachment as well as sampled), 5 = RGBA16F, 6 = RGBA32F targets.
     // A render target may come without data (null): it is then only given its sampling layout.
     const bool target = format >= 4 && format <= 6;
-    if ((data == nullptr && !target) || format < 0 || format > 6 || format == 3) return -1;
+    if ((data == nullptr && !target) || format < 0 || format > 7 || format == 3) return -1; // 7: R32F (GL_R32F), a sampled texture with data
     gdxvk::TextureDesc desc;
     desc.width = static_cast<uint32_t>(width);
     desc.height = static_cast<uint32_t>(height);
@@ -653,15 +653,25 @@ JNIEXPORT jint JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeCreateP
         const int n = d[tail];
         if (n < 0 || dn < tail + 1 + n) return -1;
         for (int k = 0; k < n; ++k) pd.spec.push_back(d[tail + 1 + k]);
+        // Optional: the strides of the bindings, from 0.
+        const int stridesAt = tail + 1 + n;
+        if (dn > stridesAt) {
+            const int nb = d[stridesAt];
+            if (nb < 0 || nb > 16 || dn < stridesAt + 1 + nb) return -1;
+            for (int k = 0; k < nb; ++k) pd.strides.push_back(static_cast<uint32_t>(d[stridesAt + 1 + k]));
+        }
     }
+    if (pd.strides.empty()) pd.strides.push_back(pd.stride);
     for (int a = 0; a < count; ++a) {
         gdxvk::VertexAttribute attr;
         attr.location = static_cast<uint32_t>(d[10 + a * 3]);
         attr.format = static_cast<uint32_t>(d[11 + a * 3]);
-        if (attr.format & 0x40000000u) { // a constant attribute (GdxVkPipelineDesc.constantAttribute)
-            attr.binding = 1;
-            attr.format &= ~0x40000000u;
+        if (attr.format & 0x40000000u) { // a constant attribute (GdxVkPipelineDesc.constantAttribute): binding 15, stride 0
+            attr.binding = 15;
+        } else {
+            attr.binding = (attr.format >> 24) & 0xFu; // GdxVkPipelineDesc.attribute(..., binding)
         }
+        attr.format &= 0xFFFFFFu;
         attr.offset = static_cast<uint32_t>(d[12 + a * 3]);
         pd.attributes.push_back(attr);
     }

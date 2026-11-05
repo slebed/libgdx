@@ -34,6 +34,10 @@ TexFormatInfo formatInfo(TexFormat f, const TextureDesc& desc) {
             i.swizzle = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G};
             i.blockBytes = 2;
             break;
+        case TexFormat::R32Float:
+            i.vk = VK_FORMAT_R32_SFLOAT;
+            i.blockBytes = 4;
+            break;
         case TexFormat::Compressed:
             i.vk = static_cast<VkFormat>(desc.vkFormat);
             i.blockW = desc.blockW;
@@ -279,6 +283,12 @@ int Resources::createTexture(const TextureDesc& d, const void* data, uint64_t da
         linearOk = (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0;
         fi.vk = vf;
         fi.blockBytes = vf == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 16;
+    }
+    if (d.format == TexFormat::R32Float) {
+        VkFormatProperties fp;
+        vkGetPhysicalDeviceFormatProperties(h_.physical, VK_FORMAT_R32_SFLOAT, &fp);
+        if ((fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0) return -1;
+        linearOk = (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0; // otherwise the sampler is forced to nearest
     }
     if (fi.compressed && (d.generateMips || d.blockW == 0 || d.blockH == 0 || d.blockBytes == 0 || !formatSupported(d.vkFormat))) return -1;
     const uint32_t levels = d.generateMips ? fullChain(d.width, d.height) : d.uploadedLevels;

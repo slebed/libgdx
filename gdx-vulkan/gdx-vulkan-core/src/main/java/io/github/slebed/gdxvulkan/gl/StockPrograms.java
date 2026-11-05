@@ -72,6 +72,9 @@ final class StockPrograms {
     /** The constant value of each attribute (glVertexAttrib*), 4 floats each; the GL default is (0, 0, 0, 1). */
     private final float[] generic = new float[MAX_ATTRIBUTES * 4];
     private final int[] constantLocations = new int[MAX_ATTRIBUTES];
+    // The vertex buffers one draw reads: the GL buffer of each binding and its stride, and the binding of each attribute (stock Mesh uses one buffer; a game may use several).
+    private static final int MAX_BINDINGS = 14;
+    private final int[] bindingBuffer = new int[MAX_BINDINGS], bindingStride = new int[MAX_BINDINGS], attributeBinding = new int[MAX_ATTRIBUTES];
 
     {
         for (int i = 0; i < MAX_ATTRIBUTES; i++) generic[i * 4 + 3] = 1f;
@@ -352,7 +355,7 @@ final class StockPrograms {
 
         // The layout of the vertex data: every enabled array the program reads, from one buffer. The pipeline is found by a 64-bit signature of what makes
         // pipelines differ (the program, the primitive type, the blend state and each attribute's format, offset and stride): nothing is built as a string or allocated per draw.
-        int buffer = 0, stride = 0;
+        int buffer = 0, stride = 0, bindingCount = 0;
         Buffer client = null;
         int clientBytes = Integer.MAX_VALUE;
         long signature = mix(program.id(), mode);
@@ -372,24 +375,39 @@ final class StockPrograms {
                 signature = mix(signature, 0x100 + i);
                 continue;
             }
-            if (buffer != 0 && p.buffer != buffer) { // in-memory pointers are all CLIENT: Mesh passes a FloatBuffer and a ByteBuffer, two views of the one array
-                throw new GdxRuntimeException("gdx-vulkan: the vertex attributes come from more than one buffer; interleave them in one (stock Mesh does)");
+            // One binding per buffer (in-memory pointers are all CLIENT: Mesh passes a FloatBuffer and a ByteBuffer, two views of the one array).
+            final int attributeStride = p.stride != 0 ? p.stride : p.size * typeBytes(p.type);
+            int b = -1;
+            for (int j = 0; j < bindingCount; j++) if (bindingBuffer[j] == p.buffer) {
+                b = j;
+                break;
             }
-            buffer = p.buffer;
+            if (b < 0) {
+                if (bindingCount == MAX_BINDINGS) throw new GdxRuntimeException("gdx-vulkan: a draw reads more than " + MAX_BINDINGS + " vertex buffers");
+                b = bindingCount++;
+                bindingBuffer[b] = p.buffer;
+                bindingStride[b] = attributeStride;
+            } else if (bindingStride[b] != attributeStride) {
+                throw new GdxRuntimeException("gdx-vulkan: attributes of one vertex buffer with different strides (" + bindingStride[b] + " and " + attributeStride + ")");
+            }
+            attributeBinding[i] = b;
             if (p.client != null) {
                 if (client == null) client = p.client;
                 clientBytes = Math.min(clientBytes, p.client instanceof FloatBuffer ? ((FloatBuffer)p.client).limit() * 4 : ((ByteBuffer)p.client).limit());
             }
-            stride = p.stride != 0 ? p.stride : p.size * typeBytes(p.type);
-            signature = mix(mix(mix(signature, i), (p.size << 20) ^ (p.type << 1) ^ (p.normalized ? 1 : 0)), ((long)p.offset << 32) ^ stride);
+            buffer = p.buffer;
+            stride = attributeStride;
+            signature = mix(mix(mix(mix(signature, i), (p.size << 20) ^ (p.type << 1) ^ (p.normalized ? 1 : 0)), ((long)p.offset << 32) ^ attributeStride), b);
             enabledReadByProgram++;
         }
         if (enabledReadByProgram == 0) throw new GdxRuntimeException("gdx-vulkan: a draw with the program using no enabled vertex attribute");
+        if (client != null && bindingCount > 1) throw new GdxRuntimeException("gdx-vulkan: vertex data in memory and in buffers in one draw: use one kind");
         Integer pipeline = pipelines.get(signature);
         if (pipeline == null) {
             final StringBuilder variant = new StringBuilder("gl|").append(mode).append('|');
             final GdxVkPipelineDesc d = new GdxVkPipelineDesc();
-            d.stride = stride;
+            d.stride = bindingStride[0];
+            for (int b = 1; b < bindingCount; b++) d.bindingStride(b, bindingStride[b]);
             d.topology = topology(mode);
             d.cullMode = GdxVkPipelineDesc.CULL_NONE; // GL's cull state is an ordered operation
             if (blend) {
@@ -414,10 +432,10 @@ final class StockPrograms {
                     variant.append('c').append(i).append(';');
                     continue;
                 }
-                d.attribute(i, format(p), p.offset);
-                variant.append(i).append(':').append(p.size).append(':').append(p.type).append(p.normalized ? 'n' : 'r').append(':').append(p.offset).append(';');
+                d.attribute(i, format(p), p.offset, attributeBinding[i]);
+                variant.append(i).append(':').append(p.size).append(':').append(p.type).append(p.normalized ? 'n' : 'r').append(':').append(p.offset).append('@').append(attributeBinding[i]).append(';');
             }
-            variant.append(stride);
+            for (int b = 0; b < bindingCount; b++) variant.append('/').append(bindingStride[b]);
             pipeline = program.pipeline(variant.toString(), d);
             pipelines.put(signature, pipeline);
         }
@@ -428,7 +446,7 @@ final class StockPrograms {
         if (indexed && clientIndices != null) maxVertex = maxIndex(clientIndices, count, indexType);
         else if (!indexed) maxVertex = first + count - 1;
         if (client == null) {
-            nativeVertices = gl.nativeBuffer(buffer);
+            nativeVertices = gl.nativeBuffer(bindingBuffer[0]);
             if (nativeVertices < 0) throw new GdxRuntimeException("gdx-vulkan: the vertex buffer has no data");
         } else if (indexed && clientIndices == null) {
             throw new GdxRuntimeException("gdx-vulkan: vertices in memory drawn with an index buffer object: use vertex and index data of the same kind");
@@ -461,6 +479,11 @@ final class StockPrograms {
             s.bindVertex(block, offset);
         } else {
             s.bindVertexBuffer(nativeVertices, 0);
+            for (int b = 1; b < bindingCount; b++) {
+                final int other = gl.nativeBuffer(bindingBuffer[b]);
+                if (other < 0) throw new GdxRuntimeException("gdx-vulkan: a vertex buffer has no data");
+                s.bindVertexBufferAt(b, other, 0);
+            }
         }
         if (constants > 0) { // the values of the attributes without an array: one vec4 each, in the order the pipeline lists them
             final long a = frame.presenter().allocVertex(constants * 16);

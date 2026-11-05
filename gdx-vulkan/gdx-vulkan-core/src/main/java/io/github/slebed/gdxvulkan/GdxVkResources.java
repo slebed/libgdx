@@ -96,6 +96,9 @@ public final class GdxVkResources {
     /** RGBA with 32-bit float channels, a render target; the device may only sample it with nearest filtering. Targets only. */
     public static final int FORMAT_RGBA32F = 6;
 
+    /** One 32-bit float channel (GL_R32F with GL_RED and GL_FLOAT): a sampled texture that pixel data can be uploaded to, read as (r, 0, 0, 1). */
+    public static final int FORMAT_R32F = 7;
+
     /**
      * A block-compressed texture: {@code levels} mip levels of {@code vkFormat}, tightly packed, level 0 first. Throws if the device
      * cannot sample the format (BC on desktop GPUs, ETC2 and ASTC on mobile ones; check {@link #formatSupported}).
@@ -119,7 +122,7 @@ public final class GdxVkResources {
     }
 
     public static int bytesPerTexel(int format) {
-        return format == FORMAT_RGBA8 ? 4 : format == FORMAT_LUMINANCE_ALPHA ? 2 : format == FORMAT_RGBA16F ? 8 : format == FORMAT_RGBA32F ? 16 : 1;
+        return format == FORMAT_RGBA8 ? 4 : format == FORMAT_LUMINANCE_ALPHA ? 2 : format == FORMAT_RGBA16F ? 8 : format == FORMAT_RGBA32F ? 16 : format == FORMAT_R32F ? 4 : 1;
     }
 
     /** @param rgba width * height * 4 bytes, RGBA8, row 0 at the top */

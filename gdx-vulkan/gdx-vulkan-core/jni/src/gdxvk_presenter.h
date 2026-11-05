@@ -41,7 +41,8 @@ struct VertexAttribute {
     uint32_t binding = 0; // 1: a constant (glVertexAttrib*): read from binding 1, which has stride 0 and is bound per draw
 };
 struct PipelineDesc {
-    uint32_t stride = 0;
+    uint32_t stride = 0; // binding 0
+    std::vector<uint32_t> strides; // by binding, from 0 (binding 0 is `stride`); a binding no attribute uses is left out of the pipeline
     std::vector<VertexAttribute> attributes;
     uint32_t topology = 3; // VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
     uint32_t cullMode = 2; // VK_CULL_MODE_BACK_BIT (0 = none, 1 = front, 2 = back)

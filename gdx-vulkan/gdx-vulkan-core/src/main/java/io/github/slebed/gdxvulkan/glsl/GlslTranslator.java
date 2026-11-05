@@ -174,7 +174,8 @@ public final class GlslTranslator {
         final Translation t = new Translation();
         t.bindless = bindless;
         final Stage v = new Stage(GlslCompiler.Stage.VERTEX, name + ".vert", join(prependVertex, vertexSource));
-        final Stage f = new Stage(GlslCompiler.Stage.FRAGMENT, name + ".frag", join(prependFragment, fragmentSource));
+        final String fragmentText = join(prependFragment, fragmentSource);
+        final Stage f = new Stage(GlslCompiler.Stage.FRAGMENT, name + ".frag", fragmentText);
         v.scan(t);
         f.scan(t);
 
@@ -188,7 +189,15 @@ public final class GlslTranslator {
         }
         for (Varying in : f.varyings) {
             final Varying out = varyings.get(in.name);
-            if (out == null) throw new GlslTranslationException(f.name + ":" + in.line + ": the varying '" + in.name + "' is read by the fragment shader but the vertex shader does not declare it");
+            // An input the vertex shader does not write: OpenGL links it as long as the fragment shader never reads it (a shader shared between variants declares
+            // the inputs of all of them), so it becomes a global that is zero. One that is read is an error, as it is in OpenGL.
+            if (out == null) {
+                final java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\b" + java.util.regex.Pattern.quote(in.name) + "\\b").matcher(fragmentText);
+                int mentions = 0;
+                while (m.find()) mentions++;
+                if (mentions > 1) throw new GlslTranslationException(f.name + ":" + in.line + ": the varying '" + in.name + "' is read by the fragment shader but the vertex shader does not declare it");
+                continue;
+            }
             if (!out.type.equals(in.type)) throw new GlslTranslationException(f.name + ":" + in.line + ": the varying '" + in.name + "' is " + in.type + " here and " + out.type + " in the vertex shader");
             in.location = out.location;
         }
@@ -538,7 +547,13 @@ public final class GlslTranslator {
 
         private String varyingText (String direction, Decl d, String[] n, Map<String, Varying> varyings) {
             final Varying v = varyings.get(n[0]);
-            if (v == null) fail(d.line, "the varying '" + n[0] + "' has no matching declaration in the vertex shader");
+            if (v == null) {
+                if (!vertex() && n[1].isEmpty()) {
+                    final boolean integer = d.type.startsWith("int") || d.type.startsWith("uint") || d.type.startsWith("ivec") || d.type.startsWith("uvec");
+                    return d.type + " " + n[0] + " = " + d.type + (integer ? "(0); " : "(0.0); ");
+                }
+                fail(d.line, "the varying '" + n[0] + "' has no matching declaration in the vertex shader");
+            }
             if (!n[1].isEmpty()) fail(d.line, "the varying '" + n[0] + "' is an array, which is not supported");
             return "layout(location = " + v.location + ") " + v.flat + direction + " " + d.type + " " + n[0] + "; ";
         }

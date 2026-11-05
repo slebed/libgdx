@@ -272,8 +272,10 @@ struct Presenter::Impl {
     struct Bound {
         VkDescriptorSet set0 = VK_NULL_HANDLE, set1 = VK_NULL_HANDLE;
         uint32_t set0Offsets[2] = {0, 0};
-        VkBuffer vertex0 = VK_NULL_HANDLE, vertex1 = VK_NULL_HANDLE, index = VK_NULL_HANDLE;
-        VkDeviceSize vertex0Offset = 0, vertex1Offset = 0, indexOffset = 0;
+        VkBuffer vertex[16] = {};          // by binding; 15 holds the constant attributes
+        VkDeviceSize vertexOffset[16] = {};
+        VkBuffer index = VK_NULL_HANDLE;
+        VkDeviceSize indexOffset = 0;
         VkIndexType indexType = VK_INDEX_TYPE_UINT16;
     } bound;
     VkBuffer readbackBuf = VK_NULL_HANDLE;
@@ -406,16 +408,19 @@ struct Presenter::Impl {
         stages[1].pSpecializationInfo = &specInfo;
 
         std::vector<VkVertexInputBindingDescription> bindings;
-        bool hasConstants = false;
         std::vector<VkVertexInputAttributeDescription> attrs;
+        bool usedBinding[16] = {};
         for (const VertexAttribute& a : desc.attributes) {
             attrs.push_back({a.location, a.binding, static_cast<VkFormat>(a.format), a.offset});
-            hasConstants = hasConstants || a.binding == 1;
+            usedBinding[a.binding & 15u] = true;
         }
-        if (desc.stride > 0) bindings.push_back({0, desc.stride, VK_VERTEX_INPUT_RATE_VERTEX});
-        if (hasConstants) bindings.push_back({1, 0, VK_VERTEX_INPUT_RATE_VERTEX}); // stride 0: every vertex reads the same values
+        for (uint32_t b = 0; b < 16; ++b) {
+            if (!usedBinding[b]) continue;
+            const uint32_t stride = b == 15 ? 0u : (b < desc.strides.size() ? desc.strides[b] : (b == 0 ? desc.stride : 0u)); // 15: the constants, every vertex reads the same values
+            bindings.push_back({b, stride, VK_VERTEX_INPUT_RATE_VERTEX});
+        }
         VkPipelineVertexInputStateCreateInfo vin{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-        if (desc.stride > 0) {
+        if (!attrs.empty()) {
             vin.vertexBindingDescriptionCount = static_cast<uint32_t>(bindings.size());
             vin.pVertexBindingDescriptions = bindings.data();
             vin.vertexAttributeDescriptionCount = static_cast<uint32_t>(attrs.size());
@@ -1205,8 +1210,9 @@ struct Presenter::Impl {
     void restoreBound(VkCommandBuffer cmd) {
         if (bound.set0 != VK_NULL_HANDLE) vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, h.layouts->pipelineLayout(), 0, 1, &bound.set0, 2, bound.set0Offsets);
         if (bound.set1 != VK_NULL_HANDLE) vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, h.layouts->pipelineLayout(), 1, 1, &bound.set1, 0, nullptr);
-        if (bound.vertex0 != VK_NULL_HANDLE) vkCmdBindVertexBuffers(cmd, 0, 1, &bound.vertex0, &bound.vertex0Offset);
-        if (bound.vertex1 != VK_NULL_HANDLE) vkCmdBindVertexBuffers(cmd, 1, 1, &bound.vertex1, &bound.vertex1Offset);
+        for (uint32_t b = 0; b < 16; ++b) {
+            if (bound.vertex[b] != VK_NULL_HANDLE) vkCmdBindVertexBuffers(cmd, b, 1, &bound.vertex[b], &bound.vertexOffset[b]);
+        }
         if (bound.index != VK_NULL_HANDLE) vkCmdBindIndexBuffer(cmd, bound.index, bound.indexOffset, bound.indexType);
     }
 
@@ -2287,8 +2293,8 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 i += 3;
                 if (buf == VK_NULL_HANDLE) return s.fail("command stream: unknown vertex block");
                 vkCmdBindVertexBuffers(cmd, 0, 1, &buf, &off);
-                s.bound.vertex0 = buf;
-                s.bound.vertex0Offset = off;
+                s.bound.vertex[0] = buf;
+                s.bound.vertexOffset[0] = off;
                 break;
             }
             case cmd::Set0Data: {
@@ -2312,9 +2318,22 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 const VkDeviceSize off = offset64(w[i + 1], w[i + 2]);
                 i += 3;
                 if (buf == VK_NULL_HANDLE) return s.fail("command stream: unknown vertex block (BindConstants)");
-                vkCmdBindVertexBuffers(cmd, 1, 1, &buf, &off);
-                s.bound.vertex1 = buf;
-                s.bound.vertex1Offset = off;
+                vkCmdBindVertexBuffers(cmd, 15, 1, &buf, &off);
+                s.bound.vertex[15] = buf;
+                s.bound.vertexOffset[15] = off;
+                break;
+            }
+            case cmd::BindVertexBinding: {
+                if (!need(4)) return s.fail("command stream truncated (BindVertexBinding)");
+                const uint32_t binding = static_cast<uint32_t>(w[i]);
+                VkBuffer buf;
+                uint64_t base, size;
+                if (binding > 14 || !s.h.resources->bufferInfo(w[i + 1], buf, base, size)) return s.fail("command stream: unknown vertex buffer or binding (BindVertexBinding)");
+                const VkDeviceSize off = base + offset64(w[i + 2], w[i + 3]);
+                i += 4;
+                vkCmdBindVertexBuffers(cmd, binding, 1, &buf, &off);
+                s.bound.vertex[binding] = buf;
+                s.bound.vertexOffset[binding] = off;
                 break;
             }
             case cmd::BindVertexBuffer: {
@@ -2325,8 +2344,8 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 const VkDeviceSize off = base + offset64(w[i + 1], w[i + 2]);
                 i += 3;
                 vkCmdBindVertexBuffers(cmd, 0, 1, &buf, &off);
-                s.bound.vertex0 = buf;
-                s.bound.vertex0Offset = off;
+                s.bound.vertex[0] = buf;
+                s.bound.vertexOffset[0] = off;
                 break;
             }
             case cmd::BindIndexBuffer: {

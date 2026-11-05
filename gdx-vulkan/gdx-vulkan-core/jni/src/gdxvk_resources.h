@@ -25,7 +25,8 @@ enum class TexFormat : int {
     Rgba8 = 0,            // R8G8B8A8_UNORM
     R8Alpha = 1,          // R8_UNORM, sampled as (0, 0, 0, R)   (GL_ALPHA)
     Rg8LuminanceAlpha = 2, // R8G8_UNORM, sampled as (R, R, R, G) (GL_LUMINANCE_ALPHA)
-    Compressed = 3         // a block-compressed VkFormat given by TextureDesc::vkFormat (BC, ETC2, ASTC)
+    Compressed = 3,        // a block-compressed VkFormat given by TextureDesc::vkFormat (BC, ETC2, ASTC)
+    R32Float = 7           // R32_SFLOAT, sampled as (R, 0, 0, 1) (GL_R32F): a height map, say; linear filtering only where the device has it
 };
 
 struct TextureDesc {

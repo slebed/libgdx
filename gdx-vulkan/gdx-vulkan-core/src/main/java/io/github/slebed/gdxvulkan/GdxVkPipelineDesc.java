@@ -46,9 +46,28 @@ public final class GdxVkPipelineDesc {
         return this;
     }
 
+    /** An attribute read from another vertex buffer binding than 0 (1 to 14): its stride is set with {@link #bindingStride}. */
+    public GdxVkPipelineDesc attribute(int location, int vkFormat, int offset, int binding) {
+        if (binding < 0 || binding > 14) throw new IllegalArgumentException("binding " + binding);
+        attributes.add(new int[] {location, vkFormat | (binding << 24), offset});
+        if (binding >= bindingStrides.length) bindingStrides = java.util.Arrays.copyOf(bindingStrides, binding + 1);
+        return this;
+    }
+
+    private int[] bindingStrides = new int[1];
+
+    /** The stride of a binding from 1 to 14 (binding 0 is {@link #stride}). */
+    public GdxVkPipelineDesc bindingStride(int binding, int stride) {
+        if (binding < 1 || binding > 14) throw new IllegalArgumentException("binding " + binding);
+        if (binding >= bindingStrides.length) bindingStrides = java.util.Arrays.copyOf(bindingStrides, binding + 1);
+        bindingStrides[binding] = stride;
+        return this;
+    }
+
     int[] encode() {
         final int tail = 10 + attributes.size() * 3;
-        int[] d = new int[tail + 1 + specConstants.length];
+        final int stridesAt = tail + 1 + specConstants.length;
+        int[] d = new int[stridesAt + 1 + bindingStrides.length];
         d[0] = stride;
         d[1] = topology;
         d[2] = cullMode;
@@ -62,6 +81,9 @@ public final class GdxVkPipelineDesc {
         for (int i = 0; i < attributes.size(); i++) System.arraycopy(attributes.get(i), 0, d, 10 + i * 3, 3);
         d[tail] = specConstants.length;
         System.arraycopy(specConstants, 0, d, tail + 1, specConstants.length);
+        d[stridesAt] = bindingStrides.length;
+        bindingStrides[0] = stride;
+        System.arraycopy(bindingStrides, 0, d, stridesAt + 1, bindingStrides.length);
         return d;
     }
 }

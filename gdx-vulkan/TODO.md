@@ -47,7 +47,7 @@ on the Adreno 840 and 1.1 s on the Adreno 650, each further shader 10 to 25 ms, 
   does the rest: total process CPU per frame is equal, 0.69 against 0.70 ms). What remains is `vkQueuePresentKHR` (about 0.27 ms per frame, 38% of the render thread; not shim specific) and the stock
   `SpriteBatch` staging copies (0.75x to 0.93x of `VulkanSpriteBatch`: every flush copies its 655 KB of vertices through the staging ring). Ideas not done: dynamic VBOs through the vertex ring,
   a second vertex binding for `glVertexAttrib` constants, a present thread (considered; risk with Swappy/resizing/present fences, and it only matters above 1,000 fps).
-- **[build] Shim coverage:** instancing through GL (needs `Gdx.gl30`, which stays null), several vertex buffers per draw, vertex formats other than float and
+- **[build] Shim coverage:** instancing through GL (needs `Gdx.gl30`, which stays null), vertex formats other than float and
   normalised ubyte, unsigned-byte indices, query objects.
 - **[build] Translator:** `#version 300 es` / `330` shaders passing through; `#define` flags as specialization constants so variants share SPIR-V; precision qualifiers to
   `RelaxedPrecision` on mobile; a spirv-opt pass (keep only if a benchmark shows an effect); optional build without the compiler's sources for precompiled-bundle users;

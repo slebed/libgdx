@@ -43,6 +43,8 @@ final class PixelConversion {
      */
     static final byte[] NO_CONTENTS = new byte[0];
 
+    private static final int GL_RED = 0x1903;
+
     /** The native format a GL (format, type) pair is stored as. */
     static int nativeFormat(int glFormat, int glType) {
         if (glType == GL20.GL_UNSIGNED_BYTE) {
@@ -54,6 +56,8 @@ final class PixelConversion {
             case GL20.GL_LUMINANCE: return GdxVkResources.FORMAT_RGBA8;
             default: break;
             }
+        } else if (glFormat == GL_RED && glType == GL20.GL_FLOAT) {
+            return GdxVkResources.FORMAT_R32F;
         } else if (glFormat == GL20.GL_RGBA && (glType == GL_HALF_FLOAT || glType == GL_HALF_FLOAT_OES)) {
             return GdxVkResources.FORMAT_RGBA16F; // a floating-point framebuffer attachment: no pixel data can be given for it
         } else if (glFormat == GL20.GL_RGBA && glType == GL20.GL_FLOAT) {
@@ -86,6 +90,26 @@ final class PixelConversion {
         if (pixels == null) return new Converted(format, NO_CONTENTS);
         if (format == GdxVkResources.FORMAT_RGBA16F || format == GdxVkResources.FORMAT_RGBA32F) {
             throw new GdxRuntimeException("gdx-vulkan: floating-point textures can only be framebuffer attachments: pixel data cannot be uploaded to one");
+        }
+        if (format == GdxVkResources.FORMAT_R32F) { // float rows copied as they are
+            if (!(pixels instanceof ByteBuffer) && !(pixels instanceof java.nio.FloatBuffer)) throw new GdxRuntimeException("gdx-vulkan: R32F texture data must be a ByteBuffer or a FloatBuffer");
+            final ByteBuffer raw;
+            if (pixels instanceof java.nio.FloatBuffer) {
+                final java.nio.FloatBuffer fb = ((java.nio.FloatBuffer)pixels).duplicate();
+                raw = ByteBuffer.allocate(fb.remaining() * 4).order(ByteOrder.nativeOrder());
+                raw.asFloatBuffer().put(fb);
+            } else {
+                raw = ((ByteBuffer)pixels).duplicate().order(ByteOrder.nativeOrder());
+            }
+            final int rowBytes = width * 4, rowStride = (rowBytes + alignment - 1) / alignment * alignment;
+            final byte[] floats = new byte[width * height * 4];
+            final int start = raw.position();
+            if (raw.remaining() < rowStride * (height - 1) + rowBytes) throw new GdxRuntimeException("gdx-vulkan: the pixel buffer is too small for " + width + "x" + height + " floats");
+            for (int y = 0; y < height; y++) {
+                raw.position(start + y * rowStride);
+                raw.get(floats, y * rowBytes, rowBytes);
+            }
+            return new Converted(format, floats);
         }
         byte[] out = new byte[width * height * outBpp];
         if (!(pixels instanceof ByteBuffer)) {

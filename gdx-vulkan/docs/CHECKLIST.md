@@ -19,12 +19,12 @@ the plan names.
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 12 | 1 | 0 | 13 |
 | Phase 5: 3D with stock models | 10 | 3 | 0 | 13 |
-| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 38 | 9 | 6 | 53 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 41 | 9 | 6 | 56 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
 | Demos (gdx-vulkan-demos) | 10 | 3 | 2 | 15 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **208** | **19** | **25** | **252** |
+| **All** | **211** | **19** | **25** | **255** |
 ---
 
 ## Core decisions
@@ -368,6 +368,10 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [x] `glReadPixels` (RGBA, unsigned byte) from a framebuffer texture and from the screen: the frame so far is submitted and waited for, the pixels are copied out, and the frame carries on in a new command buffer with the stream's bindings restored (`ReadPixelsTest`, both tiers, validation clean)
 - [x] A matrix varying (`mat3`, `mat4`) takes one location per column in the translated shaders (`GlslTranslatorTest`); found by a real game's terrain shader
 - [x] The stock `FrameBuffer` builder's float attachments: `OES_texture_float` and friends are reported as supported
+
+- [x] Several vertex buffers in one draw (up to 14 bindings, one per buffer; `BindVertexBinding`): `SeveralVertexBuffersTest`, both tiers, validation clean
+- [x] A one-channel float texture (`GL_R32F`, `GL_RED`, `GL_FLOAT`) with pixel data, sampled like any texture; a sampler with no texture bound (or one with no storage) reads black, as OpenGL's texture 0 does (`FloatTextureTest`)
+- [x] Where OpenGL ignores a call, so does the shim: `glUniform4f` on a vec3 uniform (once-per-uniform note on stderr); a fragment input that the vertex shader does not write and the fragment shader does not read is a zero global (a read of it is still an error)
 
 ### F. Tests
 - [~] Translator tests with the shaders libGDX ships: done for the `SpriteBatch`/`PolygonSpriteBatch`, `ShapeRenderer` and `ImmediateModeRenderer20` shaders, `DefaultShader` (unlit variants) and `DepthShader`, and a custom shader with arrays, a bool, an int, two samplers and `#ifdef` flags, each compiled by glslang on both code paths (`GlslTranslatorTest`, no GPU needed); not yet the Gate 3 post-processing shaders

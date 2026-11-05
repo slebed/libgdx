@@ -549,12 +549,19 @@ public class VulkanShaderProgram implements Disposable {
 
     // The calls of OpenGL's glUniform family, by location: what the GL shim forwards. {@code count} elements, from the element the location names.
 
+    private final java.util.HashSet<String> warned = new java.util.HashSet<String>();
+
     /** {@code glUniform1f..4fv}: {@code count} values of {@code components} floats each, read from {@code v} at {@code offset}. */
     public void setFloats (int location, int components, int count, float[] v, int offset) {
         if (location < 0) return;
         final Uniform u = uniformAt(location);
         final String type = components == 1 ? "float" : "vec" + components;
-        if (!u.type.equals(type)) throw new GdxRuntimeException("the uniform '" + u.name + "' is " + u.type + ", it cannot be set with floats in groups of " + components);
+        if (!u.type.equals(type) && !(u.isBool() && components == 1)) {
+            // OpenGL raises INVALID_OPERATION and leaves the uniform as it was (libGDX never looks at the error), so a game that sets a vec3 with glUniform4f runs on OpenGL and its
+            // value is simply not set. Same here, with a note once per uniform.
+            if (warned.add(u.name)) System.err.println("[gdx-vulkan] the uniform '" + u.name + "' is " + u.type + " and was set with floats in groups of " + components + ": OpenGL ignores that, so does gdx-vulkan");
+            return;
+        }
         checkCount(u, count);
         for (int e = 0; e < count; e++) {
             for (int c = 0; c < components; c++) putWord(u, e, c, Float.floatToRawIntBits(v[offset + e * components + c]));
@@ -788,8 +795,8 @@ public class VulkanShaderProgram implements Disposable {
             if (!sampler.active) continue;
             final int unit = samplerUnit[i];
             final int handle = unit == 0 ? unitZeroTexture : gl.boundTexture(unit);
-            final int nativeId = gl.nativeTexture(handle);
-            if (nativeId < 0) throw new GdxRuntimeException("the texture for sampler '" + sampler.name + "' (unit " + unit + ") has no storage");
+            int nativeId = gl.nativeTexture(handle);
+            if (nativeId < 0) nativeId = gl.defaultTexture(); // as OpenGL does: nothing bound, or a texture with no storage, reads (0, 0, 0, 1)
             if (bindless) pushWords[sampler.slotOffset >> 2] = gl.slotOf(nativeId);
             else s.bindTexture(nativeId);
         }

@@ -894,6 +894,22 @@ public class VulkanGL20 extends VulkanGL20Base {
         return t.nativeId;
     }
 
+    private int blackTexture = -1;
+
+    /**
+     * What a sampler reads when its texture unit has no usable texture (nothing bound, or a texture that was never given storage): OpenGL's texture 0 and incomplete
+     * textures sample as (0, 0, 0, 1). One 1 x 1 black texture serves them all.
+     */
+    public int defaultTexture () {
+        if (blackTexture < 0) {
+            final GdxVkSampler nearest = new GdxVkSampler();
+            nearest.minFilter = nearest.magFilter = GdxVkSampler.NEAREST;
+            nearest.mipFilter = GdxVkSampler.MIP_NONE;
+            blackTexture = resources.createTexture(1, 1, new byte[] {0, 0, 0, (byte)255}, nearest);
+        }
+        return blackTexture;
+    }
+
     /** The bindless-table slot (Tier A) or 0 (Tier B) of a native texture; it changes whenever the texture is rebound. */
     /** The GL handle of the texture bound to a texture unit (0 when none): what a program with several samplers reads its textures from. */
     public int boundTexture (int unit) {
