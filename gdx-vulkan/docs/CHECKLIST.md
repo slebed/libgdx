@@ -19,12 +19,12 @@ the plan names.
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 12 | 1 | 0 | 13 |
 | Phase 5: 3D with stock models | 10 | 3 | 0 | 13 |
-| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 35 | 9 | 6 | 50 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 38 | 10 | 6 | 54 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
 | Demos (gdx-vulkan-demos) | 10 | 3 | 2 | 15 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
 | Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **205** | **19** | **25** | **249** |
+| **All** | **208** | **20** | **25** | **253** |
 ---
 
 ## Core decisions
@@ -110,7 +110,7 @@ the plan names.
 - [x] Modules `gdx-vulkan-core` (Java + `jni/`), `gdx-vulkan-desktop`, `gdx-vulkan-android`
 - [x] Natives via plain CMake + hand-written JNI instead of gdx-jnigen: a decision, recorded in `docs/PLAN.md` and `CLAUDE.md`. The build is one CMake file per platform with no generator step, which is what lets CI build Linux arm64 and the NDK ABIs with a single command. Revisit only if a consumer needs jnigen's packaging
 - [x] Natives built: Windows x64, Linux x64 (Docker), Android arm64-v8a
-- [~] Natives: Android armeabi-v7a and x86_64 compile and link with the NDK (the library builds all three ABIs; fixed a 32-bit assumption in `VmaVirtualAllocation`); armeabi-v7a has been **run** (2026-11-05: the device suite passes as a 32-bit process on the Galaxy S20 FE, which supports it); x86_64 has not (it needs an emulator). Linux arm64: built and its native tests run by the `arm64-natives` CI job on GitHub's arm64 runner (the Java suite does not run there)
+- [~] Natives: Android armeabi-v7a and x86_64 compile and link with the NDK (the library builds all three ABIs; fixed a 32-bit assumption in `VmaVirtualAllocation`); armeabi-v7a has been **run** (2026-11-05: the device suite passes as a 32-bit process on the Galaxy S20 FE, which supports it) and so has x86_64 (the Android emulator, SwiftShader: 29 of 32 checks, the other three are throughput thresholds). Linux arm64: built and its native tests run by the `arm64-natives` CI job on GitHub's arm64 runner (the Java suite does not run there)
 - [x] No copied audio classes; `Gdx.gl30` untouched from the first commit
 
 ### 2. Native core boot
@@ -364,6 +364,11 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 - [x] Spot lights: libGDX's default shader has no spot light code, so on OpenGL they change nothing; `gate5_spot` checks that the shim's picture equals the OpenGL reference exactly (0 differing pixels); point lights are in `gate5_models` against OpenGL
 - [x] `VulkanPolygonSpriteBatch` copies its vertices and indices in one block each (it wrote them one `ByteBuffer` put at a time)
 - [x] Soaks: the RTX 2080 compatibility path ran 10 minutes (60.0 fps, flat), the last combination of GPU and tier
+
+- [x] `glReadPixels` (RGBA, unsigned byte) from a framebuffer texture and from the screen: the frame so far is submitted and waited for, the pixels are copied out, and the frame carries on in a new command buffer with the stream's bindings restored (`ReadPixelsTest`, both tiers, validation clean)
+- [x] A matrix varying (`mat3`, `mat4`) takes one location per column in the translated shaders (`GlslTranslatorTest`); found by a real game's terrain shader
+- [x] The stock `FrameBuffer` builder's float attachments: `OES_texture_float` and friends are reported as supported
+- [~] Luna (the owner's game) on gdx-vulkan: the main screen runs; the 3D game screen needs a `Gdx.gl30` layer, several vertex buffers per draw and instancing (`docs/ADOPTION.md`)
 
 ### F. Tests
 - [~] Translator tests with the shaders libGDX ships: done for the `SpriteBatch`/`PolygonSpriteBatch`, `ShapeRenderer` and `ImmediateModeRenderer20` shaders, `DefaultShader` (unlit variants) and `DepthShader`, and a custom shader with arrays, a bool, an int, two samplers and `#ifdef` flags, each compiled by glslang on both code paths (`GlslTranslatorTest`, no GPU needed); not yet the Gate 3 post-processing shaders

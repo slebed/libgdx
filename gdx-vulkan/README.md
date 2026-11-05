@@ -48,11 +48,11 @@ Beta. Everything below is built and tested against stock libGDX on OpenGL, with 
 | macOS and iOS | needs a Mac to build and test; not started |
 | Wayland | X11 only on Linux |
 | Some GLSL | cube maps and 3D samplers, structs with array or matrix members, `bool` arrays, array varyings, and (on a Vulkan 1.1 driver) more than one texture per draw are refused with a message that names the line |
-| More of OpenGL | the shim covers what libGDX's classes use: programs, uniforms, one vertex buffer (or vertex data in memory) and array or indexed draws. `Gdx.gl30` and `gl31` stay null, so instancing, several vertex buffers, vertex formats other than floats and normalised bytes, query objects and compute through GL are not available; use the Vulkan classes (`VulkanComputeShader`, `VulkanGpuInstances`) |
+| More of OpenGL | the shim covers what libGDX's classes use: programs, uniforms, one vertex buffer (or vertex data in memory) and array or indexed draws. `glReadPixels` works for RGBA8 framebuffers and the screen (it submits the frame so far and waits for the GPU, so it suits picking and screenshots, not every frame of a fast loop). `Gdx.gl30` and `gl31` stay null, so instancing, several vertex buffers, vertex formats other than floats and normalised bytes, query objects and compute through GL are not available; use the Vulkan classes (`VulkanComputeShader`, `VulkanGpuInstances`) |
 | Spot lights, point-light shadows in `VulkanModelBatch` | libGDX's own default shader has no spot light code (on OpenGL a spot light changes nothing; `gate5_spot` checks that the shim agrees), so there is none to port. Point lights work; point-light shadows are not built |
 | Maven Central | not published yet; see [Getting it](#getting-it) |
 
-The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (205 of 249 items done).
+The item-by-item list, including what is partial and why, is in [`docs/CHECKLIST.md`](docs/CHECKLIST.md) (208 of 253 items done).
 
 **Tested on** an NVIDIA RTX 5080 and RTX 2080 (Windows), a software Vulkan driver (lavapipe, on Linux, in CI on every commit), a REDMAGIC phone with an
 Adreno 840 (Android 16) and a Samsung Galaxy S20 FE 5G with an Adreno 650 (Android 13). Both phones pass the whole device suite (32 checks, 3D included, both code paths on the REDMAGIC), and the demos run on both; what each GPU needed is in [`docs/DRIVER_NOTES.md`](docs/DRIVER_NOTES.md). Other GPUs and drivers should work but have not been tried.
@@ -412,7 +412,7 @@ Stock classes run unchanged because the same shim also serves what they use to d
 - On the first run, a shader outside the set compiled with the library (everything but libGDX's own sprite, shape and default and depth model shaders for common materials and lights) is translated and compiled at run time.
 - A few features need a driver with Vulkan 1.3: shadow maps and specular, emissive and normal-map textures. On a Vulkan 1.1 driver they are skipped.
 - On Android, `Gdx.input.setOnscreenKeyboardVisible` (what Scene2D's `TextField` uses) and `Gdx.input.getTextInput` work; a newer libGDX's `openTextInputField` overlay needs the stock `AndroidApplication` and is not covered.
-- Natives are built for Windows x64, Linux x64 and Android arm64. Android armeabi-v7a runs (the device suite passes as a 32-bit process on a phone that has it); x86_64 compiles but has never been run.
+- Natives are built for Windows x64, Linux x64 and Android arm64. Android armeabi-v7a runs (the device suite passes as a 32-bit process on a phone that has it) and x86_64 runs on the Android emulator (29 of 32 device-suite checks; the other three are throughput thresholds a software renderer cannot meet).
 - Offscreen framebuffer passes recorded after a draw to the screen keep their order: a framebuffer pass in the middle of a frame interrupts the main pass.
 - Clustered lights and shadows are not combined in one scene: lights are sorted into clusters on the GPU-driven path (one mesh, no shadows), cascaded shadows work with `VulkanModelBatch` (up to 8 point lights).
 
