@@ -46,11 +46,20 @@ processResources.dependsOn 'compileShaders'
 // depends on this one (a composite build or a published jar) needs no -Dgdxvulkan.native.path. One platform per build: build on each OS to bundle it.
 def hostOs = System.getProperty('os.name').toLowerCase().contains('win') ? 'windows' : System.getProperty('os.name').toLowerCase().contains('mac') ? 'macos' : 'linux'
 def hostArch = System.getProperty('os.arch').toLowerCase().with { it.contains('aarch64') || it.contains('arm64') } ? 'arm64' : 'x86_64'
+// A release build gives -Pgdxvulkan.nativesDir=<dir> with natives/<os>-<arch>/<file> for every platform (built on their own runners): the jar then carries all of them and
+// nothing is built here. Without it the jar holds the natives of the machine that built it.
+def nativesDir = findProperty('gdxvulkan.nativesDir')
 processResources {
-    dependsOn 'buildNatives'
-    from(nativeBuild) {
-        include 'gdxvk.dll', 'libgdxvk.so', 'libgdxvk.dylib'
-        into "natives/${hostOs}-${hostArch}"
+    if (nativesDir != null) {
+        from(nativesDir) {
+            include 'natives/**'
+        }
+    } else {
+        dependsOn 'buildNatives'
+        from(nativeBuild) {
+            include 'gdxvk.dll', 'libgdxvk.so', 'libgdxvk.dylib'
+            into "natives/${hostOs}-${hostArch}"
+        }
     }
 }
 

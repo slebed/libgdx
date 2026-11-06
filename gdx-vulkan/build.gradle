@@ -1,7 +1,7 @@
 subprojects {
     apply plugin: 'java-library'
     group = 'io.github.slebed.gdx-vulkan'
-    version = '0.1.0-SNAPSHOT'
+    version = findProperty('releaseVersion') ?: '0.1.0-SNAPSHOT' // -PreleaseVersion=0.1.0-beta.1 for a release build (.github/workflows/release.yml)
 
     repositories {
         mavenCentral()

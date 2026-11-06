@@ -40,8 +40,12 @@ adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log    
 - [ ] Pre-rotation: rotate the phone in all four orientations by hand and look at it (`adb exec-out screencap -p`), or run the lifecycle run with `--ez preRotate false` and compare
 
 ## 5. Publish
-- [ ] `python tools/release-notes.py <previous tag>` for the draft of the notes; `.github/workflows/release-build.yml` (run by hand, a draft that has not been run yet) builds the natives of each platform and the Android library as workflow artifacts; nothing is published by it
-- [ ] Tag `vX.Y.Z` on the commit; release notes: what changed, what was run where, known gaps (copy from `README.md`)
+Releases are GitHub releases only (the way other libGDX libraries ship); there is no Maven upload. Versions: pre-releases first, `v0.1.0-beta.1`; a tag with a `-` is a pre-release.
+- [ ] Do sections 1 to 4 on the commit to be released and write down what ran where (device, driver, commit)
+- [ ] Try the workflow without a tag: Actions, `release`, Run workflow, version `0.1.0-beta.1`, `dry_run` on. It runs the lavapipe suite, builds every native and the Android library, packages the jars and uploads
+      them (and the draft notes) as the artifact `release-files`. Download it and check that the core jar lists `natives/windows-x86_64`, `natives/linux-x86_64` and `natives/linux-arm64`
+- [ ] Tag the commit and push the tag: `git tag v0.1.0-beta.1 && git push origin v0.1.0-beta.1`. The workflow builds the same files and creates a **draft** pre-release with them; nothing is public yet
+- [ ] Edit the draft's notes: add the runs from the first step, the known gaps (copy from `README.md`), and a line pointing to `docs/TRYING_IT.md`; then press Publish
 - [ ] `NOTICE` still lists everything vendored and generated
 
 ## Bumping libGDX

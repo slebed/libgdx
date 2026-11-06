@@ -12,19 +12,19 @@ the plan names.
 
 | Section | Done | Partial | Not started | Total |
 |---|---|---|---|---|
-| Core decisions | 55 | 2 | 0 | 57 |
+| Core decisions | 56 | 1 | 0 | 57 |
 | Phase 1a: Extraction, window surfaces and CI | 21 | 1 | 0 | 22 |
 | Phase 1b: Memory, layout and caches | 20 | 0 | 0 | 20 |
 | Phase 2: Unmodified 2D | 25 | 0 | 0 | 25 |
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 12 | 1 | 0 | 13 |
-| Phase 5: 3D with stock models | 10 | 3 | 0 | 13 |
+| Phase 5: 3D with stock models | 11 | 2 | 0 | 13 |
 | Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 45 | 8 | 3 | 56 |
-| Releases and adoption testing | 0 | 0 | 12 | 12 |
+| Releases and adoption testing | 7 | 0 | 5 | 12 |
 | Demos (gdx-vulkan-demos) | 11 | 4 | 0 | 15 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
-| Cross-cutting and housekeeping | 7 | 0 | 1 | 8 |
-| **All** | **219** | **19** | **20** | **258** |
+| Cross-cutting and housekeeping | 8 | 0 | 1 | 9 |
+| **All** | **229** | **17** | **13** | **259** |
 ---
 
 ## Core decisions
@@ -74,7 +74,7 @@ the plan names.
 - [x] Dirty meshes uploaded at draw time (a new native buffer when the old one was already drawn this frame); `Mesh.dispose()` releases the native buffers through `glDeleteBuffer` (`StockMeshTest`)
 - [x] `VertexDataType.VertexArray` meshes (and index arrays) copied into the per-frame ring on each draw (`StockMeshTest.vertexArrayMeshesAreCopiedThroughTheRingEachDraw`)
 - [x] Unit tests pinning the field names/types (`StockMeshFieldsTest`, no GPU needed); `StockMeshAccess` also checks them when it is constructed. Per libGDX version: only 1.14.2 exists to pin
-- [~] Upstream PR: public `getBufferHandle()` and dirty accessor: patch written and checked (`docs/upstream/`), **not filed** (the owner's decision; until it ships gdx-vulkan reads the fields through JNI field ids)
+- [x] Upstream PR: **dropped by the owner (2026-11-05)**: the library does not rely on changes to the libGDX API. The patch stays in `docs/upstream/` as a record; gdx-vulkan reads the VBO/IBO handle and dirty fields through JNI field ids (`StockMeshFieldsTest` pins the names)
 
 ### 6. Coordinate, winding, depth and colour conventions
 - [x] Swapchain: negative-height viewport, `COUNTER_CLOCKWISE` front face (pixel-tested upright + culling, both tiers)
@@ -275,7 +275,7 @@ the plan names.
 ### 1. Mesh data
 - [x] Buffer shim calls with copy-on-write (see Core decisions 3)
 - [x] `StockMeshAccess` uploads dirty stock meshes at draw time
-- [~] The upstream libGDX PR (public buffer handle + dirty accessor): the patch is written and checked (`docs/upstream/`, applies cleanly to the libGDX sources, five classes, two small public accessors each) but **not filed**: opening a pull request on `libgdx/libgdx` is the owner's decision
+- [x] The upstream libGDX PR is **dropped** (owner, 2026-11-05: the library does not rely on changes to the libGDX API); the patch is kept in `docs/upstream/` as a record
 
 ### 2. `VulkanModelBatch`
 - [x] Accepts stock `RenderableProvider`s (`ModelInstance` and friends, the stock `RenderableSorter`s, `Environment`): `VulkanModelBatch`, a port of libGDX's default shader. It maps `VertexAttributes` + `Material` to pipelines itself (40 vertex shader variants for normal/colour/texcoord and 0-4 bone weights, specialization constants for the material and light flags) instead of through a `VulkanShaderProvider` and `VulkanShaderPipelineBundle`s, so custom `Shader`s and `ShaderProvider`s are not accepted. Supported: position, normal, colour, texcoord0, bones (4 weights); diffuse/specular/emissive colours and textures, shininess, normal maps (beyond stock), blending, alpha test, cull and depth attributes; ambient cubemap, directional and point lights, fog, one directional shadow map (`DirectionalShadowLight`, with `VulkanModelBatch.depth` as the `DepthShaderProvider` equivalent). Tier B samples one texture per draw, so on Tier B only the diffuse texture works and specular/emissive/normal textures and shadow maps are ignored. Not supported: spot lights (stock's default shader has none either), reflection, custom shaders
@@ -387,13 +387,13 @@ Owner's plan: publish release builds on GitHub, when it is safe, so others can t
 owner's own projects to prove that moving over is clean, and hopefully faster than stock libGDX. A release is made only when the owner says so.
 
 ### Release builds
-- [ ] Release criteria agreed ("safe"): CI green on the tagged commit; no open bug that crashes or corrupts on a supported platform; the known limitations are in the release notes; the licences and `NOTICE` are complete; no personal paths or credentials in the repository
-- [ ] Version scheme: pre-releases first (`v0.1.0-beta.1`), marked as pre-release on GitHub
-- [ ] One jar that carries the native library of every desktop platform (`natives/<os>-<arch>/`); today the jar holds only the platform of the machine that built it
-- [ ] A release workflow that runs on a tag: builds the natives on Windows x64, Linux x64 and (arm64 if wanted), the Android library as an AAR (arm64-v8a and the other ABIs), runs the tests, and attaches the jars, the AAR and their checksums
-- [ ] Release notes written from the checklist (what works, what does not, the known problems) and a "how to try it" page for testers (`docs/RELEASE.md` updated)
-- [ ] Issue template that asks for what is needed to reproduce (GPU, driver, OS, which path it used, the log)
-- [ ] Publishing to a Maven repository (GitHub Packages, JitPack or Maven Central) decided; until then the releases are the download
+- [x] Release criteria agreed (owner, 2026-11-05): CI green on the tagged commit; no open bug that crashes or corrupts on a supported platform; the known limitations are in the release notes; the licences and `NOTICE` are complete; no personal paths or credentials in the repository. Real-GPU and phone runs are listed in `docs/RELEASE.md` and recorded in the notes
+- [x] Version scheme (owner, 2026-11-05): pre-releases first (`v0.1.0-beta.1`), a tag with a `-` is created as a draft **pre-release** on GitHub
+- [x] One jar that carries the native library of every desktop platform (`natives/<os>-<arch>/`: windows-x86_64, linux-x86_64, linux-arm64): `-Pgdxvulkan.nativesDir=<dir>` packages natives built on their own runners (`release.yml`, job `package`, which fails when one is missing); checked locally with a stand-in directory
+- [x] A release workflow that runs on a tag (`.github/workflows/release.yml`): the lavapipe suite first, then natives for Windows x64, Linux x64 and arm64, the Android AAR (arm64-v8a, armeabi-v7a, x86_64), one jar with every desktop native, the AAR, the demo APK and `SHA256SUMS.txt`, and a **draft** release (a pre-release for a `-` tag) that the owner publishes; `workflow_dispatch` with `dry_run` builds everything and creates no release
+- [x] Release notes: `tools/release-notes.py` drafts them in the workflow (checklist counts, commits since the last tag, known limitations); the "how to try it" page for testers is `docs/TRYING_IT.md`; the runs on real GPUs and phones are added by hand before publishing (`docs/RELEASE.md`)
+- [x] Issue template that asks for what is needed to reproduce (`.github/ISSUE_TEMPLATE/bug_report.yml`: GPU and driver, OS, the path, the log)
+- [x] Publishing decided (owner, 2026-11-05): **GitHub releases only**, like the other libGDX libraries; the jars and the AAR are the download. Maven Central or JitPack can follow if testers ask for a Gradle dependency
 
 ### Adoption testing in the owner's projects
 - [ ] `docs/ADOPTION.md`: one entry per project: what had to change (class swaps, shaders, configuration), anything unclear or broken, how long it took

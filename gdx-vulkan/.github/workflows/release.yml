@@ -1,0 +1,159 @@
+name: release
+
+# Builds a release of gdx-vulkan: the natives of every platform libGDX supports that this library addresses (Windows x64, Linux x64 and arm64; Android arm64-v8a,
+# armeabi-v7a and x86_64 through the AAR), ONE jar that carries all the desktop natives, the AAR, a checksum file and draft release notes.
+#
+#   - Push a tag `vX.Y.Z` or `vX.Y.Z-beta.N`: everything is built after the lavapipe test suite passes, and a DRAFT pre-release (a tag with a `-`) or draft release is created
+#     on GitHub with the files attached. Nothing is public until the owner presses "Publish" on the draft.
+#   - Run by hand (workflow_dispatch) with `dry_run` on (the default): the same build, the files are uploaded as workflow artifacts and no release is created.
+#
+# What a release needs that CI cannot do (real GPUs, phones) is listed in docs/RELEASE.md; record those runs in the release notes before publishing the draft.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, without the v (for example 0.1.0-beta.1)'
+        required: true
+        default: '0.1.0-dev'
+      dry_run:
+        description: 'Build only: upload the files as workflow artifacts and create no release'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    uses: ./.github/workflows/ci.yml
+
+  linux-x64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build build-essential glslc libx11-dev
+      - name: Build the natives
+        run: |
+          cmake -S gdx-vulkan-core/jni -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release -DGDXVK_BUILD_TESTS=OFF
+          cmake --build build/native --parallel
+          mkdir -p stage/natives/linux-x86_64 && cp build/native/libgdxvk.so stage/natives/linux-x86_64/
+      - uses: actions/upload-artifact@v4
+        with: { name: natives-linux-x86_64, path: stage }
+
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build build-essential glslc libx11-dev
+      - name: Build the natives
+        run: |
+          cmake -S gdx-vulkan-core/jni -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release -DGDXVK_BUILD_TESTS=OFF
+          cmake --build build/native --parallel
+          mkdir -p stage/natives/linux-arm64 && cp build/native/libgdxvk.so stage/natives/linux-arm64/
+      - uses: actions/upload-artifact@v4
+        with: { name: natives-linux-arm64, path: stage }
+
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the Vulkan SDK (glslc)
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with: { vulkan_version: 1.4.304.1, install_runtime: false, cache: true }
+      - name: Build the natives (static MSVC runtime, see jni/CMakeLists.txt)
+        shell: bash
+        run: |
+          cmake -S gdx-vulkan-core/jni -B build/native -DCMAKE_BUILD_TYPE=Release -DGDXVK_BUILD_TESTS=OFF
+          cmake --build build/native --config Release --parallel
+          mkdir -p stage/natives/windows-x86_64
+          cp "$(find build/native -name gdxvk.dll | head -n 1)" stage/natives/windows-x86_64/
+      - uses: actions/upload-artifact@v4
+        with: { name: natives-windows-x86_64, path: stage }
+
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - name: Install glslc
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends glslc
+      - name: Install the NDK and CMake the library asks for
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358" "cmake;3.22.1"
+      - name: Build the Android library (every ABI) and the apps
+        working-directory: gdx-vulkan-android
+        run: |
+          chmod +x gradlew
+          ./gradlew :library:assembleRelease :testapp:assembleDebug :demoapp:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: |
+            gdx-vulkan-android/library/build/outputs/aar/*-release.aar
+            gdx-vulkan-android/testapp/build/outputs/apk/debug/*.apk
+            gdx-vulkan-android/demoapp/build/outputs/apk/debug/*.apk
+
+  package:
+    needs: [tests, linux-x64, linux-arm64, windows-x64, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', inputs.version) }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - name: Install glslc (the jar carries the library's own SPIR-V shaders)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends glslc
+      - uses: actions/download-artifact@v4
+        with: { pattern: natives-*, path: natives-in, merge-multiple: true }
+      - uses: actions/download-artifact@v4
+        with: { name: android, path: android-in }
+      - name: Build the jars with every desktop native inside
+        run: |
+          VER="${VERSION#v}"
+          chmod +x gradlew
+          find natives-in -type f
+          ./gradlew -PreleaseVersion="$VER" -Pgdxvulkan.nativesDir="$PWD/natives-in" :gdx-vulkan-core:jar :gdx-vulkan-desktop:jar
+          mkdir -p dist
+          cp gdx-vulkan-core/build/libs/gdx-vulkan-core-"$VER".jar gdx-vulkan-desktop/build/libs/gdx-vulkan-desktop-"$VER".jar dist/
+          cp android-in/library/build/outputs/aar/*-release.aar "dist/gdx-vulkan-android-$VER.aar"
+          cp android-in/demoapp/build/outputs/apk/debug/*.apk "dist/gdx-vulkan-demos-$VER.apk"
+          # The jar must hold the natives of every desktop platform.
+          for p in linux-x86_64/libgdxvk.so linux-arm64/libgdxvk.so windows-x86_64/gdxvk.dll; do
+            unzip -l "dist/gdx-vulkan-core-$VER.jar" | grep -q "natives/$p" || { echo "missing natives/$p in the core jar"; exit 1; }
+          done
+          (cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - name: Draft the release notes
+        run: |
+          PREV="$(git tag --list 'v*' --sort=-v:refname | grep -vx "$VERSION" | head -n 1 || true)"
+          python3 tools/release-notes.py $PREV > dist-notes.md
+          cat dist-notes.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: |
+            dist
+            dist-notes.md
+      - name: Create the draft release (tag pushes only)
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FLAGS="--draft"
+          case "$VERSION" in *-*) FLAGS="$FLAGS --prerelease" ;; esac
+          gh release create "$VERSION" $FLAGS --title "gdx-vulkan $VERSION" --notes-file dist-notes.md dist/*

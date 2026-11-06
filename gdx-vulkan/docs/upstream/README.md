@@ -1,6 +1,6 @@
 # Upstream libGDX change: public buffer handle and dirty flag
 
-**Status: prepared, not filed.** `0001-public-buffer-handle-and-dirty-flag.patch` applies cleanly to libGDX's `gdx` module (checked with
+**Status: dropped (owner, 2026-11-05): the library must not rely on changes to the libGDX API. Kept as a record only.** It was prepared, not filed. `0001-public-buffer-handle-and-dirty-flag.patch` applies cleanly to libGDX's `gdx` module (checked with
 `git apply --check` against the 1.14.x sources). Nobody has opened a pull request on `libgdx/libgdx`; that is the owner's call.
 
 ## What it changes

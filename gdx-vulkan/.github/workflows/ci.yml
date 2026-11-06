@@ -10,6 +10,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:   # the release workflow runs the whole suite first
   workflow_dispatch:
     inputs:
       update_goldens:

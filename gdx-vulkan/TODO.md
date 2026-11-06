@@ -92,15 +92,13 @@ Built: stock shadow recipe (both backends), cascaded shadows, GPU boids with an 
 ## 5. Release and adoption (only when the owner says so)
 
 Plan in the checklist "Releases and adoption testing". Nothing is released; the owner wants others to test and wants to try the library in several of their own projects.
-- **[decide] Release criteria** ("safe"): CI green on the tag, no open crash/corruption bug on a supported platform, known limitations in the notes, licences and `NOTICE` complete, no personal paths.
-- **[build] One jar with the natives of every desktop platform** (`natives/<os>-<arch>/`; today the jar holds the build machine's platform only).
-- **[build] A release workflow on a tag:** natives for Windows x64, Linux x64 (arm64 if wanted), the Android AAR (all ABIs), tests, jars and AAR attached.
-- **[decide] Version scheme** (pre-releases first, `v0.1.0-beta.1`) and **where to publish** (GitHub releases only, GitHub Packages, JitPack, Maven Central).
-- **[build] Release notes from the checklist, a "how to try it" page for testers, an issue template** (GPU, driver, OS, code path, log).
+Decisions of the owner, 2026-11-05: the release criteria in the checklist are the bar; versions `v0.1.0-beta.1` and so on; **GitHub releases only**; platforms are whatever libGDX supports and the library can address (Windows x64, Linux x64 and arm64, Android arm64-v8a, armeabi-v7a, x86_64; macOS and iOS need a Mac); **no upstream libGDX change**.
+- **[done 2026-11-05] The release machinery:** `.github/workflows/release.yml` (tag or dry run: tests, natives, AAR, one jar with every desktop native, checksums, draft release), `docs/TRYING_IT.md` for testers, the issue template, `tools/release-notes.py`, `docs/RELEASE.md` section 5. **Not run yet on GitHub:** do the dry run first (RELEASE.md section 5).
+- **[owner] When to cut the first pre-release:** after the checklist in `docs/RELEASE.md` sections 1 to 4 has been done on the commit (real GPUs, a phone round), and the unexplained measurements in section 8 below are looked at, if the owner wants them first.
 - **[build] Adoption testing in the owner's projects:** `docs/ADOPTION.md` (what had to change, what broke, how long it took), build and run each project on the desktop (and Android),
   compare with stock, switch stock and gdx-vulkan with a flag to measure one game both ways (frame time CPU and GPU, 1% lows, memory), list the custom GLSL each project uses, correct the
-  README migration section from the experience.
-- **[decide] Upstream libGDX PR** (public buffer handle and dirty accessor on VBO/IBO; patch ready in `docs/upstream/`, applies cleanly, **not filed**). Until it ships gdx-vulkan reads those fields through JNI field ids.
+  README migration section from the experience. (The owner keeps the notes about their own projects out of this repository.)
+- **[decided 2026-11-05] No upstream libGDX PR:** the library must not rely on changes to the libGDX API. The prepared patch (`docs/upstream/`) is kept as a record; gdx-vulkan reads those fields through JNI field ids.
 - **[build] Bump `gdxVersion` to 1.14.3** when it is on Maven Central (still 404 on the last check); procedure at the end of `docs/RELEASE.md`. Regenerates the GL20 base and the batches from the new sources.
 
 ## 6. Documents that disagree with the code
