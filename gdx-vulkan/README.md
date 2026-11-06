@@ -382,6 +382,21 @@ gpu.render(camera, width, height);           // culls, sorts the lights into clu
 ```
 The transforms never leave GPU memory. `Stress5Main` is a complete program; `VulkanSpriteBatchInstanced` does the same for a million sprites.
 
+The instances can receive the directional light's shadow too: `gpu.setShadow(light)` with a stock `DirectionalShadowLight` or a `VulkanCascadedShadowLight` that you have rendered your casters into this frame (up to 4 cascades; modern path only). The instances do not cast into it; draw whatever casts with the `ModelBatch`.
+
+### Measuring where a frame goes
+
+`GdxVkPresenter.gpuFrameNanos()` is the GPU time of a whole frame. To split it by stage, mark the end of each stage in the command stream and read the times a frame or two later:
+
+```java
+GdxVkFrame.current().stream().gpuZone(0);                 // after the shadow pass has been recorded
+GdxVkFrame.current().stream().gpuZone(1);                 // after the main scene
+...
+long shadowNs = frame.presenter().gpuZoneNanos(0);        // GPU time from the frame's start to mark 0
+long sceneNs  = frame.presenter().gpuZoneNanos(1);        // from mark 0 to mark 1
+```
+Zones are 0 to 31, marked in increasing order; one that a frame did not mark reads 0. Each mark is a timestamp the GPU has to wait for, so it costs throughput: use zones to see proportions, not absolute speed.
+
 ## How it works
 
 gdx-vulkan implements libGDX's `GL20` interface on Vulkan for everything that is not drawing: textures, framebuffers, buffers, state. The drawing classes
@@ -413,7 +428,9 @@ Stock classes run unchanged because the same shim also serves what they use to d
 - On Android, `Gdx.input.setOnscreenKeyboardVisible` (what Scene2D's `TextField` uses) and `Gdx.input.getTextInput` work; a newer libGDX's `openTextInputField` overlay needs the stock `AndroidApplication` and is not covered.
 - Natives are built for Windows x64, Linux x64 and Android arm64. Android armeabi-v7a runs (the device suite passes as a 32-bit process on a phone that has it) and x86_64 runs on the Android emulator (29 of 32 device-suite checks; the other three are throughput thresholds a software renderer cannot meet).
 - Offscreen framebuffer passes recorded after a draw to the screen keep their order: a framebuffer pass in the middle of a frame interrupts the main pass.
-- Clustered lights and shadows are not combined in one scene: lights are sorted into clusters on the GPU-driven path (one mesh, no shadows), cascaded shadows work with `VulkanModelBatch` (up to 8 point lights).
+- Clustered lights and shadows are combined only one way: the GPU-driven instances receive the directional light's shadow next to their clustered point lights, but they do not cast shadows, and point lights are not shadowed. Cascaded shadows with casters work with `VulkanModelBatch` (up to 8 point lights).
+- The library without the run-time shader compiler (`-Pgdxvulkan.noCompiler=true`, 0.55 MB instead of 2.5 MB) runs everything that ships as SPIR-V but reports an error for a custom `ShaderProgram`. See `docs/SHADER_COMPILER.md`.
+- Measured against OpenGL on one game, gdx-vulkan's process held about 0.6 GB more memory (the same in a menu and in a scene, so not scene dependent), and its render thread was busy 0.97 cores in an uncapped 2,000 fps menu against 0.35 on OpenGL, with the frame 10% slower there (about 0.05 ms of fixed cost per frame). Neither has been explained or profiled in the library yet: the memory is probably the Vulkan driver and the compiler, the busy thread probably a wait for the GPU that spins. With vsync on, the second should not show.
 
 ## Contributing and licence
 Issues and pull requests are welcome; run the tests first (`docs/TESTING.md`). What is left to do and the open problems are in [`TODO.md`](TODO.md). Apache License 2.0, see `LICENSE`. Third-party code is vendored in

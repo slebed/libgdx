@@ -49,14 +49,13 @@ on the Adreno 840 and 1.1 s on the Adreno 650, each further shader 10 to 25 ms, 
   a second vertex binding for `glVertexAttrib` constants, a present thread (considered; risk with Swappy/resizing/present fences, and it only matters above 1,000 fps).
 - **[build] Shim coverage:** instancing through GL (needs `Gdx.gl30`, which stays null), vertex formats other than float and
   normalised ubyte, unsigned-byte indices, query objects.
-- **[build] Translator:** `#version 300 es` / `330` shaders passing through; `#define` flags as specialization constants so variants share SPIR-V; precision qualifiers to
-  `RelaxedPrecision` on mobile; a spirv-opt pass (keep only if a benchmark shows an effect); optional build without the compiler's sources for precompiled-bundle users;
+- **[done 2026-11-05] Translator:** `#version 300 es` / `330` / `430` shaders pass through (a real game's custom shaders run); `gl_FragCoord` and `dFdx`/`dFdy` follow OpenGL's axes; fragment outputs start at zero; an unwritten varying reads zero; the optional build without the compiler exists (`-Pgdxvulkan.noCompiler=true`); the spirv-opt pass is **dropped** (the one measurement shows nothing to win, see `docs/CHECKLIST.md`).
+  **[build]** `#define` flags as specialization constants so variants share SPIR-V (the preprocessor decides the declarations first, so this means restructuring the translator); precision qualifiers to `RelaxedPrecision` on mobile (needs a phone to measure);
   `VulkanShaderProgram` setter overloads still missing (`FloatBuffer` / `IntBuffer`, by-location multi-value forms).
 - **[build] A test that fails the build if the model batch, the effects or compute call the run-time compiler** (only the sprite batch, polygon batch and shape renderer are covered).
 
 ### 3D and rendering
-- **[build] Clustered lights together with shadows in one scene.** Clusters exist only on the GPU-driven path (one mesh, no shadows); cascaded shadows and up to 8 point lights
-  work in `VulkanModelBatch`. Options: the cluster lookup in the model shader (many lights for any model), or cascade sampling in `gpu_lit`.
+- **[partly done 2026-11-05] Clustered lights together with shadows in one scene.** The GPU-driven instances now receive the directional light's shadow (`VulkanGpuInstances.setShadow`). **[build]** the instances casting into the shadow map (a second cull against the light's frustum and a depth variant of the indirect draw), shadows for the point lights, and the cluster lookup in the model shader (many lights for any model).
 - **[decided 2026-11-05] No spot lights in `VulkanModelBatch`**: libGDX's own default shader does not implement them either (see above), so a port that adds them would draw what stock cannot. Point-light shadows remain unbuilt (clustered lights and shadows in one scene, above).
 - **[build] True reordering of offscreen framebuffer passes** recorded after a screen draw (pass scheduling today only moves the swapchain pass's start).
 
@@ -86,7 +85,7 @@ Built: stock shadow recipe (both backends), cascaded shadows, GPU boids with an 
 - **[done 2026-11-04] The comparison demos**: sprites, boids and shadows run the same scene on both backends (`tools/compare-demos.sh`, `tools/compare-phone.sh`, `GlDemosActivity`); the cascaded shadows demo is
   labelled a feature demo with no OpenGL counterpart. Results are in the README ("Demo measurements"), including the cases gdx-vulkan does not win.
 - **[done 2026-11-04] The demo app on Android** (`gdx-vulkan-android/demoapp`, `tools/demos-test.sh`; touch menu, three demos, Back returns). Passes on the Galaxy S20 FE (Adreno 650, Tier B); not yet run on the REDMAGIC (USB only). The owner's review of the demos' code and looks is still to do.
-- **[build] More demos:** sprite storm (100k+ sprites, stock against Vulkan), post-processing over a Scene2D UI; a scene with clustered lights and shadows once section 3 allows.
+- **[done 2026-11-05] More demos:** sprite storm (150,000 sprites from one atlas) and post-processing over a Scene2D UI (menu keys 5 and 6, OpenGL counterparts `storm` and `postfx`, smoke tests). Numbers on the phones and both RTX cards are still to be recorded in the README. **[build]** a scene with clustered lights and shadows, now that the instances can receive shadows (casting is still missing).
 - **[build] Demo numbers on the second GPU** (the RTX 2080 has no fair OpenGL comparison on this PC; phones and the RTX 5080 are in the README).
 - **[done 2026-11-05] Demo screenshots in the README** (`docs/images/`, 1280 x 720 on the RTX 5080, quantised to 128 colours to stay small).
 
@@ -126,3 +125,9 @@ Plan in the checklist "Releases and adoption testing". Nothing is released; the 
 5. **Documents** (section 6): tick the stale boxes, add the as-built section to the plan.
 6. **Release work** (section 5) when the owner decides: the multi-platform jar and workflow first, then a first pre-release to testers, adoption testing in parallel.
 7. **Later:** custom 3D shader API decision, clustered lights with shadows, offscreen pass reordering, Wayland, macOS and iOS.
+
+## 8. Measurements still unexplained (2026-11-05, from running one game on both renderers)
+- **[verify] Memory:** the gdx-vulkan process held about 0.6 GB more working set than OpenGL in the same scene (0.44 against 1.06 GB in a menu, 1.8 against 2.4 GB in a scene). The rings of the library are 4 to 32 MB, so the rest is the driver, glslang and the caches; split it (a vmmap, or the process with and without -Pgdxvulkan.noCompiler=true) before anyone optimises it.
+- **[verify] Render thread:** 0.97 cores busy in an uncapped menu at 2,000 fps against 0.35 on OpenGL (whose driver threads take the rest: the process totals are alike). Probably the wait for the GPU spinning; check with vsync on and with GDXVK_PROFILE=1.
+- **[verify] Fixed per-frame cost:** at 2,000 fps a frame is 10% slower than OpenGL (0.49 against 0.44 ms): acquire, submit, present and the per-frame bookkeeping. Only visible when frames are this short.
+- **[verify] Android pre-rotation of the new fragment-shader fixes** (gl_FragCoord, gdx_dFdx, gdx_dFdy): the rotated cases follow the same table as the vertex pre-rotation and receive the same specialization constant, but only the unrotated case is tested; check on a phone.
