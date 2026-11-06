@@ -12,6 +12,8 @@
 // (light_cull.comp). The cluster is found from the pixel (the screen's top row first, as the swapchain is drawn) and the exponential depth slice.
 layout(constant_id = 1) const bool C_TEXTURE = false;
 layout(constant_id = 2) const bool C_LIGHTS = true; // false when there are no point lights: the cluster lists are not read
+layout(constant_id = 3) const bool C_SHADOW = false; // the directional light is shadowed by the maps of VulkanGpuInstances.setShadow (modern path only)
+layout(constant_id = 4) const int C_CASCADES = 1;    // cascades of that shadow (1: the plain map)
 
 layout(location = 0) in vec3 v_world;
 layout(location = 1) in vec3 v_normal;
@@ -29,6 +31,33 @@ float f(uint i) {
     return uintBitsToFloat(w[i]);
 }
 
+mat4 loadMat4(uint at) {
+    return mat4(vec4(f(at), f(at + 1u), f(at + 2u), f(at + 3u)), vec4(f(at + 4u), f(at + 5u), f(at + 6u), f(at + 7u)),
+        vec4(f(at + 8u), f(at + 9u), f(at + 10u), f(at + 11u)), vec4(f(at + 12u), f(at + 13u), f(at + 14u), f(at + 15u)));
+}
+
+// The same lookup as model_default.frag's cascaded shadows: the cascade is picked by the view depth (1 / gl_FragCoord.w is the clip-space w), four PCF taps of the packed depth.
+float shadowFactor() {
+    const float depth = 1.0 / gl_FragCoord.w;
+    int c = 0;
+    if (depth > f(H_SHADOW_SPLITS)) c = 1;
+    if (depth > f(H_SHADOW_SPLITS + 1u)) c = 2;
+    if (depth > f(H_SHADOW_SPLITS + 2u)) c = 3;
+    c = min(c, C_CASCADES - 1);
+    const vec4 sp = loadMat4(H_SHADOW + uint(c) * 16u) * vec4(v_world, 1.0);
+    vec3 uv = (sp.xyz / sp.w) * 0.5 + 0.5;
+    uv.z = min(uv.z, 0.998);
+    const int slot = int(w[H_SHADOW_SLOTS + uint(c)]);
+    const float o = f(H_SHADOW_PARAMS);
+    const vec4 bitShifts = vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0);
+    float lit = 0.0;
+    lit += step(uv.z, dot(texture(GDX_TEXTURE(slot), uv.xy + vec2(o, o)), bitShifts));
+    lit += step(uv.z, dot(texture(GDX_TEXTURE(slot), uv.xy + vec2(-o, o)), bitShifts));
+    lit += step(uv.z, dot(texture(GDX_TEXTURE(slot), uv.xy + vec2(o, -o)), bitShifts));
+    lit += step(uv.z, dot(texture(GDX_TEXTURE(slot), uv.xy + vec2(-o, -o)), bitShifts));
+    return lit * 0.25;
+}
+
 void main() {
     vec3 base = vec3(1.0);
     if (C_TEXTURE) base = texture(GDX_TEXTURE(gdx_pc.u_indices.y), v_uv).rgb;
@@ -37,7 +66,8 @@ void main() {
     const vec3 albedo = base * tint;
 
     const vec3 n = normalize(v_normal);
-    vec3 light = vec3(0.12) + vec3(0.55, 0.52, 0.48) * max(dot(n, normalize(vec3(0.4, 0.8, 0.3))), 0.0);
+    const float shadow = C_SHADOW ? shadowFactor() : 1.0;
+    vec3 light = vec3(0.12) + vec3(0.55, 0.52, 0.48) * max(dot(n, normalize(vec3(0.4, 0.8, 0.3))), 0.0) * shadow;
 
     if (!C_LIGHTS) {
         outColor = vec4(albedo * light, 1.0);

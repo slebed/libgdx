@@ -4,6 +4,8 @@ import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g3d.utils.TextureDescriptor;
+import com.badlogic.gdx.graphics.g3d.environment.ShadowMap;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.VertexAttributes.Usage;
@@ -34,7 +36,7 @@ import java.nio.ByteOrder;
  * simulation as a {@link VulkanComputeShader} over {@link #buffer()}, queue it before {@link #render}, and it runs ahead of the cull and the draw
  * in the same frame with the barriers in place.
  *
- * <p>Per frame the CPU does: rewrite a 224-byte header, queue three dispatches (reset, cull, light cull), and record one bind, one push and one
+ * <p>Per frame the CPU does: rewrite a 528-byte header, queue three dispatches (reset, cull, light cull), and record one bind, one push and one
  * indirect draw. Nothing scales with the instance count and nothing allocates. The view is a perspective camera; the swapchain is the target
  * (the cluster lookup assumes its top-down pixel rows).
  */
@@ -42,7 +44,7 @@ public class VulkanGpuInstances implements Disposable {
     public static final int INSTANCE_FLOATS = 12, LIGHT_FLOATS = 8;
     /** Clusters in x, y and depth, and the most lights one cluster keeps (more are dropped). */
     public static final int CLUSTERS_X = 16, CLUSTERS_Y = 9, CLUSTERS_Z = 24, MAX_LIGHTS_PER_CLUSTER = 32;
-    private static final int HEADER_UINTS = 56;
+    private static final int HEADER_UINTS = 132;
 
     private final GdxVkFrame frame;
     private final GdxVkContext context;
@@ -64,8 +66,11 @@ public class VulkanGpuInstances implements Disposable {
     private final float[] pushReset = VulkanComputeShader.ints(VulkanComputeShader.newPush(), 0, 0, 0, 0);
     private final float[] pushCull = VulkanComputeShader.ints(VulkanComputeShader.newPush(), 1, 0, 0, 0);
     private final float[] pushLights = VulkanComputeShader.newPush();
-    private int pipelineId = -1, pipelineIdUnlit = -1;
+    private final int[] pipelines = new int[2 * 5]; // by (lit, cascades): the pipeline id, -1 until it was built
     private Object pipelineOwner;
+    private ShadowMap shadow;
+    private final int[] shadowSlots = new int[4];
+    private final float[] shadowSplits = new float[4];
 
     /**
      * @param mesh a stock mesh with position, normal and (to texture it) texture coordinates, centred on its origin
@@ -110,6 +115,33 @@ public class VulkanGpuInstances implements Disposable {
         boundingRadius = r;
         cull = new VulkanComputeShader(frame, "gpu_cull", "gpu_cull.comp");
         lightCull = new VulkanComputeShader(frame, "light_cull", "light_cull.comp");
+    }
+
+    /**
+     * Lets the instances receive a shadow on the directional light (the point lights are not shadowed): a stock {@code DirectionalShadowLight} or a
+     * {@link VulkanCascadedShadowLight} that the application has rendered its casters into this frame, before {@link #render}. The instances themselves
+     * do not cast into it: draw whatever casts with the {@code ModelBatch}. Modern code path only (the compatibility path binds one texture per draw): there
+     * the call is accepted and the shadow is ignored. Pass null to switch it off.
+     */
+    public void setShadow (ShadowMap shadow) {
+        this.shadow = shadow;
+    }
+
+    private int shadowCascades () {
+        if (shadow == null || !tierA) return 0;
+        return shadow instanceof VulkanCascadedShadowLight ? Math.min(((VulkanCascadedShadowLight)shadow).cascades(), 4) : 1;
+    }
+
+    /** Binds the depth map the way the model batch does and returns its slot in the bindless table. */
+    private int shadowSlot (TextureDescriptor<Texture> desc) {
+        final Texture t = desc.texture;
+        gl.glActiveTexture(GL20.GL_TEXTURE0);
+        t.bind();
+        t.unsafeSetWrap(desc.uWrap, desc.vWrap);
+        t.unsafeSetFilter(desc.minFilter, desc.magFilter);
+        final int id = gl.nativeTexture(t.getTextureObjectHandle());
+        if (id < 0) throw new GdxRuntimeException("gdx-vulkan: the shadow map has no storage (nothing was rendered into it)");
+        return gl.slotOf(id);
     }
 
     /** The resource buffer: bind it as storage in your own compute shaders. */
@@ -202,6 +234,27 @@ public class VulkanGpuInstances implements Disposable {
         header.putInt(CLUSTERS_X).putInt(CLUSTERS_Y).putInt(CLUSTERS_Z).putInt(MAX_LIGHTS_PER_CLUSTER);
         header.putInt(offInstances).putInt(offVisible).putInt(offIndirect).putInt(offLights);
         header.putInt(offClusters).putInt(mesh.getNumIndices()).putInt(offUser).putInt(0);
+        final int cascades = shadowCascades();
+        final int[] slots = shadowSlots;
+        final float[] splits = shadowSplits;
+        java.util.Arrays.fill(slots, 0);
+        java.util.Arrays.fill(splits, 0f);
+        float offset = 0f;
+        for (int k = 0; k < 4; k++) {
+            if (k < cascades) {
+                final TextureDescriptor<Texture> map = shadow instanceof VulkanCascadedShadowLight ? ((VulkanCascadedShadowLight)shadow).depthMap(k) : shadow.getDepthMap();
+                final Matrix4 m = shadow instanceof VulkanCascadedShadowLight ? ((VulkanCascadedShadowLight)shadow).projViewTrans(k) : shadow.getProjViewTrans();
+                for (int i = 0; i < 16; i++) header.putFloat(m.val[i]);
+                slots[k] = shadowSlot(map);
+                if (k == 0) offset = 1f / (2f * map.texture.getWidth());
+            } else {
+                for (int i = 0; i < 16; i++) header.putFloat(0f);
+            }
+            if (k < 3 && shadow instanceof VulkanCascadedShadowLight && k + 1 < cascades) splits[k] = ((VulkanCascadedShadowLight)shadow).split(k);
+        }
+        for (int k = 0; k < 4; k++) header.putFloat(k < 3 ? splits[k] : 0f);
+        for (int k = 0; k < 4; k++) header.putInt(slots[k]);
+        header.putFloat(offset).putInt(cascades).putInt(0).putInt(0);
         header.flip();
         header.get(headerBytes, 0, header.limit());
         resources.writeBuffer(buffer, 0, headerBytes, 0, header.limit());
@@ -211,15 +264,17 @@ public class VulkanGpuInstances implements Disposable {
     private int pipeline (boolean lit) {
         final Object presenter = frame.presenter();
         if (presenter != pipelineOwner) {
-            pipelineId = createPipeline(true);
-            pipelineIdUnlit = createPipeline(false);
+            java.util.Arrays.fill(pipelines, -1);
             pipelineOwner = presenter;
         }
-        return lit ? pipelineId : pipelineIdUnlit;
+        final int cascades = shadowCascades();
+        final int index = (lit ? 5 : 0) + cascades;
+        if (pipelines[index] < 0) pipelines[index] = createPipeline(lit, cascades);
+        return pipelines[index];
     }
 
     /** @param lit whether the fragment shader looks up the point lights of its cluster; without lights it does not read the cluster lists at all */
-    private int createPipeline (boolean lit) {
+    private int createPipeline (boolean lit, int cascades) {
         final VertexAttributes va = mesh.getVertexAttributes();
         final GdxVkPipelineDesc d = new GdxVkPipelineDesc();
         d.stride = va.vertexSize;
@@ -235,8 +290,8 @@ public class VulkanGpuInstances implements Disposable {
         if (!hasNormal) throw new GdxRuntimeException("gdx-vulkan: VulkanGpuInstances needs a mesh with normals");
         d.cullMode = GdxVkPipelineDesc.CULL_BACK;
         final boolean tex = texture != null && hasTexCoords();
-        d.specConstants = new int[] {tex ? 1 : 0, lit ? 1 : 0};
-        return frame.pipeline("gpuinst|" + va.vertexSize + "|" + (tex ? "t" : "-") + (lit ? "l" : "-") + "|" + va.getMask(), "gpuinstances", "gpu_lit_v" + (hasTexCoords() ? 1 : 0) + ".vert", "gpu_lit.frag", d);
+        d.specConstants = new int[] {tex ? 1 : 0, lit ? 1 : 0, cascades > 0 ? 1 : 0, Math.max(cascades, 1)};
+        return frame.pipeline("gpuinst|" + va.vertexSize + "|" + (tex ? "t" : "-") + (lit ? "l" : "-") + cascades + "|" + va.getMask(), "gpuinstances", "gpu_lit_v" + (hasTexCoords() ? 1 : 0) + ".vert", "gpu_lit.frag", d);
     }
 
     private static final java.util.Map<GdxVkContext, Integer> WHITE = new java.util.WeakHashMap<GdxVkContext, Integer>();

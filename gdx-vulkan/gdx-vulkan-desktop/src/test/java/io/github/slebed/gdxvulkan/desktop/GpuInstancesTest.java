@@ -11,6 +11,7 @@ import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.VertexAttributes.Usage;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.math.Vector3;
 
@@ -18,7 +19,9 @@ import io.github.slebed.gdxvulkan.GdxVkConfig;
 import io.github.slebed.gdxvulkan.GdxVkContext;
 import io.github.slebed.gdxvulkan.GdxVkFrame;
 import io.github.slebed.gdxvulkan.GdxVkPresenter;
+import io.github.slebed.gdxvulkan.g3d.VulkanCascadedShadowLight;
 import io.github.slebed.gdxvulkan.g3d.VulkanGpuInstances;
+import io.github.slebed.gdxvulkan.g3d.VulkanModelBatch;
 import io.github.slebed.gdxvulkan.gl.VulkanGL20;
 
 import org.junit.jupiter.api.AfterAll;
@@ -212,6 +215,70 @@ class GpuInstancesTest {
         }
         assertTrue(nonEmpty > 50, "the lights reach a good number of clusters: " + nonEmpty);
         assertTrue(mismatches <= 2, "cluster lists that differ from the brute-force test (a sphere exactly touching a box edge may round either way): " + mismatches);
+        gpu.dispose();
+    }
+
+    /**
+     * One frame with a shadow: a slab at {@code slabZ} is rendered into the cascaded shadow light's maps with the model batch's depth pass (the light shines along the
+     * direction that gpu_lit.frag's directional light comes from), then the instances are drawn with the shadow set (or none, for null).
+     */
+    private byte[] renderWithShadow(VulkanGpuInstances gpu, VulkanCascadedShadowLight light, ModelInstance slab) {
+        TestGdx.width = N;
+        TestGdx.height = N;
+        GLFW.glfwPollEvents();
+        assertTrue(frame.begin(0.05f, 0.06f, 0.10f, 1f));
+        if (light != null) {
+            light.update(camera);
+            final VulkanModelBatch depth = VulkanModelBatch.depth(frame);
+            for (int i = 0; i < light.cascades(); i++) {
+                light.begin(i);
+                depth.begin(light.camera(i));
+                if (slab != null) depth.render(slab);
+                depth.end();
+                light.end(i);
+            }
+            depth.dispose();
+        }
+        gl.glViewport(0, 0, N, N);
+        gl.glClearColor(0.05f, 0.06f, 0.10f, 1f);
+        gl.glClearDepthf(1f);
+        gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        gpu.setShadow(light);
+        gpu.render(camera, N, N);
+        return frame.endAndCapture();
+    }
+
+    private static int luma(int[] c) {
+        return (299 * c[0] + 587 * c[1] + 114 * c[2]) / 1000;
+    }
+
+    @Test void instancesInAShadowAreDarkerAndTheRestAreUntouched() {
+        assumeTrue(frame.isTierA(), "shadows on the instances need the modern code path");
+        final VulkanGpuInstances gpu = new VulkanGpuInstances(frame, mesh, null, GRID * GRID, 4, 0);
+        gpu.setInstances(grid(), GRID * GRID);
+        gpu.setLights(new float[8], 0);
+        final VulkanCascadedShadowLight light = new VulkanCascadedShadowLight(512, 2, 1f, 80f, 0.6f, 40f);
+        light.set(1f, 1f, 1f, -0.4f, -0.8f, -0.3f); // the direction gpu_lit.frag's light comes from, reversed
+        final Model slabModel = new ModelBuilder().createBox(8f, 8f, 0.3f, new Material(), Usage.Position | Usage.Normal);
+        final ModelInstance slab = new ModelInstance(slabModel, -6f, 3f, 1.5f); // between the light and the left of the grid
+        final ModelInstance far = new ModelInstance(slabModel, -6f, 3f, 60f); // out of the shadow map's range, so nothing is shadowed
+        final byte[] unshadowed = renderWithShadow(gpu, null, null);
+        final byte[] shadowed = renderWithShadow(gpu, light, slab);
+        final byte[] noCaster = renderWithShadow(gpu, light, null);
+        int darker = 0, changedWithoutCaster = 0, compared = 0;
+        for (int gy = 8; gy < 16; gy++) {
+            for (int gx = 8; gx < 16; gx++) { // the cells the camera sees
+                final int a = luma(pixelOfInstance(unshadowed, gx, gy)), b = luma(pixelOfInstance(shadowed, gx, gy)), c = luma(pixelOfInstance(noCaster, gx, gy));
+                compared++;
+                if (b < a * 0.8) darker++;
+                if (Math.abs(c - a) > 6) changedWithoutCaster++;
+            }
+        }
+        System.out.println("[gpu shadows] " + darker + " of " + compared + " visible instances darker under the slab's shadow, " + changedWithoutCaster + " changed with no caster");
+        assertTrue(darker >= 6 && darker < compared - 6, "some instances are in the shadow and some are not: " + darker + " of " + compared);
+        assertEquals(0, changedWithoutCaster, "a shadow map with nothing in it changes nothing");
+        slabModel.dispose();
+        light.dispose();
         gpu.dispose();
     }
 
