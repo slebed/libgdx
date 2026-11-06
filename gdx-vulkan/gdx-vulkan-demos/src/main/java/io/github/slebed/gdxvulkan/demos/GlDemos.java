@@ -18,9 +18,11 @@ public final class GlDemos {
 
     static Demo create (String id) {
         if (id.equals("sprites")) return new SpritesDemo();
+        if (id.equals("storm")) return new SpriteStormDemo();
+        if (id.equals("postfx")) return new PostProcessDemo();
         if (id.equals("shadows-stock")) return new StockShadowsDemo();
         if (id.equals("boids")) return new GpuBoidsOpenGlDemo();
-        throw new IllegalArgumentException("unknown demo '" + id + "': sprites, shadows-stock or boids");
+        throw new IllegalArgumentException("unknown demo '" + id + "': sprites, storm, postfx, shadows-stock or boids");
     }
 
     public static void main (String[] args) {

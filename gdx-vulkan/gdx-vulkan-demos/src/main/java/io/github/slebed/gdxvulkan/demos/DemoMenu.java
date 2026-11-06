@@ -19,7 +19,9 @@ public final class DemoMenu implements ApplicationListener {
         () -> new SpritesDemo(),
         () -> new GpuBoidsDemo(),
         () -> new StockShadowsDemo(),
-        () -> new CascadedShadowsDemo()};
+        () -> new CascadedShadowsDemo(),
+        () -> new SpriteStormDemo(),
+        () -> new PostProcessDemo()};
 
     private final Demo[] listed = new Demo[DEMOS.length];
     private final Launcher launcher;

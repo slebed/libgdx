@@ -79,6 +79,16 @@ class DemosSmokeTest {
         assertDrawn(run(4));
     }
 
+    @Test void theSpriteStormDemoDraws () throws IOException {
+        needDisplay();
+        assertDrawn(run(5));
+    }
+
+    @Test void thePostProcessDemoDraws () throws IOException {
+        needDisplay();
+        assertDrawn(run(6));
+    }
+
     @Test void theGpuBoidsDemoDraws () throws IOException {
         needDisplay();
         assumeFalse(tierB(), "GPU-driven instancing needs the modern code path (Vulkan 1.3)");
