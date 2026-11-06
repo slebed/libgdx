@@ -136,6 +136,51 @@ class PreRotationTest {
         quads.dispose();
     }
 
+    /**
+     * A translated shader that reads gl_FragCoord and the derivatives draws the same picture at every pre-rotation: the translator's rotation table agrees with the
+     * presenter's (red grows to the right, green upwards, and the bottom-right shows +1 for dFdx and dFdy in GL's axes).
+     */
+    @Test void fragCoordAndDerivativesFollowOpenGlAtEveryRotation() {
+        final String vertex = "attribute vec4 a_position;\nvoid main() {\n    gl_Position = a_position;\n}\n";
+        final String fragment = "#ifdef GL_ES\nprecision highp float;\n#endif\nuniform vec2 u_resolution;\nvoid main() {\n    vec2 p = gl_FragCoord.xy / u_resolution;\n"
+            + "    float up = dFdy(gl_FragCoord.y) * 0.5, right = dFdx(gl_FragCoord.x) * 0.5;\n"
+            + "    if (p.x < 0.5) gl_FragColor = vec4(p.x * 2.0, p.y, 0.0, 1.0);\n    else if (p.y < 0.25) gl_FragColor = vec4(right, up, 0.0, 1.0);\n}\n";
+        final com.badlogic.gdx.graphics.glutils.ShaderProgram program = new com.badlogic.gdx.graphics.glutils.ShaderProgram(vertex, fragment);
+        assertTrue(program.isCompiled(), program.getLog());
+        final com.badlogic.gdx.graphics.Mesh mesh = new com.badlogic.gdx.graphics.Mesh(true, 6, 0, new com.badlogic.gdx.graphics.VertexAttribute(1, 4, "a_position"));
+        mesh.setVertices(new float[] {-1, -1, 0, 1, 1, -1, 0, 1, 1, 1, 0, 1, -1, -1, 0, 1, 1, 1, 0, 1, -1, 1, 0, 1});
+        byte[] upright = null;
+        for (int rot = 0; rot <= 3; rot++) {
+            presenter.debugForceRotation(rot);
+            TestGdx.width = N;
+            TestGdx.height = N;
+            GLFW.glfwPollEvents();
+            assertTrue(frame.begin(0f, 0f, 0f, 1f), "frame skipped at rotation " + rot);
+            assertEquals(rot, presenter.rotation(), "the swapchain really is pre-rotated at " + rot);
+            program.bind();
+            program.setUniformf("u_resolution", N, N);
+            mesh.render(program, GL20.GL_TRIANGLES);
+            final byte[] got = frame.endAndCapture();
+            if (rot == 0) {
+                upright = got;
+                assertNear(got, 36, 12, 96, 236, 0, 3); // left half, near the top: green high
+                assertNear(got, 36, 180, 96, 14, 0, 3); // near the bottom: green low
+                assertNear(got, 144, 180, 128, 128, 0, 3); // bottom right: the derivatives
+            } else {
+                assertArrayEquals(upright, got, "the picture at " + rot * 90 + " degrees differs from the upright one");
+            }
+        }
+        presenter.debugForceRotation(0);
+        mesh.dispose();
+        program.dispose();
+    }
+
+    private void assertNear(byte[] px, int x, int y, int r, int g, int b, int tolerance) {
+        int o = (y * N + x) * 4;
+        assertTrue(Math.abs((px[o] & 255) - r) <= tolerance && Math.abs((px[o + 1] & 255) - g) <= tolerance && Math.abs((px[o + 2] & 255) - b) <= tolerance,
+            "pixel " + x + "," + y + " was " + (px[o] & 255) + "," + (px[o + 1] & 255) + "," + (px[o + 2] & 255) + ", expected about " + r + "," + g + "," + b);
+    }
+
     private void assertPixel(byte[] px, int x, int y, int r, int g, int b) {
         int o = (y * N + x) * 4;
         assertEquals(r, px[o] & 255, "red at " + x + "," + y);

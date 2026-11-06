@@ -93,6 +93,8 @@ final class DeviceSuite {
         s.check("frameBufferDepthAndStencil", s::frameBufferDepthAndStencil);
         s.check("multiTargetFrameBuffer", s::multiTargetFrameBuffer);
         s.check("gpuTimestamps", s::gpuTimestamps);
+        s.check("gpuZones", s::gpuZones);
+        s.check("fragCoordAndDerivativesFollowOpenGl", s::fragCoordAndDerivatives);
         s.check("shaderCompileTime", s::shaderCompileTime);
         s.check("gate3Scenes", s::gate3);
         s.check("stockClassesOnTheShim", s::stockClasses);
@@ -976,6 +978,62 @@ final class DeviceSuite {
         TestLog.i(TAG, "gpuTimestamps: the GPU took " + ns / 1e6 + " ms for the last frame (an empty one: a clear and a present)");
         require(ns > 0, "the device reports GPU time (timestamps are supported on this queue)");
         require(ns < 500_000_000L, "an empty frame does not take half a second of GPU time: " + ns);
+    }
+
+    private static final String QUAD_VERTEX = "attribute vec4 a_position;\nvoid main() {\n    gl_Position = a_position;\n}\n";
+
+    /** GPU zones split a frame's GPU time: two marks in a frame that clears and draws report times that add up to no more than the frame's own. */
+    private void gpuZones() {
+        final String fragment = "#ifdef GL_ES\nprecision highp float;\n#endif\nvoid main() {\n    float a = gl_FragCoord.x * 0.001;\n"
+            + "    for (int i = 0; i < 400; i++) a = fract(a * 1.0001 + sin(a) * 0.37 + float(i) * 1e-4);\n    gl_FragColor = vec4(a, 0.2, 0.3, 1.0);\n}\n";
+        final com.badlogic.gdx.graphics.glutils.ShaderProgram program = new com.badlogic.gdx.graphics.glutils.ShaderProgram(QUAD_VERTEX, fragment);
+        require(program.isCompiled(), "the shader built: " + program.getLog());
+        final com.badlogic.gdx.graphics.Mesh mesh = quad();
+        for (int i = 0; i < 40; i++) {
+            beginFrame(0.1f, 0.2f, 0.3f);
+            frame.stream().gpuZone(0);
+            program.bind();
+            mesh.render(program, GL20.GL_TRIANGLES);
+            frame.stream().gpuZone(1);
+            frame.end();
+        }
+        final long total = presenter.gpuFrameNanos(), z0 = presenter.gpuZoneNanos(0), z1 = presenter.gpuZoneNanos(1);
+        TestLog.i(TAG, "gpuZones: frame " + total / 1000 + " us, clear " + z0 / 1000 + " us, draw " + z1 / 1000 + " us");
+        require(total > 0 && z1 > 0, "the device reports GPU time for both zones");
+        require(z0 + z1 <= total + total / 10, "the zones do not add up to more than the frame: " + z0 + " + " + z1 + " against " + total);
+        mesh.dispose();
+        program.dispose();
+    }
+
+    private com.badlogic.gdx.graphics.Mesh quad() {
+        final com.badlogic.gdx.graphics.Mesh mesh = new com.badlogic.gdx.graphics.Mesh(true, 6, 0, new com.badlogic.gdx.graphics.VertexAttribute(1, 4, "a_position"));
+        mesh.setVertices(new float[] {-1, -1, 0, 1, 1, -1, 0, 1, 1, 1, 0, 1, -1, -1, 0, 1, 1, 1, 0, 1, -1, 1, 0, 1});
+        return mesh;
+    }
+
+    /**
+     * gl_FragCoord and dFdx/dFdy of a translated shader follow OpenGL's axes (x to the right, y upwards, the origin at the bottom left) on the swapchain, whatever the display
+     * rotation (the swapchain is pre-rotated): red grows to the right and green upwards on the left half; below a quarter of the height the right half shows the derivatives.
+     */
+    private void fragCoordAndDerivatives() {
+        final String fragment = "#ifdef GL_ES\nprecision highp float;\n#endif\nuniform vec2 u_resolution;\nvoid main() {\n    vec2 p = gl_FragCoord.xy / u_resolution;\n"
+            + "    float up = dFdy(gl_FragCoord.y) * 0.5, right = dFdx(gl_FragCoord.x) * 0.5;\n"
+            + "    if (p.x < 0.5) gl_FragColor = vec4(p.x * 2.0, p.y, 0.0, 1.0);\n    else if (p.y < 0.25) gl_FragColor = vec4(right, up, 0.0, 1.0);\n}\n";
+        final com.badlogic.gdx.graphics.glutils.ShaderProgram program = new com.badlogic.gdx.graphics.glutils.ShaderProgram(QUAD_VERTEX, fragment);
+        require(program.isCompiled(), "the shader built: " + program.getLog());
+        final com.badlogic.gdx.graphics.Mesh mesh = quad();
+        beginFrame(0, 0, 0);
+        program.bind();
+        program.setUniformf("u_resolution", W, H);
+        mesh.render(program, GL20.GL_TRIANGLES);
+        final byte[] f = frame.endAndCapture();
+        assertPx(f, 12, 4, 100, 237, 0, 24, "left half near the top: green high, red low");
+        assertPx(f, 12, 59, 100, 18, 0, 24, "left half near the bottom: green low");
+        assertPx(f, 24, 32, 195, 128, 0, 24, "left half: red grows to the right");
+        assertPx(f, 48, 58, 128, 128, 0, 6, "bottom right: dFdx and dFdy are +1 along GL's x and y");
+        assertPx(f, 48, 20, 0, 0, 0, 1, "a fragment that writes nothing is black");
+        mesh.dispose();
+        program.dispose();
     }
 
     /** At most {@code fraction} of the pixels may differ by more than {@code tolerance} in a colour channel. */

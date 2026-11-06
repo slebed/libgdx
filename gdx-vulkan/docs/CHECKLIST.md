@@ -464,3 +464,4 @@ An earlier cascaded-shadows run found a real bug: `VulkanModelBatch` recomputed 
 - [x] GPU zones: `CommandStream.gpuZone(n)` and `GdxVkPresenter.gpuZoneNanos(n)` give the GPU time of each stage of a frame (`GpuZoneTest`)
 - [x] The library's own model shader takes its normal-mapping tangent frame from GL-oriented derivatives on every target (`gdx_vk_frag.glsl`, pipeline constant 1000); golden `gate5_normalmap` regenerated on lavapipe
 - [x] `TranslatorVersionTest`: a translator change without a new cache version fails the build
+- [x] The fragment-shader fixes (`gl_FragCoord`, `gdx_dFdx`/`gdx_dFdy`) agree with the presenter's pre-rotation: one shader, four forced rotations, identical pictures (`PreRotationTest`, both tiers); the device suite has `gpuZones` and `fragCoordAndDerivativesFollowOpenGl`, passing on the Galaxy S20 FE (portrait)
