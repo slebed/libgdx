@@ -44,6 +44,12 @@ What shaderc does better, and what we give up: a smaller API and ready-made incl
 - **Behaviour:** `shader_compiler_test` (a native test, no GPU) checks vertex, fragment and compute compilation, the SPIR-V magic number, and that an error names the
   shader and the line of the source as given.
 
+## Building without the compiler (2026-11-05)
+`gradlew ... -Pgdxvulkan.noCompiler=true` (CMake option `GDXVK_GLSLANG=OFF`; the build goes to `gdx-vulkan-core/build/native-nocompiler`) leaves glslang out of `gdxvk.dll`:
+**0.55 MB instead of 2.5 MB** on Windows x64, and a much shorter native build. Everything that ships as SPIR-V works (sprite, polygon and instanced batches, shape renderer,
+model batch, shader bundle, the stock classes whose shaders the library recognises); a custom `ShaderProgram` and any shader the bundle lacks report
+`this build of gdx-vulkan has no run-time GLSL compiler (GDXVK_GLSLANG=OFF)`. `NoCompilerTest` pins the message and is skipped on a normal build.
+
 ## Still to measure
 1. Android arm64 and Linux x64 library sizes (the build is wired for them; not measured).
 2. The cost of adding the SPIRV-Tools optimizer: size, compile time, and whether its output runs faster (Stress test 2 with a translated sprite shader

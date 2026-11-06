@@ -15,7 +15,7 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-def coreNative = project(':gdx-vulkan-core').layout.buildDirectory.dir('native')
+def coreNative = project(':gdx-vulkan-core').layout.buildDirectory.dir((((findProperty('gdxvulkan.noCompiler') ?: 'false').toString().toBoolean()) ? 'native-nocompiler' : 'native'))
 
 // Shared by `test` and `soakTest`.
 def configureGpuTest = { Test t ->

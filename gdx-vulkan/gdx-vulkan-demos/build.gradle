@@ -18,12 +18,12 @@ processResources {
     }
 }
 
-def coreNative = project(':gdx-vulkan-core').layout.buildDirectory.dir('native')
+def coreNative = project(':gdx-vulkan-core').layout.buildDirectory.dir((((findProperty('gdxvulkan.noCompiler') ?: 'false').toString().toBoolean()) ? 'native-nocompiler' : 'native'))
 
 test {
     useJUnitPlatform()
     dependsOn ':gdx-vulkan-core:buildNatives'
-    systemProperty 'gdxvulkan.native.path', project(':gdx-vulkan-core').layout.buildDirectory.dir('native').get().asFile.absolutePath
+    systemProperty 'gdxvulkan.native.path', project(':gdx-vulkan-core').layout.buildDirectory.dir((((findProperty('gdxvulkan.noCompiler') ?: 'false').toString().toBoolean()) ? 'native-nocompiler' : 'native')).get().asFile.absolutePath
     systemProperty 'gdxvulkan.validation', System.getProperty('gdxvulkan.validation', 'true')
     systemProperty 'gdxvulkan.forceTierB', System.getProperty('gdxvulkan.forceTierB', 'false')
     systemProperty 'gdxvulkan.requireDriver', System.getProperty('gdxvulkan.requireDriver', 'false')

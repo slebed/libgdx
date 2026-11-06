@@ -8,13 +8,17 @@ dependencies {
 }
 
 def jniDir      = file('jni')
-def nativeBuild = layout.buildDirectory.dir('native')
+def nativeBuild = layout.buildDirectory.dir((((findProperty('gdxvulkan.noCompiler') ?: 'false').toString().toBoolean()) ? 'native-nocompiler' : 'native')) // the compiler-free build (-Pgdxvulkan.noCompiler=true) has its own directory
 
 // Plain CMake build (Phase 1a decision: gdx-jnigen deferred until cross-compile support is verified).
+// -Pgdxvulkan.noCompiler=true builds the library without the run-time GLSL compiler (glslang): about 0.55 MB instead of 2.5 MB, and no translation of stock GLSL at run time.
+// Everything that ships as SPIR-V (the batches, the shape renderer, the model batch, the shader bundle) still works; a custom ShaderProgram reports a clear error.
+def noCompiler = (findProperty('gdxvulkan.noCompiler') ?: 'false').toString().toBoolean()
 tasks.register('cmakeConfigure', Exec) {
     inputs.file('jni/CMakeLists.txt')
+    inputs.property('noCompiler', noCompiler)
     outputs.dir(nativeBuild)
-    commandLine 'cmake', '-S', jniDir, '-B', nativeBuild.get().asFile, '-DCMAKE_BUILD_TYPE=Release'
+    commandLine 'cmake', '-S', jniDir, '-B', nativeBuild.get().asFile, '-DCMAKE_BUILD_TYPE=Release', "-DGDXVK_GLSLANG=${noCompiler ? 'OFF' : 'ON'}"
 }
 tasks.register('buildNatives', Exec) {
     dependsOn 'cmakeConfigure'
