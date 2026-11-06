@@ -82,21 +82,29 @@ public class VulkanAndroidApplication extends Activity implements AndroidApplica
 
     /** Call from {@code onCreate} with the application. Uses the defaults. */
     public void initialize(ApplicationListener listener) {
-        initialize(listener, new AndroidApplicationConfiguration(), new GdxVkConfig(), true);
+        initialize(listener, new AndroidApplicationConfiguration(), androidDefaults(), true);
     }
 
     public void initialize(ApplicationListener listener, AndroidApplicationConfiguration config) {
-        initialize(listener, config, new GdxVkConfig(), true);
+        initialize(listener, config, androidDefaults(), true);
     }
 
     /**
      * @param vkConfig Vulkan options ({@code forceTierB}, validation, device index)
      * @param vsync false asks for a present mode that does not wait for the display
      */
+    /** The Vulkan options of an Android game that gives none: the library's defaults plus half-precision shaders, which is what OpenGL ES ran. */
+    private static GdxVkConfig androidDefaults() {
+        final GdxVkConfig c = new GdxVkConfig();
+        c.relaxedPrecision = true;
+        return c;
+    }
+
     public void initialize(ApplicationListener listener, AndroidApplicationConfiguration config, GdxVkConfig vkConfig, boolean vsync) {
         if (getVersion() < MINIMUM_SDK) throw new GdxRuntimeException("libGDX requires Android API Level " + MINIMUM_SDK + " or later.");
         config.nativeLoader.load();
         setApplicationLogger(new AndroidApplicationLogger());
+        io.github.slebed.gdxvulkan.glsl.GlslTranslator.relaxedPrecision = vkConfig.relaxedPrecision;
         if (vkConfig.framePacing) GdxVkContext.setFramePacingActivity(this); // before the context exists: Swappy asks for a device extension
         graphics = new VulkanAndroidGraphics(this, listener, vkConfig, vsync);
         graphics.depthBuffer = config.depth > 0;

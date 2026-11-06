@@ -297,6 +297,20 @@ public final class Gate3Scenes {
 
     /** The post-processing shaders as GLSL programs on stock libGDX: the reference. */
     public static Fx glFx() {
+        final String[] sources = fxSources();
+        final String vert = sources[0];
+        final String[] frags = {sources[1], sources[2], sources[3]};
+        ShaderProgram.pedantic = false;
+        final ShaderProgram[] programs = new ShaderProgram[frags.length];
+        for (int i = 0; i < frags.length; i++) {
+            programs[i] = new ShaderProgram(vert, frags[i]);
+            if (!programs[i].isCompiled()) throw new IllegalStateException("GL effect " + i + " did not compile: " + programs[i].getLog());
+        }
+        return fxOf(programs);
+    }
+
+    /** The GLSL of the three effects: the vertex shader, then the fragment shaders of BRIGHT, BLUR and CRT (the translator tests read them too). */
+    public static String[] fxSources() {
         final String vert = "attribute vec4 a_position;\nattribute vec4 a_color;\nattribute vec2 a_texCoord0;\nuniform mat4 u_projTrans;\n"
             + "varying vec4 v_color;\nvarying vec2 v_texCoords;\n"
             + "void main() {\n  v_color = a_color;\n  v_color.a = v_color.a * (255.0 / 254.0);\n  v_texCoords = a_texCoord0;\n"
@@ -319,12 +333,10 @@ public final class Gate3Scenes {
             head + "void main() {\n  vec4 c = v_color * texture2D(u_texture, v_texCoords);\n"
                 + "  float scan = 0.85 + 0.15 * sin(v_texCoords.y * u_p.x * 6.2831853);\n  vec2 d = v_texCoords - vec2(0.5);\n"
                 + "  float vignette = 1.0 - dot(d, d) * u_p.y;\n  gl_FragColor = vec4(c.rgb * scan * vignette, c.a);\n}\n"};
-        ShaderProgram.pedantic = false;
-        final ShaderProgram[] programs = new ShaderProgram[frags.length];
-        for (int i = 0; i < frags.length; i++) {
-            programs[i] = new ShaderProgram(vert, frags[i]);
-            if (!programs[i].isCompiled()) throw new IllegalStateException("GL effect " + i + " did not compile: " + programs[i].getLog());
-        }
+        return new String[] {vert, frags[0], frags[1], frags[2]};
+    }
+
+    private static Fx fxOf(final ShaderProgram[] programs) {
         return new Fx() {
             public void use(Batch b, Effect e, float p0, float p1, float p2, float p3) {
                 ShaderProgram p = programs[e.ordinal()];

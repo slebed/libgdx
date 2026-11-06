@@ -70,6 +70,64 @@ class GlslTranslatorTest {
         assertEquals(64, tex.sampler("u_sampler0").slotOffset);
     }
 
+    /** The post-processing shaders of Gate 3 (a bright pass, a nine-tap blur, a CRT effect) translate and compile on both code paths, and their uniforms land in the push constants. */
+    @Test void thePostProcessingShadersOfGate3Translate () {
+        final String[] sources = Gate3Scenes.fxSources();
+        final String[] names = {"bright", "blur", "crt"};
+        for (boolean bindless : new boolean[] {true, false}) {
+            for (int i = 0; i < names.length; i++) {
+                final Translation t = GlslTranslator.translate("fx_" + names[i], sources[0], sources[i + 1], null, null, bindless);
+                assertCompiles(t, "fx_" + names[i] + (bindless ? "/modern" : "/compat"));
+                assertTrue(t.uniform("u_p").active, "u_p is read");
+                assertTrue(t.uniform("u_p").push, "u_p is small and hot: a push constant");
+                assertEquals(1, t.samplers.size(), "one texture");
+            }
+        }
+    }
+
+    private static boolean hasRelaxedPrecision (int[] spirv) {
+        for (int i = 5; i < spirv.length; ) {
+            final int word = spirv[i];
+            final int count = word >>> 16, op = word & 0xffff;
+            if (count == 0) break;
+            if (op == 71 && count >= 3 && spirv[i + 2] == 0) return true; // OpDecorate <target> RelaxedPrecision
+            i += count;
+        }
+        return false;
+    }
+
+    /**
+     * Precision qualifiers (checklist, Phase 5b): libGDX's shaders keep {@code precision mediump float;} behind {@code #ifdef GL_ES}. With {@code GlslTranslator.relaxedPrecision}
+     * the source is preprocessed as OpenGL ES source and the qualifiers reach the SPIR-V as {@code RelaxedPrecision}, which mobile GPUs run in half precision as they do under OpenGL ES;
+     * off, everything is single precision. The lines of the source do not move either way.
+     */
+    @Test void relaxedPrecisionIsOptInAndKeepsTheLines () {
+        final String vert = "attribute vec4 a_position;\nattribute vec2 a_texCoord0;\nvarying mediump vec2 v_uv;\nvoid main() {\n  v_uv = a_texCoord0;\n  gl_Position = a_position;\n}\n";
+        final String frag = "#ifdef GL_ES\nprecision mediump float;\n#endif\nvarying mediump vec2 v_uv;\nuniform sampler2D u_texture;\nvoid main() {\n"
+            + "  gl_FragColor = texture2D(u_texture, v_uv) * 0.5;\n}\n";
+        final String bad = frag.replace("* 0.5;", "* oops;");
+        final boolean before = GlslTranslator.relaxedPrecision;
+        try {
+            GlslTranslator.relaxedPrecision = false;
+            Translation t = GlslTranslator.translate("precision", vert, frag, null, null, true);
+            assertFalse(hasRelaxedPrecision(GlslCompiler.compile(GlslCompiler.Stage.FRAGMENT, "precision.frag", t.fragment).spirv) && !t.fragment.contains("precision"), "single precision by default");
+            final int[] plain = GlslCompiler.compile(GlslCompiler.Stage.FRAGMENT, "precision.frag", t.fragment).spirv;
+            GlslTranslator.relaxedPrecision = true;
+            t = GlslTranslator.translate("precision", vert, frag, null, null, true);
+            final GlslCompiler.Result relaxed = GlslCompiler.compile(GlslCompiler.Stage.FRAGMENT, "precision.frag", t.fragment);
+            assertTrue(relaxed.ok(), relaxed.log + "\n" + t.fragment);
+            assertTrue(hasRelaxedPrecision(relaxed.spirv), "mediump reaches the SPIR-V as RelaxedPrecision");
+            assertFalse(plain != null && hasRelaxedPrecision(plain), "off, no RelaxedPrecision");
+            // The line of an error is still the line of the original source (line 7 here).
+            final Translation tb = GlslTranslator.translate("precision", vert, bad, null, null, true);
+            final GlslCompiler.Result r = GlslCompiler.compile(GlslCompiler.Stage.FRAGMENT, "precision.frag", tb.fragment);
+            assertFalse(r.ok());
+            assertTrue(r.log.contains("precision.frag:7"), r.log);
+        } finally {
+            GlslTranslator.relaxedPrecision = before;
+        }
+    }
+
     @Test void aFragmentThatWritesNoColourOutputsZeroAndFragCoordIsTheOpenGlOne () throws Exception {
         final String vert = "attribute vec3 a_position;\nuniform mat4 u_proj;\nvoid main() {\n    gl_Position = u_proj * vec4(a_position, 1.0);\n}\n";
         final String frag = "uniform vec2 u_resolution;\nvoid main() {\n    vec2 uv = gl_FragCoord.xy / u_resolution;\n    if (uv.x > 0.5) gl_FragColor = vec4(1.0);\n}\n";

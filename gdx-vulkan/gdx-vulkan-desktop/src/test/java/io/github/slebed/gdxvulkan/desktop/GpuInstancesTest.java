@@ -282,6 +282,78 @@ class GpuInstancesTest {
         gpu.dispose();
     }
 
+    /**
+     * Everything the library draws with its own shaders is compiled when the library is built: the model batch (lit, with a diffuse colour), the GPU-driven instances (culling and
+     * light-culling compute, the lit draw with point lights and a shadow), the instanced sprite batch (compute) and the three effect bundles. None of it may call the run-time compiler
+     * (the sprite batch, the polygon batch and the shape renderer have the same guard in {@code ShaderProgramTest}).
+     */
+    @Test void theModelBatchTheInstancesAndTheEffectsNeverUseTheRunTimeCompiler() {
+        assumeTrue(frame.isTierA(), "the shadow variant needs the modern code path");
+        final int calls = io.github.slebed.gdxvulkan.GlslCompiler.callCount();
+        final VulkanGpuInstances gpu = new VulkanGpuInstances(frame, mesh, null, GRID * GRID, 4, 0);
+        gpu.setInstances(grid(), GRID * GRID);
+        gpu.setLights(new float[] {0.2f, 0.2f, 1.5f, 4f, 1f, 0.05f, 0.05f, 6f}, 1);
+        final VulkanCascadedShadowLight light = new VulkanCascadedShadowLight(256, 2, 1f, 80f, 0.6f, 40f);
+        light.set(1f, 1f, 1f, -0.4f, -0.8f, -0.3f);
+        final ModelInstance box = new ModelInstance(model, 0f, 0f, 2f);
+        final com.badlogic.gdx.graphics.g3d.Environment environment = new com.badlogic.gdx.graphics.g3d.Environment();
+        environment.set(new com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute(com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute.AmbientLight, 0.3f, 0.3f, 0.3f, 1f));
+        environment.add(new com.badlogic.gdx.graphics.g3d.environment.DirectionalLight().set(1f, 1f, 1f, -0.5f, -1f, -0.3f));
+        final VulkanModelBatch models = new VulkanModelBatch(frame);
+        final io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatchInstanced sprites = new io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatchInstanced(frame, 16);
+        sprites.setSprites(new float[] {8f, 8f, 3f, 2f, 20f, 20f, -3f, 1f}, 2);
+        final com.badlogic.gdx.graphics.Pixmap pm = new com.badlogic.gdx.graphics.Pixmap(2, 2, com.badlogic.gdx.graphics.Pixmap.Format.RGBA8888);
+        pm.setColor(1f, 1f, 1f, 1f);
+        pm.fill();
+        final com.badlogic.gdx.graphics.Texture white = new com.badlogic.gdx.graphics.Texture(pm);
+        pm.dispose();
+
+        TestGdx.width = N;
+        TestGdx.height = N;
+        GLFW.glfwPollEvents();
+        assertTrue(frame.begin(0.05f, 0.06f, 0.10f, 1f));
+        light.update(camera);
+        final VulkanModelBatch depth = VulkanModelBatch.depth(frame);
+        for (int i = 0; i < light.cascades(); i++) {
+            light.begin(i);
+            depth.begin(light.camera(i));
+            depth.render(box);
+            depth.end();
+            light.end(i);
+        }
+        depth.dispose();
+        gl.glViewport(0, 0, N, N);
+        gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
+        models.begin(camera);
+        models.render(box, environment);
+        models.end();
+        gpu.setShadow(light);
+        gpu.render(camera, N, N);
+        sprites.setTexture(white);
+        sprites.setSpriteSize(4f, 4f);
+        sprites.setBounds(N, N);
+        sprites.getProjectionMatrix().setToOrtho2D(0, 0, N, N);
+        sprites.update(0.016f);
+        sprites.draw();
+        final io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch batch = new io.github.slebed.gdxvulkan.g2d.VulkanSpriteBatch(frame);
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, N, N);
+        for (String fx : new String[] {"fx_bright", "fx_blur", "fx_crt"}) {
+            batch.setShaderBundle(io.github.slebed.gdxvulkan.VulkanShaderPipelineBundle.fromResources(fx, "sprite.vert", fx + ".frag"));
+            batch.begin();
+            batch.draw(white, 4, 4, 32, 32);
+            batch.end();
+        }
+        batch.dispose();
+        frame.endAndCapture();
+
+        assertEquals(calls, io.github.slebed.gdxvulkan.GlslCompiler.callCount(), "the model batch, the GPU instances, the compute shaders and the effects use shaders compiled at build time");
+        white.dispose();
+        sprites.dispose();
+        models.dispose();
+        light.dispose();
+        gpu.dispose();
+    }
+
     @Test void aLightBrightensTheInstancesAroundIt() {
         final VulkanGpuInstances gpu = new VulkanGpuInstances(frame, mesh, null, GRID * GRID, 4, 0);
         gpu.setInstances(grid(), GRID * GRID);

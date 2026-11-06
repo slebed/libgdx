@@ -169,12 +169,36 @@ public final class GlslTranslator {
      * @param prependVertex text put in front of the vertex source, like {@code ShaderProgram.prependVertexCode}; may be null
      * @param bindless true for the modern path (textures through the bindless table), false for the compatibility path (one bound texture)
      */
+    /**
+     * Whether the sources are preprocessed as OpenGL ES ones ({@code GL_ES} defined): the {@code precision mediump float;} that libGDX's shaders keep behind {@code #ifdef GL_ES}, and
+     * every {@code mediump} / {@code lowp} qualifier, then reach the SPIR-V as {@code RelaxedPrecision}, which a mobile GPU runs in half precision (twice the ALU rate on Adreno) as
+     * it does under OpenGL ES. Off (the default) everything is single precision. {@code VulkanAndroidApplication} turns it on. Part of the shader cache key.
+     */
+    public static volatile boolean relaxedPrecision = false;
+
+    /**
+     * The text preprocessed as OpenGL ES source, without moving a line. glslang reserves the names that start with GL_ (a desktop-profile source cannot define {@code GL_ES}), so
+     * the name is replaced by {@code GDX_GL_ES}, which is defined here: after the {@code #version} line when there is one, in front otherwise.
+     */
+    static String withGlEs (String source) {
+        final String text = source.replaceAll("\\bGL_ES\\b", "GDX_GL_ES");
+        final java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\A(\\s*#\\s*version[^\\n]*\\n)").matcher(text);
+        if (m.find()) {
+            final String versionLine = m.group(1);
+            int lines = 1;
+            for (int i = 0; i < versionLine.length(); i++) if (versionLine.charAt(i) == '\n') lines++;
+            return versionLine + "#define GDX_GL_ES 1\n#line " + lines + "\n" + text.substring(m.end());
+        }
+        return "#define GDX_GL_ES 1\n#line 1\n" + text;
+    }
+
     public static Translation translate (String name, String vertexSource, String fragmentSource, String prependVertex, String prependFragment,
         boolean bindless) {
         final Translation t = new Translation();
         t.bindless = bindless;
-        final Stage v = new Stage(GlslCompiler.Stage.VERTEX, name + ".vert", join(prependVertex, vertexSource));
-        String fragmentText = join(prependFragment, fragmentSource);
+        final boolean es = relaxedPrecision;
+        final Stage v = new Stage(GlslCompiler.Stage.VERTEX, name + ".vert", es ? withGlEs(join(prependVertex, vertexSource)) : join(prependVertex, vertexSource));
+        String fragmentText = es ? withGlEs(join(prependFragment, fragmentSource)) : join(prependFragment, fragmentSource);
         // gl_FragCoord counts from the bottom left in OpenGL and from the top left in Vulkan: a program that reads it gets the OpenGL one, from the size of the screen
         // that the draw sets in an implicit uniform (a uniform of the translation, not of the source, so the lines stay where they are).
         if (java.util.regex.Pattern.compile("\\bgl_FragCoord\\b").matcher(fragmentText).find()) fragmentText = fragmentText.replaceAll("\\bgl_FragCoord\\b", "gdx_FragCoordGL(gdx_fragTarget)");

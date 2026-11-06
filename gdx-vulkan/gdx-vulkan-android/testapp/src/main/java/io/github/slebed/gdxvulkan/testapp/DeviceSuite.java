@@ -95,6 +95,7 @@ final class DeviceSuite {
         s.check("gpuTimestamps", s::gpuTimestamps);
         s.check("gpuZones", s::gpuZones);
         s.check("fragCoordAndDerivativesFollowOpenGl", s::fragCoordAndDerivatives);
+        s.check("relaxedPrecisionSpeed", s::relaxedPrecisionSpeed);
         s.check("shaderCompileTime", s::shaderCompileTime);
         s.check("gate3Scenes", s::gate3);
         s.check("stockClassesOnTheShim", s::stockClasses);
@@ -1003,6 +1004,46 @@ final class DeviceSuite {
         require(z0 + z1 <= total + total / 10, "the zones do not add up to more than the frame: " + z0 + " + " + z1 + " against " + total);
         mesh.dispose();
         program.dispose();
+    }
+
+    /**
+     * What {@code GlslTranslator.relaxedPrecision} is worth on this GPU: the same ALU-heavy fragment shader (the usual libGDX header, {@code precision mediump float} behind
+     * {@code #ifdef GL_ES}) compiled single precision and as RelaxedPrecision, each timed with GPU zones over the same frames. Only a regression fails the check; the ratio is logged.
+     */
+    private void relaxedPrecisionSpeed() {
+        final String fragment = "#ifdef GL_ES\nprecision mediump float;\n#endif\nvoid main() {\n    float a = gl_FragCoord.x * 0.001;\n    float b = gl_FragCoord.y * 0.002;\n"
+            + "    for (int i = 0; i < 1500; i++) { a = fract(a * 1.37 + b * 0.71 + 0.1); b = fract(b * 1.19 + a * 0.43 + 0.2); }\n    gl_FragColor = vec4(a, b, 0.3, 1.0);\n}\n";
+        final boolean before = io.github.slebed.gdxvulkan.glsl.GlslTranslator.relaxedPrecision;
+        final double[] ms = new double[2];
+        try {
+            for (int mode = 0; mode < 2; mode++) {
+                io.github.slebed.gdxvulkan.glsl.GlslTranslator.relaxedPrecision = mode == 1;
+                final com.badlogic.gdx.graphics.glutils.ShaderProgram program = new com.badlogic.gdx.graphics.glutils.ShaderProgram(QUAD_VERTEX, fragment);
+                require(program.isCompiled(), "the shader built: " + program.getLog());
+                final com.badlogic.gdx.graphics.Mesh mesh = quad();
+                double sum = 0;
+                int n = 0;
+                for (int i = 0; i < 80; i++) {
+                    beginFrame(0, 0, 0);
+                    program.bind();
+                    mesh.render(program, GL20.GL_TRIANGLES);
+                    frame.stream().gpuZone(0);
+                    frame.end();
+                    if (i >= 20) {
+                        sum += presenter.gpuZoneNanos(0);
+                        n++;
+                    }
+                }
+                ms[mode] = sum / n / 1e6;
+                mesh.dispose();
+                program.dispose();
+            }
+        } finally {
+            io.github.slebed.gdxvulkan.glsl.GlslTranslator.relaxedPrecision = before;
+        }
+        TestLog.i(TAG, String.format("relaxedPrecisionSpeed: single precision %.3f ms, RelaxedPrecision %.3f ms per frame of GPU time (%.2fx)", ms[0], ms[1], ms[0] / ms[1]));
+        require(ms[0] > 0 && ms[1] > 0, "the device reports GPU time");
+        require(ms[1] < ms[0] * 1.15, "RelaxedPrecision is not slower than single precision: " + ms[1] + " against " + ms[0]);
     }
 
     private com.badlogic.gdx.graphics.Mesh quad() {

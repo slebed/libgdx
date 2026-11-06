@@ -120,6 +120,9 @@ Decisions of the owner, 2026-11-05: the release criteria in the checklist are th
 6. **Release work** (section 5) when the owner decides: the multi-platform jar and workflow first, then a first pre-release to testers, adoption testing in parallel.
 7. **Later:** custom 3D shader API decision, clustered lights with shadows, offscreen pass reordering, Wayland, macOS and iOS.
 
+## 7b. What is left of the checklist (2026-11-05)
+Open boxes: 4 partial, 10 not started. **Partial:** the Linux arm64 Java suite (the arm64 CI job runs the native tests only: lavapipe is not promised to be bit-identical across architectures, so the goldens would need their own arm64 set); the owner's review of the demos' code and looks (two boxes); the GPU instances casting shadows (needs a second cull against the light's frustum and a depth variant of the indirect draw). **Not started:** Phase 6 (macOS and iOS, needs a Mac), the adoption items (the owner's own projects), the libGDX 1.14.3 bump (404 on Maven Central).
+
 ## 8. Measurements still unexplained (2026-11-05, from running one game on both renderers)
 - **[verify] Memory:** the gdx-vulkan process held about 0.6 GB more working set than OpenGL in the same scene (0.44 against 1.06 GB in a menu, 1.8 against 2.4 GB in a scene). The rings of the library are 4 to 32 MB, so the rest is the driver, glslang and the caches; split it (a vmmap, or the process with and without -Pgdxvulkan.noCompiler=true) before anyone optimises it.
 - **[verify] Render thread:** 0.97 cores busy in an uncapped menu at 2,000 fps against 0.35 on OpenGL (whose driver threads take the rest: the process totals are alike). Probably the wait for the GPU spinning; check with vsync on and with GDXVK_PROFILE=1.

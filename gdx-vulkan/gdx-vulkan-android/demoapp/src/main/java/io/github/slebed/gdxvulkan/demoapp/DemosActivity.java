@@ -44,6 +44,7 @@ public class DemosActivity extends VulkanAndroidApplication {
         if (getIntent().hasExtra("mode")) System.setProperty("demo.mode", String.valueOf(getIntent().getIntExtra("mode", 0)));
         final PhoneStats stats = new PhoneStats(getFilesDir(), logSeconds);
         final GdxVkConfig vkConfig = new GdxVkConfig();
+        vkConfig.relaxedPrecision = true; // half precision like OpenGL ES, as VulkanAndroidApplication does for a game that gives no options
         vkConfig.forceTierB = getIntent().getBooleanExtra("forceTierB", false);
         vkConfig.framePacing = getIntent().getBooleanExtra("pacing", true); // --ez pacing false: no Swappy (for measuring what it costs)
         final AndroidApplicationConfiguration config = new AndroidApplicationConfiguration();

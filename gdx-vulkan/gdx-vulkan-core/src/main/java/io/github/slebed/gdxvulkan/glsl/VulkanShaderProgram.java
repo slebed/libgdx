@@ -547,6 +547,121 @@ public class VulkanShaderProgram implements Disposable {
         setMatrices(fetchUniformLocation(name), 2, length / 4, false, values, offset);
     }
 
+    // The rest of stock ShaderProgram's setters: the by-location forms and the vector, int-array and buffer variants, so a game that holds locations ports as it is.
+
+    public void setUniformf (int location, Vector2 values) {
+        setUniformf(location, values.x, values.y);
+    }
+
+    public void setUniformf (int location, Vector3 values) {
+        setUniformf(location, values.x, values.y, values.z);
+    }
+
+    public void setUniformf (String name, com.badlogic.gdx.math.Vector4 values) {
+        setUniformf(name, values.x, values.y, values.z, values.w);
+    }
+
+    public void setUniformf (int location, com.badlogic.gdx.math.Vector4 values) {
+        setUniformf(location, values.x, values.y, values.z, values.w);
+    }
+
+    public void setUniformf (int location, Color values) {
+        setUniformf(location, values.r, values.g, values.b, values.a);
+    }
+
+    public void setUniform1fv (int location, float[] values, int offset, int length) {
+        setFloats(location, 1, length, values, offset);
+    }
+
+    public void setUniform2fv (int location, float[] values, int offset, int length) {
+        setFloats(location, 2, length / 2, values, offset);
+    }
+
+    public void setUniform3fv (int location, float[] values, int offset, int length) {
+        setFloats(location, 3, length / 3, values, offset);
+    }
+
+    public void setUniform4fv (int location, float[] values, int offset, int length) {
+        setFloats(location, 4, length / 4, values, offset);
+    }
+
+    /** An array of {@code int} (or of samplers: their texture units), one element per value. */
+    public void setUniform1iv (int location, int[] values, int offset, int length) {
+        for (int i = 0; i < length; i++) setUniformi(location < 0 ? -1 : location + i, values[offset + i]);
+    }
+
+    public void setUniform1iv (String name, int[] values, int offset, int length) {
+        setUniform1iv(fetchUniformLocation(name), values, offset, length);
+    }
+
+    public void setUniform2iv (int location, int[] values, int offset, int length) {
+        for (int i = 0; i < length / 2; i++) setUniformInts(location < 0 ? -1 : location + i, "ivec2", values[offset + i * 2], values[offset + i * 2 + 1]);
+    }
+
+    public void setUniform2iv (String name, int[] values, int offset, int length) {
+        setUniform2iv(fetchUniformLocation(name), values, offset, length);
+    }
+
+    public void setUniform3iv (int location, int[] values, int offset, int length) {
+        for (int i = 0; i < length / 3; i++) setUniformInts(location < 0 ? -1 : location + i, "ivec3", values[offset + i * 3], values[offset + i * 3 + 1], values[offset + i * 3 + 2]);
+    }
+
+    public void setUniform3iv (String name, int[] values, int offset, int length) {
+        setUniform3iv(fetchUniformLocation(name), values, offset, length);
+    }
+
+    public void setUniform4iv (int location, int[] values, int offset, int length) {
+        for (int i = 0; i < length / 4; i++) {
+            setUniformInts(location < 0 ? -1 : location + i, "ivec4", values[offset + i * 4], values[offset + i * 4 + 1], values[offset + i * 4 + 2], values[offset + i * 4 + 3]);
+        }
+    }
+
+    public void setUniform4iv (String name, int[] values, int offset, int length) {
+        setUniform4iv(fetchUniformLocation(name), values, offset, length);
+    }
+
+    public void setUniformMatrix (int location, Matrix4 matrix) {
+        setUniformMatrix(location, matrix, false);
+    }
+
+    public void setUniformMatrix (int location, Matrix4 matrix, boolean transpose) {
+        setMatrices(location, 4, 1, transpose, matrix.val, 0);
+    }
+
+    public void setUniformMatrix (int location, Matrix3 matrix) {
+        setUniformMatrix(location, matrix, false);
+    }
+
+    public void setUniformMatrix (int location, Matrix3 matrix, boolean transpose) {
+        setMatrices(location, 3, 1, transpose, matrix.val, 0);
+    }
+
+    public void setUniformMatrix4fv (int location, float[] values, int offset, int length) {
+        setMatrices(location, 4, length / 16, false, values, offset);
+    }
+
+    /** As stock: {@code count} matrices read from the buffer's remaining floats starting at its position. */
+    public void setUniformMatrix4fv (String name, java.nio.FloatBuffer buffer, int count, boolean transpose) {
+        final float[] values = new float[count * 16];
+        final int position = buffer.position();
+        buffer.get(values);
+        buffer.position(position);
+        setMatrices(fetchUniformLocation(name), 4, count, transpose, values, 0);
+    }
+
+    public void setUniformMatrix3fv (String name, java.nio.FloatBuffer buffer, int count, boolean transpose) {
+        final float[] values = new float[count * 9];
+        final int position = buffer.position();
+        buffer.get(values);
+        buffer.position(position);
+        setMatrices(fetchUniformLocation(name), 3, count, transpose, values, 0);
+    }
+
+    /** What {@code glGetUniformLocation} answers (stock's name for {@link #uniformLocation}). */
+    public int getUniformLocation (String name) {
+        return uniformLocation(name);
+    }
+
     // The calls of OpenGL's glUniform family, by location: what the GL shim forwards. {@code count} elements, from the element the location names.
 
     private final java.util.HashSet<String> warned = new java.util.HashSet<String>();

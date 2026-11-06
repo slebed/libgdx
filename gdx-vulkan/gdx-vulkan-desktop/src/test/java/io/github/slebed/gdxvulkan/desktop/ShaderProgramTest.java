@@ -201,6 +201,30 @@ class ShaderProgramTest {
         white.dispose();
     }
 
+    /** The setters of stock's ShaderProgram that take a location, a Vector4 or an int array reach the shader exactly like the by-name forms above. */
+    @Test void theByLocationAndVectorSettersDoWhatTheByNameOnesDo () {
+        final VulkanShaderProgram program = new VulkanShaderProgram(frame, SPRITE_VERT, CUSTOM_FRAG);
+        assertTrue(program.isCompiled(), program.getLog());
+        final Texture white = solid(1, 1, 1);
+        final int tint = program.getUniformLocation("u_tint"), palette = program.fetchUniformLocation("u_palette"), index = program.fetchUniformLocation("u_index"),
+            invert = program.fetchUniformLocation("u_invert");
+        assertTrue(tint >= 0 && palette >= 0 && index >= 0 && invert >= 0, "the locations exist");
+        program.setUniformf(tint, new com.badlogic.gdx.math.Vector4(1f, 0.5f, 0.25f, 1f));
+        program.setUniform4fv(palette, new float[] {1, 1, 1, 1, /**/ 0.5f, 1, 1, 1, /**/ 1, 0.5f, 1, 1, /**/ 1, 1, 0.5f, 1}, 0, 16);
+        program.setUniform1iv(index, new int[] {1}, 0, 1);
+        program.setUniformi(invert, 0);
+
+        final byte[] f = render(b -> {
+            b.setShaderProgram(program);
+            b.begin();
+            b.setColor(1, 1, 1, 1);
+            b.draw(white, 0, 0, 64, 64);
+            b.end();
+        });
+        assertPx(f, 32, 32, 128, 128, 64, "tint (1, 0.5, 0.25, set as a Vector4 by location) times palette[1] (0.5, 1, 1)");
+        white.dispose();
+    }
+
     @Test void twoProgramsKeepTheirOwnUniformBlocksWithinOneFrame () {
         final VulkanShaderProgram a = new VulkanShaderProgram(frame, SPRITE_VERT, CUSTOM_FRAG);
         final VulkanShaderProgram bProgram = new VulkanShaderProgram(frame, SPRITE_VERT, CUSTOM_FRAG);
