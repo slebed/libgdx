@@ -93,6 +93,13 @@ copies the push words into the batch's push block, and emits the uniform block w
 `u_projTrans` and `u_texture` first, as stock's `SpriteBatch` does, and flushes on every texture change, as stock does. Pipelines are built per program and blend
 state, with the vertex attributes (`a_position`, `a_color`, `a_texCoord0`) placed at the locations the program gave them.
 
+## Precision (OpenGL ES behaviour)
+By default the sources are preprocessed as desktop GLSL, so libGDX's `#ifdef GL_ES precision mediump float; #endif` disappears and everything is single precision. With
+`GlslTranslator.relaxedPrecision` (`GdxVkConfig.relaxedPrecision`, on by default in `VulkanAndroidApplication`) they are preprocessed as OpenGL ES sources: glslang reserves names that
+start with `GL_`, so the text is rewritten `GL_ES` to `GDX_GL_ES` and `#define GDX_GL_ES 1` is inserted after the `#version` line (or first) with a `#line` directive that keeps the numbering. The
+`precision` statement and every `mediump` / `lowp` qualifier then reach the SPIR-V as `RelaxedPrecision`, which a mobile GPU runs in half precision as it does under OpenGL ES (1.39x on an Adreno 650:
+`DeviceSuite.relaxedPrecisionSpeed`). The setting is part of the cache key. `GlslTranslatorTest.relaxedPrecisionIsOptInAndKeepsTheLines`.
+
 ## The cache
 The cache key includes `ShaderCache.VERSIONS`; `TranslatorVersionTest` hashes `GlslTranslator.java` and fails when it changed without a new version, a bundle re-record and the new hash in `src/test/resources/translator-source.sha256`.
 

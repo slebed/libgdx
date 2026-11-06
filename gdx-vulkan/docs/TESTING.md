@@ -14,6 +14,11 @@ gradlew check ... -Dgdxvulkan.requireGl=true                          # fail ins
 ```
 Native only: `cmake -S gdx-vulkan-core/jni -B build/native && cmake --build build/native && ctest --test-dir build/native`.
 
+Tests added with the OpenGL-compatibility work: `FragCoordTest` (`gl_FragCoord` counts from the bottom left, derivatives follow GL's axes, an unwritten output is zero),
+`PreRotationTest.fragCoordAndDerivativesFollowOpenGlAtEveryRotation` (the same shader at the four forced rotations draws identical pictures), `GpuZoneTest` (GPU time per stage),
+`TranslatorVersionTest` (a translator change needs a new cache version), `NoCompilerTest` (run it with `-Pgdxvulkan.noCompiler=true`: the library built without glslang says so; the batches, instances
+and bundle tests pass without it, a custom `ShaderProgram` does not), `GpuInstancesTest` (shadows on the instances, and that the model batch, instances and effects never call the run-time compiler).
+
 Without a Vulkan driver the driver tests skip; `-Dgdxvulkan.requireDriver=true` turns that into a failure (CI does). The 2D and framebuffer scenes use the
 skin, fonts and particle effects in `test-assets/` (see `NOTICE`); `-Dgdxvulkan.assetsDir=` points elsewhere, and the scenes skip if the directory is missing.
 
@@ -75,7 +80,7 @@ adb shell am start -n io.github.slebed.gdxvulkan.testapp/.MainActivity --ez suit
 adb shell run-as io.github.slebed.gdxvulkan.testapp cat files/gdxvk-test.log      # look for "DEVICESUITE PASS"
 tools/stress4.sh [cycles=50] [--tier-b] [--no-prerotate] [--no-stream]             # rotate + background/foreground while textures stream
 tools/keyboard-test.sh <adb serial>                                                  # the on-screen keyboard: shown, a key arrives as libGDX input, hidden
-tools/demos-test.sh <adb serial> [seconds]                                          # the four demos on one phone: the numbers they show and a screenshot of each
+tools/demos-test.sh <adb serial> [seconds]                                          # the six demos on one phone (DEMOS="5 6" for some): the numbers they show and a screenshot of each
 tools/compare-phone.sh <adb serial> sprites|boids|shadows [count] [seconds] [vsync] [rounds]   # the same demo on stock libGDX (OpenGL ES) and on gdx-vulkan, on one phone; MODE=0|1|2, HUD=true|false|layout|shapes|text
 tools/energy-phone.sh <adb serial> sprites|boids|shadows [count] [seconds] [rounds]    # battery power of the same two, on a phone that is not plugged in (wireless adb), at the display's rate
 tools/compare-demos.sh sprites|boids|shadows [count] [frames] [vsync]                  # the same on the desktop: stock OpenGL against gdx-vulkan, with the GPU's power draw from nvidia-smi

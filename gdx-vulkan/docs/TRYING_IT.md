@@ -39,6 +39,8 @@ Add the `.aar` (`gdx-vulkan-android-<version>.aar`) as a dependency and extend `
 ## Seeing what it does
 - Set `-Dgdxvulkan.validation=true` to turn the Khronos validation layer on (when installed); a message in the log is worth reporting.
 - `GDXVK_PROFILE=1` prints the per-frame CPU time at close. `GdxVkPresenter.gpuFrameNanos()` and `gpuZoneNanos(n)` give GPU times (README, "Measuring where a frame goes").
+- On Android, translated shaders run in half precision where they say `mediump`, as under OpenGL ES (`GdxVkConfig.relaxedPrecision`, on by default; pass your own `GdxVkConfig` with it off if a shader needs
+  full precision). On the desktop everything is single precision.
 - The first run translates and compiles custom GLSL, which takes a moment; the result is cached in `gdxvk-shader-cache` next to the game.
 - To compare with OpenGL, keep both application classes in the game and pick one at start-up, as the demos do.
 

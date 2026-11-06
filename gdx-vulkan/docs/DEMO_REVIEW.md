@@ -7,7 +7,7 @@ For the owner's review of the demos (TODO.md section 4): what to run, what to lo
 ```
 gradlew :gdx-vulkan-demos:demos                      # the demo app: 1 to 4 start a demo, C starts the stock OpenGL one beside it (not in demo 4), Esc comes back
 gradlew :gdx-vulkan-demos:demoGl -Ddemo=sprites      # one demo on stock libGDX and OpenGL alone (also boids, shadows-stock)
-cd gdx-vulkan-android && gradlew :demoapp:assembleDebug     # the phone app; tools/demos-test.sh <serial> runs the four demos on a phone
+cd gdx-vulkan-android && gradlew :demoapp:assembleDebug     # the phone app; tools/demos-test.sh <serial> runs the six demos on a phone (DEMOS="5 6" for some)
 ```
 
 Useful switches: `-Ddemo.hud=false` (no text), `-Ddemo.sprites=N`, `-Ddemo.mode=0|1|2`, `-Ddemo.boids=N`, `-Ddemo.lights=true`, `-Ddemo.width=`, `-Ddemo.height=`, `-Ddemo.vsync=true`.
