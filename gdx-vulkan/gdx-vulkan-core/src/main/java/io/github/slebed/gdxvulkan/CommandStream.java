@@ -13,7 +13,7 @@ import java.nio.IntBuffer;
  */
 public final class CommandStream {
     public static final int BIND_PIPELINE = 1, PUSH_CONSTANTS = 2, VIEWPORT = 3, SCISSOR = 4, SCISSOR_ENABLE = 5, CLEAR = 6, BIND_VERTEX = 7,
-        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13, BIND_TARGET = 14, DEPTH_STATE = 15, STENCIL_STATE = 16, CULL_MODE = 17, PUSH_RANGE = 18, BIND_VERTEX_BUFFER = 19, SET0_DATA = 20, DRAW_INDEXED_INSTANCED = 21, DRAW_INDEXED_INDIRECT = 22, DRAW_INSTANCED = 23, BIND_CONSTANTS = 24, BIND_VERTEX_BINDING = 25;
+        BIND_INDEX_BUFFER = 8, BIND_INDEX_RING = 9, BIND_TEXTURE = 10, DRAW_INDEXED = 11, DRAW = 12, BIND_STORAGE = 13, BIND_TARGET = 14, DEPTH_STATE = 15, STENCIL_STATE = 16, CULL_MODE = 17, PUSH_RANGE = 18, BIND_VERTEX_BUFFER = 19, SET0_DATA = 20, DRAW_INDEXED_INSTANCED = 21, DRAW_INDEXED_INDIRECT = 22, DRAW_INSTANCED = 23, BIND_CONSTANTS = 24, BIND_VERTEX_BINDING = 25, GPU_ZONE = 26;
     public static final int INDEX_U16 = 0, INDEX_U32 = 1;
 
     private ByteBuffer buffer;   // the stream as the native side reads it
@@ -215,6 +215,16 @@ public final class CommandStream {
         put(resourceBuffer);
         put((int)offset);
         put((int)(offset >>> 32));
+    }
+
+    /**
+     * Marks the end of a GPU zone, 0 to 31, in increasing order within a frame: the GPU time since the previous mark (or the frame's start) is read with
+     * {@code GdxVkPresenter.gpuZoneNanos(zone)} a frame or two later. Call it after the draws of the stage have been recorded.
+     */
+    public void gpuZone(int zone) {
+        ensure(2);
+        put(GPU_ZONE);
+        put(zone);
     }
 
     /** The values of the pipeline's constant attributes (binding 1): 16 bytes each, in a ring block written by the caller. */

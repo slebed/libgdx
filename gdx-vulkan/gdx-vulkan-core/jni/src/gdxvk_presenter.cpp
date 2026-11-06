@@ -55,6 +55,7 @@ namespace gdxvk {
 namespace {
 
 constexpr uint32_t kFramesInFlight = 2;
+constexpr uint32_t kGpuZones = 32; // GPU timestamps a frame can take besides its two ends (cmd::GpuZone)
 
 FrameStatus mapResult(VkResult r) {
     switch (r) {
@@ -96,6 +97,7 @@ struct Frame {
     uint64_t serial = 0; // submit serial of the last frame recorded in this slot; 0 = never submitted
     VkQueryPool timestamps = VK_NULL_HANDLE; // two GPU timestamps: the start of the frame's work and its end (when the device supports them)
     bool timestampsPending = false; // the last submit wrote them and nobody has read them yet
+    uint32_t zoneMask = 0; // the zones (cmd::GpuZone) written while this slot's frame was recorded
 };
 
 void imageBarrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from, VkImageLayout to, VkPipelineStageFlags srcStage,
@@ -154,6 +156,7 @@ struct Presenter::Impl {
     bool gpuTiming = false;
     uint32_t timestampValidBits = 0;
     std::atomic<uint64_t> gpuFrameNs{0};
+    std::atomic<uint64_t> gpuZoneNs[kGpuZones] = {}; // per zone: GPU time from the previous mark to this one, of the last frame read
     struct RetiredSwap {
         VkSwapchainKHR swapchain = VK_NULL_HANDLE;
         std::vector<VkImageView> views;
@@ -400,6 +403,9 @@ struct Presenter::Impl {
         specData.push_back(static_cast<int32_t>(vrot));
         for (size_t k = 0; k < desc.spec.size(); ++k) specData.push_back(desc.spec[k]);
         for (uint32_t k = 0; k < specData.size(); ++k) specEntries.push_back({k, static_cast<uint32_t>(k * sizeof(int32_t)), sizeof(int32_t)});
+        // Constant 1000 (gdx_vk_frag.glsl): 1 when the pipeline draws to the swapchain, whose y axis runs the other way from OpenGL's.
+        specEntries.push_back({1000u, static_cast<uint32_t>(specData.size() * sizeof(int32_t)), sizeof(int32_t)});
+        specData.push_back(offscreen ? 0 : 1);
         const VkSpecializationInfo specInfo{static_cast<uint32_t>(specEntries.size()), specEntries.data(), specData.size() * sizeof(int32_t), specData.data()};
         stages[0].pSpecializationInfo = &specInfo;
         stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -1176,7 +1182,7 @@ struct Presenter::Impl {
             if (gpuTiming) {
                 VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
                 qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
-                qi.queryCount = 2;
+                qi.queryCount = 2 + kGpuZones;
                 if (vkCreateQueryPool(h.device, &qi, nullptr, &f.timestamps) != VK_SUCCESS) f.timestamps = VK_NULL_HANDLE; // the frame goes on unmeasured
             }
             const std::string idx = std::to_string(&f - frames);
@@ -1194,7 +1200,7 @@ struct Presenter::Impl {
         ubi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(f.uploadCmd, &ubi);
         if (timestamps && f.timestamps != VK_NULL_HANDLE) { // the frame's GPU time starts with the first command of the submit
-            vkCmdResetQueryPool(f.uploadCmd, f.timestamps, 0, 2);
+            vkCmdResetQueryPool(f.uploadCmd, f.timestamps, 0, 2 + kGpuZones);
             vkCmdWriteTimestamp(f.uploadCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, f.timestamps, 0);
         }
         beginLabel(h, f.uploadCmd, "gdx: staged uploads", 0.5f, 0.8f, 0.4f);
@@ -1580,8 +1586,21 @@ FrameStatus Presenter::beginFrame(const float rgba[4]) {
             const uint64_t ticks = ((t[1] & mask) - (t[0] & mask)) & mask;
             s.gpuFrameNs.store(static_cast<uint64_t>(static_cast<double>(ticks) * h.limits.timestampPeriod), std::memory_order_relaxed);
         }
+        if (f.zoneMask != 0) { // value and availability of every zone, so one that this frame did not write does not hold the others back
+            uint64_t z[kGpuZones * 2] = {};
+            vkGetQueryPoolResults(h.device, f.timestamps, 2, kGpuZones, sizeof z, z, 2 * sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+            const uint64_t mask = s.timestampValidBits >= 64 ? ~0ull : ((1ull << s.timestampValidBits) - 1ull);
+            uint64_t previous = t[0];
+            for (uint32_t k = 0; k < kGpuZones; ++k) {
+                if (z[k * 2 + 1] == 0) { s.gpuZoneNs[k].store(0, std::memory_order_relaxed); continue; }
+                const uint64_t ticks = ((z[k * 2] & mask) - (previous & mask)) & mask;
+                previous = z[k * 2];
+                s.gpuZoneNs[k].store(static_cast<uint64_t>(static_cast<double>(ticks) * h.limits.timestampPeriod), std::memory_order_relaxed);
+            }
+        }
         f.timestampsPending = false;
     }
+    f.zoneMask = 0; // this frame's zones are marked while its stream is replayed, before its uploads (and the reset of the pool) are recorded
     h.deletion->collect(); // the GPU has finished with everything retired before the frames that are now complete
     h.staging->collect(h.timeline->completed());
     s.rings[s.frameIndex]->reset(); // this slot's previous frame has completed
@@ -2312,6 +2331,17 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
                 s.bound.set0Offsets[1] = b.offsets[1];
                 break;
             }
+            case cmd::GpuZone: {
+                if (!need(1)) return s.fail("command stream truncated (GpuZone)");
+                const uint32_t zone = static_cast<uint32_t>(w[i]);
+                i += 1;
+                Frame& zf = s.frames[s.frameIndex];
+                if (zone < kGpuZones && zf.timestamps != VK_NULL_HANDLE) {
+                    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, zf.timestamps, 2 + zone);
+                    zf.zoneMask |= 1u << zone;
+                }
+                break;
+            }
             case cmd::BindConstants: {
                 if (!need(3)) return s.fail("command stream truncated (BindConstants)");
                 VkBuffer buf = ring.vertexBlockBuffer(static_cast<uint32_t>(w[i]));
@@ -2446,6 +2476,7 @@ FrameStatus Presenter::submitCommandStream(const uint8_t* data, size_t bytes) {
 }
 
 uint64_t Presenter::gpuFrameNanos() const { return impl_->gpuFrameNs.load(std::memory_order_relaxed); }
+uint64_t Presenter::gpuZoneNanos(uint32_t zone) const { return zone < kGpuZones ? impl_->gpuZoneNs[zone].load(std::memory_order_relaxed) : 0; }
 
 void Presenter::lastPassCounts(uint32_t out[2]) const {
     out[0] = impl_->lastPassCount[0];

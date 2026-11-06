@@ -116,6 +116,9 @@ public:
     // How long the GPU worked on the last frame whose timestamps could be read (a frame or two behind), in nanoseconds: from the first command of
     // its submit (staged uploads, compute) to the last (the frame's draws). 0 when the device cannot take timestamps.
     uint64_t gpuFrameNanos() const;
+    // GPU time of a zone of the last frame whose timestamps could be read: from the previous GpuZone mark of that frame (or its first command) to this zone's mark,
+    // in nanoseconds; 0 for a zone the frame did not mark or when the device cannot take timestamps. Zones are 0 to 31, marked in increasing order.
+    uint64_t gpuZoneNanos(uint32_t zone) const;
 
     // Stress test 3 (plan, Phase 3): the cost of recording `draws` indexed draws, each with a state change (the cull mode, alternating) and
     // a full 128-byte push-constant block, as one plain C++ loop straight into the frame's command buffer. This is the floor the command

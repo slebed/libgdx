@@ -94,6 +94,8 @@ copies the push words into the batch's push block, and emits the uniform block w
 state, with the vertex attributes (`a_position`, `a_color`, `a_texCoord0`) placed at the locations the program gave them.
 
 ## The cache
+The cache key includes `ShaderCache.VERSIONS`; `TranslatorVersionTest` hashes `GlslTranslator.java` and fails when it changed without a new version, a bundle re-record and the new hash in `src/test/resources/translator-source.sha256`.
+
 `ShaderCache` writes one file per program (`<sha-256 prefix>.spvprog`): both SPIR-V modules and the translation tables, named from a hash of the sources, the
 prepend text, the code path and the translator and compiler versions. Finding the file skips the preprocessor, the translator and the compiler, including
 glslang's first-use start-up (152 ms in the native test). `VulkanShaderProgram.cacheDirectory` chooses the folder (null turns it off); the default is

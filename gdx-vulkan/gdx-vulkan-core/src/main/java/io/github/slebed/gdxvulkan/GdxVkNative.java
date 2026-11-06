@@ -80,6 +80,8 @@ final class GdxVkNative {
 
     static native long nativeGpuFrameNanos(long handle);
 
+    static native long nativeGpuZoneNanos(long handle, int zone);
+
     /** Stress test 3: nanoseconds to record `draws` state-change + push-constants + indexed-draw triples as a plain C++ loop; -1 on error. */
     static native long nativeBenchmarkRecord(long handle, int pipeline, int indexBuffer, int draws, float[] push);
 

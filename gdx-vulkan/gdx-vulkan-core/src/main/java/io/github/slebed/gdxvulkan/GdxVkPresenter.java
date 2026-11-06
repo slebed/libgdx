@@ -146,6 +146,15 @@ public final class GdxVkPresenter implements AutoCloseable {
         return GdxVkNative.nativeGpuFrameNanos(handle);
     }
 
+    /**
+     * GPU time of one zone of the last frame whose timestamps could be read, in nanoseconds: the time from the previous {@link CommandStream#gpuZone} mark of that frame
+     * (or from its first command) to this zone's mark. A frame or two behind; 0 for a zone the frame did not mark, or when the device cannot take timestamps.
+     */
+    public long gpuZoneNanos(int zone) {
+        check();
+        return GdxVkNative.nativeGpuZoneNanos(handle, zone);
+    }
+
     /** Stress test 3 floor: see {@code Presenter::benchmarkRecord}. Inside an open frame; returns nanoseconds. */
     public long benchmarkRecord(int pipeline, int indexBuffer, int draws, float[] push) {
         check();

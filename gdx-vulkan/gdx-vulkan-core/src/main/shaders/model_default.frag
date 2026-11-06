@@ -5,6 +5,7 @@
 #endif
 #include "gdx_vk_common.glsl"
 #include "gdx_vk_sets.glsl"
+#include "gdx_vk_frag.glsl"
 
 // VulkanModelBatch fragment shader: a port of libGDX's default.fragment.glsl (see model_default_vertex.glsl for the data layout). The material
 // and lighting flags the stock shader chose with #define are specialization constants, the same ids as in the vertex shader.
@@ -49,8 +50,8 @@ const int H_AMBIENT = 5, H_DIR = 11, H_POINT = 19, H_FOGCOLOR = 35, H_SHADOWP = 
 // texture coordinate ("normal mapping without precomputed tangents"); the mesh needs no tangent attribute.
 vec3 mappedNormal(vec3 N) {
     const vec3 mapN = texture(GDX_TEXTURE(floatBitsToInt(gdx_pc.u_custom0.x)), v_normalUV).xyz * 2.0 - 1.0;
-    const vec3 dp1 = dFdx(v_worldPos), dp2 = dFdy(v_worldPos);
-    const vec2 duv1 = dFdx(v_normalUV), duv2 = dFdy(v_normalUV);
+    const vec3 dp1 = gdx_dFdx(v_worldPos), dp2 = gdx_dFdy(v_worldPos);
+    const vec2 duv1 = gdx_dFdx(v_normalUV), duv2 = gdx_dFdy(v_normalUV);
     const vec3 dp2perp = cross(dp2, N), dp1perp = cross(N, dp1);
     const vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
     const vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;

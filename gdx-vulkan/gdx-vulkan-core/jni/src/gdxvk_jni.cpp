@@ -341,6 +341,10 @@ JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeGpuFra
     return static_cast<jlong>(reinterpret_cast<gdxvk::Presenter*>(handle)->gpuFrameNanos());
 }
 
+JNIEXPORT jlong JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeGpuZoneNanos(JNIEnv*, jclass, jlong handle, jint zone) {
+    return static_cast<jlong>(reinterpret_cast<gdxvk::Presenter*>(handle)->gpuZoneNanos(static_cast<uint32_t>(zone)));
+}
+
 JNIEXPORT jintArray JNICALL Java_io_github_slebed_gdxvulkan_GdxVkNative_nativeLastPassCounts(JNIEnv* env, jclass, jlong handle) {
     uint32_t c[2];
     reinterpret_cast<gdxvk::Presenter*>(handle)->lastPassCounts(c);

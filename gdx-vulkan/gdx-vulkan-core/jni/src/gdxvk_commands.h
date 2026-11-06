@@ -33,6 +33,7 @@ enum Op : int32_t {
     DrawIndexedInstanced = 21, // index count, first index, vertex offset, instance count, first instance: instance i reads gl_InstanceIndex = first instance + i
     BindVertexBinding = 25, // binding, resource buffer id, offset lo, offset hi: vertex data of another binding than 0 (a stock draw that reads several vertex buffers)
     BindConstants = 24, // ring block, offset lo, offset hi: the values of constant vertex attributes (binding 1, stride 0), 16 bytes each at the offsets the pipeline names
+    GpuZone = 26,       // zone index 0..31: writes a GPU timestamp; the zone's time is the GPU time since the previous mark of the frame (or its start)
     DrawInstanced = 23, // vertex count, first vertex, instance count, first instance
     Set0Data = 20,      // uniform bytes, storage bytes, then the uniform words and the storage words (each rounded up to whole words): copied into the frame ring and bound as Set 0
     BindVertexBuffer = 19, // resource buffer id, offset lo, offset hi: vertex data that lives in a persistent buffer (stock Mesh), not the frame ring
