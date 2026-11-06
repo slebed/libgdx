@@ -24,7 +24,7 @@ Tier B = render-pass cache + per-texture descriptors; `forceTierB` runs it anywh
 ## What was built differently from the plan (as of 2026-11)
 The plan above is the original design; the code differs in these ways, and `CHECKLIST.md` is the authority on what exists.
 - **Stock classes run with no rename.** The plan had the Vulkan-native batches do all drawing and left stock `SpriteBatch`, `ShapeRenderer`, `Stage` and `ModelBatch` unsupported. The GL shim now also serves
-  programs, uniforms, attributes and `glDrawElements`/`glDrawArrays` (`gl/StockPrograms`, one vertex buffer per draw), so unmodified libGDX code draws. The `Vulkan...` classes stay as the fast path.
+  programs, uniforms, attributes and `glDrawElements`/`glDrawArrays` (`gl/StockPrograms`: up to 14 vertex buffers per draw, vertex data in memory, `glVertexAttrib*` constants, `glReadPixels`, one-channel float textures), so unmodified libGDX code draws. The `Vulkan...` classes stay as the fast path.
   `Gdx.gl30` and `gl31` are still null.
 - **A run-time GLSL translator** (Phase 5b, `docs/SHADER_TRANSLATOR.md`): libGDX's old GLSL is translated to Vulkan GLSL and compiled with a vendored glslang, cached on disk by source hash, off the render thread
   where possible. libGDX's own sprite, shape and model shaders never reach it: they are recognised by a hash of their source (`glsl/KnownShaders`) and replaced by dedicated shaders, and the programs
@@ -32,7 +32,10 @@ The plan above is the original design; the code differs in these ways, and `CHEC
 - **The GPU-driven path is larger than planned**: `VulkanComputeShader`, `VulkanGpuInstances` (GPU culling, indirect draws, clustered lights), `VulkanSpriteBatchInstanced`, cascaded shadows
   (`VulkanCascadedShadowLight`).
 - **Applications:** `VulkanDesktopApplication` (GLFW, a generated copy of the stock input) and `VulkanAndroidApplication` (with Swappy frame pacing, `VK_KHR_swapchain_maintenance1` present fences, an on-screen keyboard).
-- **GPU time per frame** comes from timestamp queries in the presenter (`GdxVkPresenter.gpuFrameNanos()`), not planned.
+- **GPU time per frame** comes from timestamp queries in the presenter (`GdxVkPresenter.gpuFrameNanos()`), not planned; **GPU zones** (`CommandStream.gpuZone`, `GdxVkPresenter.gpuZoneNanos`) split it by stage.
+- **OpenGL behaviour in the translated shaders**, found by running a real game: `gl_FragCoord` and `dFdx`/`dFdy` follow OpenGL's axes on every target, fragment outputs start at zero, an unwritten varying reads zero, and the shim ignores calls OpenGL ignores. The library's own model shader takes its normal-mapping frame from the same GL-oriented derivatives.
+- **An optional library without the run-time compiler** (`-Pgdxvulkan.noCompiler=true`, 0.55 MB instead of 2.5 MB) for users who ship only SPIR-V; the SPIR-V optimizer was considered and dropped.
+- **Instances receive shadows** (`VulkanGpuInstances.setShadow`), but do not cast them yet.
 - **Demos and comparisons** (`gdx-vulkan-demos`, the Android demo app, `tools/compare-*.sh`, `tools/energy-phone.sh`) measure the library against stock libGDX on the same machine; the README reports the cases it loses.
 - **Driver findings drove design:** a push constant must not address a vertex-shader buffer read (Adreno 650); a bindless index must not come through a varying (Adreno 840); see `DRIVER_NOTES.md`.
 - **The repository** is `slebed/gdx-vulkan`, split out of the fork `slebed/libgdx`; CI runs lavapipe in both tiers and builds the arm64 natives.

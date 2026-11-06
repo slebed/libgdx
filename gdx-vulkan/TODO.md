@@ -105,13 +105,9 @@ Plan in the checklist "Releases and adoption testing". Nothing is released; the 
 
 ## 6. Documents that disagree with the code
 
-- **[docs] `docs/CHECKLIST.md` has boxes that are probably done but not ticked.** Verify and tick: "CI (lavapipe) runs the translator tests and the golden scenes" (it does:
-  `check` runs them), "Every test runs on both code paths with the validation layers clean" (CI does both paths), the glslang item "Linux and Android builds not run yet" (Linux CI and the
-  S20 run translated shaders; only the size cost is unrecorded), "custom 3D shaders ... `VulkanShaderPipelineBundle` stays supported" (the bundle path is supported and tested).
-  The summary counts at the top (187 of 238) follow the boxes, so they move when these do.
-- **[docs] `docs/PLAN.md` and `libGDX Vulkan Backend Plan v5.0.md` describe the plan, not what exists:** the shader translator (Phase 5b), stock classes through the shim, the shader bundle, GPU timing and the demos
-  are not in them. Add a "what was built differently" section, or mark the plan as the original design.
-- **[docs] The checklist's Android "21-check device suite" figures are older** than the 30-check suite (`docs/RELEASE.md` and `CLAUDE.md` were updated; the Phase 4 text was not).
+- **[done 2026-11-05] `docs/CHECKLIST.md` boxes:** the four named here are ticked, and the summary table is recomputed from the boxes (218 done, 20 partial, 20 not started, of 258).
+- **[done 2026-11-05] `docs/PLAN.md` has a "What was built differently from the plan" section** (translator, stock classes, bundle, GPU timing and zones, demos, the OpenGL behaviours, the compiler-free build). The v5.0 plan document itself, kept in the Claude Project, is unchanged: it is the original design.
+- **[done] The checklist's Android device-suite figures** say 21 checks "when this was run" and 32 since.
 - **[docs] README performance numbers for RM-11P predate the sprite shader fix and this session's work in part**; the S20-FE was re-run on 2026-11-04 (see the README).
 - **[housekeeping] The fork's working tree** (`slebed/libgdx`, branch `gdx-vulkan-phase1`) has uncommitted changes to the owner's old LWJGL Vulkan backend (`backends/gdx-backend-vulkan`,
   `tests/gdx-tests-android` assets). They are not part of this project and were left alone; decide separately what to do with them.

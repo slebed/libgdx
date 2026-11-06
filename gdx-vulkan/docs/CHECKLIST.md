@@ -12,19 +12,19 @@ the plan names.
 
 | Section | Done | Partial | Not started | Total |
 |---|---|---|---|---|
-| Core decisions | 54 | 2 | 0 | 56 |
+| Core decisions | 55 | 2 | 0 | 57 |
 | Phase 1a: Extraction, window surfaces and CI | 21 | 1 | 0 | 22 |
 | Phase 1b: Memory, layout and caches | 20 | 0 | 0 | 20 |
 | Phase 2: Unmodified 2D | 25 | 0 | 0 | 25 |
 | Phase 3: Stock FrameBuffer | 13 | 0 | 0 | 13 |
 | Phase 4: Android lifecycle | 12 | 1 | 0 | 13 |
 | Phase 5: 3D with stock models | 10 | 3 | 0 | 13 |
-| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 41 | 9 | 6 | 56 |
+| Phase 5b: Stock GLSL shaders (runtime translation to Vulkan) | 45 | 8 | 3 | 56 |
 | Releases and adoption testing | 0 | 0 | 12 | 12 |
-| Demos (gdx-vulkan-demos) | 10 | 3 | 2 | 15 |
+| Demos (gdx-vulkan-demos) | 11 | 4 | 0 | 15 |
 | Phase 6 (stretch, tabled: needs a Mac): macOS and iOS | 0 | 0 | 4 | 4 |
-| Cross-cutting and housekeeping | 4 | 0 | 1 | 5 |
-| **All** | **211** | **19** | **25** | **255** |
+| Cross-cutting and housekeeping | 7 | 0 | 1 | 8 |
+| **All** | **219** | **19** | **20** | **258** |
 ---
 
 ## Core decisions
@@ -338,7 +338,7 @@ descriptor writes), and the Vulkan features the library already uses (bindless t
 
 ### C. The compiler
 - [x] Choose the compiler: **glslang** used directly behind a `ShaderCompiler` interface, with the reasons and the comparison with shaderc (and with the original backend, which used shaderc through LWJGL) in `docs/SHADER_COMPILER.md`
-- [~] Vendor a pinned glslang (16.6.0) into the native library and build it for Windows x64, Linux x64 and Android arm64; record the size cost with and without the SPIRV-Tools optimizer: vendored, built and tested on Windows x64 (1.7 MB, first compile 152 ms, then 0.9 ms; `shader_compiler_test`); Linux (Docker, CI) and Android builds not run yet, the optimizer not added
+- [x] Vendor a pinned glslang (16.6.0) into the native library and build it for Windows x64, Linux x64 and Android arm64; record the size cost: vendored and built on all three (Windows and Linux in CI, Android on both phones, where translated shaders run); the front end and SPIR-V generator cost about 1.7 MB on Windows x64 (the library is 2.5 MB with it and 0.55 MB without, `-Pgdxvulkan.noCompiler=true`), first compile 152 ms, then 0.9 ms (`shader_compiler_test`); the SPIRV-Tools optimizer is not part of the build (dropped, see the optimisation-pass item)
 - [x] Existing SPIRV-Reflect validation runs on every translated shader: creating a pipeline validates both modules against the library's pipeline layout, and it already caught a real translation bug (a texture table declared in a stage that never reads it, which glslang sized to one element); nothing extra is needed
 - [x] The build works without the compiler for people who only use precompiled SPIR-V: `-Pgdxvulkan.noCompiler=true` (CMake `GDXVK_GLSLANG=OFF`, its own `build/native-nocompiler` directory) gives a 0.55 MB library instead of 2.5 MB; the batches, the shape renderer, the model batch, the instanced batch and the shader bundle pass (`SpriteBatchTest`, `BundledShadersTest`, `InstancedBatchTest`, `NoCompilerTest`), and a custom `ShaderProgram` reports `no run-time GLSL compiler` (the stock-class test that uses one fails there, as it should). The vendored glslang stays in the repository: the option only leaves it out of the library
 
